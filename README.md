@@ -1,2 +1,2 @@
-# EchoCore_API
-An API for my personal discord bot
+# EchoEngine_CORE
+This Repository is brand new and will soon contain the EchoEngine Discord bot and it's accompanying API
