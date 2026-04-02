@@ -1,0 +1,19 @@
+{
+  "name": "echoengine-core",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "db:generate:primary": "prisma generate --schema=prisma/primary/schema.prisma",
+    "db:migrate:dev:primary": "prisma migrate dev --schema=prisma/primary/schema.prisma",
+    "db:migrate:deploy:primary": "prisma migrate deploy --schema=prisma/primary/schema.prisma",
+    "db:push:primary": "prisma db push --schema=prisma/primary/schema.prisma",
+    "db:studio:primary": "prisma studio --schema=prisma/primary/schema.prisma"
+  },
+  "devDependencies": {
+    "prisma": "^7.5.0",
+    "typescript": "^5.8.0"
+  }
+}

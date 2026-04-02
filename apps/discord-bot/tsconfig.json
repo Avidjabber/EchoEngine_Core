@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "paths": {
+      "@prisma/primary": ["../../prisma/primary/generated"],
+      "@prisma/primary/*": ["../../prisma/primary/generated/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

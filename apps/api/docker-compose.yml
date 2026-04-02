@@ -1,0 +1,41 @@
+# Standalone compose for running just the API + its own Postgres.
+# For the full stack, use the root docker-compose.yml instead.
+
+name: echoengine-api
+
+services:
+  postgres-primary:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-echoengine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-echoengine_primary}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-primary-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-echoengine}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PRIMARY_DATABASE_URL: postgresql://${POSTGRES_USER:-echoengine}:${POSTGRES_PASSWORD:-changeme}@postgres-primary:5432/${POSTGRES_DB:-echoengine_primary}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+
+volumes:
+  postgres-primary-data:
