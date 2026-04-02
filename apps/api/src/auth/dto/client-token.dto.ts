@@ -3,9 +3,9 @@ import { IsString, IsNotEmpty } from 'class-validator';
 export class ClientTokenDto {
     @IsString()
     @IsNotEmpty()
-    clientId: string;
+    declare clientId: string;
 
     @IsString()
     @IsNotEmpty()
-    clientSecret: string;
+    declare clientSecret: string;
 }

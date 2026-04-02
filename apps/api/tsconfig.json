@@ -3,14 +3,14 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "outDir": "./dist",
     "baseUrl": "./",
     "incremental": true,
     "paths": {
-      "@prisma/primary": ["../../prisma/primary/generated"],
+      "@prisma/primary": ["../../prisma/primary/generated/client"],
       "@prisma/primary/*": ["../../prisma/primary/generated/*"]
     }
   },

@@ -30,7 +30,7 @@ services:
       - .env
     environment:
       NODE_ENV: production
-      PRIMARY_DATABASE_URL: postgresql://${POSTGRES_USER:-echoengine}:${POSTGRES_PASSWORD:-changeme}@postgres-primary:5432/${POSTGRES_DB:-echoengine_primary}
+      DATABASE_URL_PRIMARY: postgresql://${POSTGRES_USER:-echoengine}:${POSTGRES_PASSWORD:-changeme}@postgres-primary:5432/${POSTGRES_DB:-echoengine_primary}
     ports:
       - "3000:3000"
     depends_on:

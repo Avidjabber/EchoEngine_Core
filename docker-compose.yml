@@ -1,60 +1,30 @@
 name: echoengine-core
 
 services:
-  # ── Databases ──────────────────────────────────────────────────────────────
-  postgres-primary:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-primary-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # ── API ────────────────────────────────────────────────────────────────────
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    restart: unless-stopped
+    restart: on-failure:2
+    env_file:
+      - apps/api/.env
     environment:
       NODE_ENV: production
       PORT: 3000
-      PRIMARY_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-primary:5432/${POSTGRES_DB}
     ports:
       - "3000:3000"
-    depends_on:
-      postgres-primary:
-        condition: service_healthy
 
   # ── Discord Bot ────────────────────────────────────────────────────────────
   discord-bot:
     build:
       context: .
       dockerfile: apps/discord-bot/Dockerfile
-    restart: unless-stopped
+    restart: on-failure:2
+    env_file:
+      - apps/discord-bot/.env
     environment:
       NODE_ENV: production
-      BOT_TOKEN: ${BOT_TOKEN}
-      CLIENT_ID: ${CLIENT_ID}
-      GUILD_ID: ${GUILD_ID}
-      DEPLOY: ${DEPLOY:-false}
-      DEBUG: ${DEBUG:-false}
-      BOT_STATUS: ${BOT_STATUS:-online}
-      BOT_ACTIVITY_TYPE: ${BOT_ACTIVITY_TYPE:-WATCHING}
-      BOT_ACTIVITY_TEXT: ${BOT_ACTIVITY_TEXT:-the echoes}
       API_BASE_URL: http://api:3000
-      API_KEY: ${API_KEY}
     depends_on:
       - api
-
-volumes:
-  postgres-primary-data:

@@ -6,7 +6,7 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "paths": {
-      "@prisma/primary": ["../../prisma/primary/generated"],
+      "@prisma/primary": ["../../prisma/primary/generated/client"],
       "@prisma/primary/*": ["../../prisma/primary/generated/*"]
     }
   },

@@ -5,8 +5,10 @@
 FROM node:24-alpine
 WORKDIR /app
 
-# Copy prisma schemas (needed for type generation)
+# Copy prisma schemas and config (needed for generation)
 COPY prisma/ ./prisma/
+COPY prisma.config.ts ./
+COPY tsconfig.base.json ./
 
 # Copy workspace root manifests
 COPY package.json ./

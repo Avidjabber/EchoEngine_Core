@@ -6,7 +6,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 export class PrimaryDatabaseService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
     constructor() {
         const adapter = new PrismaPg({
-            connectionString: process.env.PRIMARY_DATABASE_URL!,
+            connectionString: process.env.DATABASE_URL_PRIMARY!,
         });
         super({ adapter });
     }
