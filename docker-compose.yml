@@ -1,0 +1,45 @@
+name: echoengine-core
+
+networks:
+  internal:
+    driver: bridge
+
+services:
+  # ── API ────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: on-failure:2
+    env_file:
+      - apps/api/.env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Discord Bot ────────────────────────────────────────────────────────────
+  discord-bot:
+    build:
+      context: .
+      dockerfile: apps/discord-bot/Dockerfile
+    restart: on-failure:2
+    env_file:
+      - apps/discord-bot/.env
+    environment:
+      NODE_ENV: production
+      API_BASE_URL: http://api:3000
+    networks:
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy

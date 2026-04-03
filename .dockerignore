@@ -1,0 +1,19 @@
+# Dependencies — installed inside the container via npm install
+node_modules/
+
+# Build output — compiled inside the container via tsc
+dist/
+build/
+
+# Incremental TypeScript build info — must not carry over between machines
+*.tsbuildinfo
+
+# Prisma generated clients — regenerated inside the container via prisma generate
+apps/*/src/generated/
+
+# Environment files — injected at runtime via env_file / environment
+.env*
+
+# Git
+.git/
+.gitignore

@@ -1,0 +1,3571 @@
+// ----------------------
+// Database Connection
+// ----------------------
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../apps/api/src/generated/prisma-primary"
+}
+
+// ============================================================
+// ECHO DENS
+// ============================================================
+
+model EchoDens {
+  id        Int    @id @default(autoincrement())
+  guildId   String
+  channelId String
+
+  // Channel posting permissions — controls which bot message types can be posted here
+  // Multiple channels can share the same flags (e.g. two clans each with their own activity channel)
+  allowWorldSim    Boolean @default(true)  // weather/env condition announcements
+  allowConditions  Boolean @default(true)  // condition/medicine updates
+  allowCombat      Boolean @default(true)  // combat messages
+  allowActivities  Boolean @default(true)  // patrol/hunt activity messages
+  allowEvents      Boolean @default(true)  // event chain messages
+  allowCrafting    Boolean @default(true)  // crafting/item messages
+  allowProgression Boolean @default(true)  // EXP/level-up/aging messages
+  allowSocial      Boolean @default(true)  // relationship/standing messages
+
+  @@unique([guildId, channelId])
+}
+
+// ============================================================
+// GUILD SETTINGS
+// ============================================================
+
+model GuildSettings {
+  id       Int    @id @default(autoincrement())
+  guildId  String @unique
+  ownerId  String  // Discord user ID of the guild owner; checked against UserSettings.isPremium for cap increases
+
+  // Season: null = Default season
+  seasonId Int?
+  season   Season? @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+
+  // Active weather pattern — null = no pattern running (Worker picks one at next daily tick)
+  currentPatternId     Int?
+  currentPatternStepId Int?       // FK to WeatherPatternStep — step carries weatherStateId; derive current weather from step at read time
+  currentStepStartedAt DateTime? @db.Timestamptz // when the current step began; Worker uses this to advance steps
+
+  currentPattern     WeatherPattern?     @relation(fields: [currentPatternId],     references: [id], onDelete: SetNull)
+  currentPatternStep WeatherPatternStep? @relation(fields: [currentPatternStepId], references: [id], onDelete: SetNull)
+  weatherCooldowns   Guild_WeatherPatternCooldown[]
+  seasonDefaults     GuildSeason_DefaultWeather[]
+
+  // Hard caps (premium tiers may raise these in future)
+  maxGroups Int @default(10)
+  maxRanks  Int @default(100)
+
+  defaultDailyEnergy Int @default(100)  // baseline energy for all users; premium override stored in UserSettings
+  expCap             Int @default(300)  // EXP required to earn one skill point; app resets exp to 0 on reaching this
+  filthCapPerCat     Int @default(10)   // filth cap = filthCapPerCat × living entity count in the group
+
+  doubleAgeMaxThreshold Int @default(0)  // cats at or below this age (in moons) age up twice per daily tick; 0 = disabled
+
+  maxCombatRounds Int @default(50)  // maximum rounds before a combat fight is forced to end in a draw
+
+  defaultProficiencyBonus Int @default(2)  // flat bonus added to skill rolls when an entity is proficient in that skill
+
+  // Feature flags — disable entire subsystems guild-wide; all default to true (fully enabled)
+  worldSimEnabled    Boolean @default(true)  // weather, seasons, environmental conditions, filth
+  conditionsEnabled  Boolean @default(true)  // conditions, medicine, herb gathering, symptoms
+  combatEnabled      Boolean @default(true)  // sparring, boss fights, combat steps in events
+  activitiesEnabled  Boolean @default(true)  // patrols, hunts, action types
+  eventsEnabled      Boolean @default(true)  // event chains (requires activitiesEnabled for activity-triggered events)
+  craftingEnabled    Boolean @default(true)  // items, storage, crafting recipes, ingredient processing, food/prey
+  progressionEnabled Boolean @default(true)  // energy, aging, EXP, skill points, clan reputation
+  socialEnabled      Boolean @default(true)  // group standings, entity relationships, family trees
+
+  // One-time default data seed — null = never seeded; set by /data seed-defaults; blocks re-runs
+  defaultsSeededAt DateTime? @db.Timestamptz
+
+  // Daily tick tracking — null = never ticked; updated by Worker after each daily processing run
+  lastTickAt DateTime? @db.Timestamptz
+
+  // Guild-wide event cooldown — null = no event has ever fired; updated whenever a global-scope event fires.
+  // Worker skips firing any new global-scope event if now() < lastEventAt + EventDef.cooldownDays.
+  lastEventAt DateTime? @db.Timestamptz
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt      @db.Timestamptz
+
+  @@index([seasonId])
+  @@index([currentPatternId])
+  @@index([currentPatternStepId])
+}
+
+// ============================================================
+// USER SETTINGS
+// ============================================================
+
+// Global — one row per Discord user, applies across all servers
+model UserSettings {
+  userId  String @id  // Discord user ID
+
+  isPremium Boolean @default(false)
+
+  // Premium feature toggles — only apply when isPremium = true
+  premiumDoubleEnergy   Boolean @default(true)  // doubles daily energy cap from guild default
+  premiumGuildBoosts    Boolean @default(true)  // applies premium cap increases to guilds the user owns
+  premiumMoreEntities   Boolean @default(true)  // increases the global entity cap
+  premiumRollBonus      Boolean @default(true)  // grants a bonus to dice rolls
+  premiumCustomColor    Boolean @default(true)  // enables per-character embed color (hex stored in EntityBio)
+  premiumLongerArchive  Boolean @default(true)  // extends isDeceased character archive retention
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+}
+
+// ============================================================
+// GLOBAL / SEED DATA
+// ============================================================
+
+// Seasons (static seed data — do not modify via application)
+// Options: Default, New-leaf, Green-leaf, Leaf-fall, Leaf-bare
+// null seasonId in GuildSettings = Default
+model Season {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  guilds          GuildSettings[]
+  envConditions   Season_EnvCondition[]
+  patternWeights  Season_WeatherPattern[]
+  guildDefaults   GuildSeason_DefaultWeather[]
+}
+
+// A discrete named weather state (global seed — guild-extensible).
+// e.g. Clear, Rain, Hard Rain, Storm, Snow, Blizzard
+// isSevere — state may only appear in admin-triggered patterns; Worker never picks these naturally.
+// Duration is defined on WeatherPatternStep, not here — the same state can last different amounts
+// of time in different patterns.
+model WeatherState {
+  id       Int     @id @default(autoincrement())
+  guildId  String  @default("global") @db.VarChar(50)
+  name     String  @db.VarChar(100)
+  isSevere Boolean @default(false)
+
+  envConditions        WeatherState_EnvCondition[]
+  patternSteps         WeatherPatternStep[]
+  eventWeatherTriggers EventDef_WeatherTrigger[]
+  guildSeasonDefaults  GuildSeason_DefaultWeather[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+// Named environmental conditions — discrete modifier labels applied by seasons, weather states, biomes, and locations.
+// e.g. Cold, Damp, Windy, Dry, Smoke. Intensity is determined by stack count:
+//   stackCount = (season contributes?) + (active weather state contributes?) + biome stacks + location stacks
+// Each active source adds 1. Modifiers and condition rules apply once per stack.
+model EnvCondition {
+  id      Int    @id @default(autoincrement())
+  guildId String @default("global") @db.VarChar(50)
+  name    String @db.VarChar(100)
+
+  seasonEntries       Season_EnvCondition[]
+  weatherStateEntries WeatherState_EnvCondition[]
+  biomeEntries       Biome_EnvCondition[]
+  locationEntries    Location_EnvCondition[]
+  statModifiers      EnvCondition_StatModifier[]
+  skillModifiers     EnvCondition_SkillModifier[]
+  worldModifiers     EnvCondition_Modifier[]
+  eventWeights       EnvCondition_EventDef[]
+  conditionEnvRules  ConditionDef_EnvRule[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+// Environmental conditions active during a season (e.g. Leaf-bare → Cold, Dry)
+// Each active source contributes a stack of 1; totals are summed across season + weather + biomes + location.
+model Season_EnvCondition {
+  seasonId       Int
+  envConditionId Int
+
+  season       Season       @relation(fields: [seasonId],       references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+
+  @@id([seasonId, envConditionId])
+  @@index([envConditionId])
+}
+
+// Environmental conditions active during a weather state (e.g. Storm → Damp, Windy)
+// Each active source contributes a stack of 1; totals are summed across season + weather + biomes + location.
+model WeatherState_EnvCondition {
+  weatherStateId Int
+  envConditionId Int
+
+  weatherState WeatherState @relation(fields: [weatherStateId], references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+
+  @@id([weatherStateId, envConditionId])
+  @@index([envConditionId])
+}
+
+// A named sequence of weather states that plays out over a day.
+// isSevere     — admin-triggered only; Worker never picks these during normal daily selection.
+// cooldownDays — minimum days before this pattern can be selected again for the same guild.
+model WeatherPattern {
+  id           Int     @id @default(autoincrement())
+  guildId      String  @default("global") @db.VarChar(50)
+  name         String  @db.VarChar(100)
+  isSevere     Boolean @default(false)
+  cooldownDays Int     @default(0)
+
+  steps          WeatherPatternStep[]
+  seasonWeights  Season_WeatherPattern[]
+  guildCooldowns Guild_WeatherPatternCooldown[]
+  guilds         GuildSettings[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+// An ordered step within a weather pattern.
+// weatherStateId null = use the current season's defaultWeatherStateId (calm/baseline day).
+// durationMinutes — how long this step lasts; Worker advances to the next step when elapsed.
+model WeatherPatternStep {
+  id              Int  @id @default(autoincrement())
+  patternId       Int
+  stepOrder       Int
+  weatherStateId  Int?
+  durationMinutes Int
+
+  pattern      WeatherPattern  @relation(fields: [patternId],      references: [id], onDelete: Cascade)
+  weatherState WeatherState?   @relation(fields: [weatherStateId], references: [id], onDelete: Restrict)
+  guilds       GuildSettings[]
+
+  @@unique([patternId, stepOrder])
+  @@index([weatherStateId])
+}
+
+// Relative spawn weight for a weather pattern within a given season.
+// Worker normalises weights across eligible (non-severe, off-cooldown) patterns to pick the day's pattern.
+model Season_WeatherPattern {
+  seasonId  Int
+  patternId Int
+  weight    Float @default(1.0)
+
+  season  Season         @relation(fields: [seasonId],  references: [id], onDelete: Cascade)
+  pattern WeatherPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+
+  @@id([seasonId, patternId])
+  @@index([patternId])
+}
+
+// Per-guild default weather state for each season.
+// Used when a WeatherPatternStep has no explicit weatherStateId (null step = "calm baseline").
+// Seeded by seedWeather; guilds can override these after initial setup.
+model GuildSeason_DefaultWeather {
+  guildId        String
+  seasonId       Int
+  weatherStateId Int
+
+  guild        GuildSettings @relation(fields: [guildId],        references: [guildId], onDelete: Cascade)
+  season       Season        @relation(fields: [seasonId],       references: [id],      onDelete: Cascade)
+  weatherState WeatherState  @relation(fields: [weatherStateId], references: [id],      onDelete: Cascade)
+
+  @@id([guildId, seasonId])
+  @@index([seasonId])
+  @@index([weatherStateId])
+}
+
+// Per-guild cooldown tracking for weather patterns.
+// Worker skips a pattern if now() < lastRunAt + pattern.cooldownDays.
+model Guild_WeatherPatternCooldown {
+  guildId   String
+  patternId Int
+  lastRunAt DateTime @db.Timestamptz
+
+  guild   GuildSettings  @relation(fields: [guildId],   references: [guildId], onDelete: Cascade)
+  pattern WeatherPattern @relation(fields: [patternId], references: [id],      onDelete: Cascade)
+
+  @@id([guildId, patternId])
+  @@index([patternId])
+}
+
+
+// Actions that can be performed with items (global seed — eat, drink, apply, chew, etc.)
+// Covers medicine use and item consumption only. Crafting and processing interactions
+// live on CraftingInteraction, which is entirely separate.
+model ItemInteraction {
+  id          Int    @id @default(autoincrement())
+  name        String @unique @db.VarChar(100)
+  description String @db.VarChar(300)
+
+  itemActions     ItemAction[]
+  warningTriggers ItemWarning[]
+}
+
+// Location Status (global seed data — Owned, Shared, Disputed)
+model LocationStatus {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  locationGroups Location_Group[]
+}
+
+// Group Types (global seed data — Clan, Tribe, Colony, Outsider)
+// isOrganized: true = group gets inventory/storage generated on creation
+// hasWorldSim: true = group is subjected to daily world sim (food deductions, etc.)
+model GroupType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(100)
+
+  isOrganized Boolean @default(true)
+  hasWorldSim Boolean @default(false)
+
+  groups Group[]
+}
+
+// Item Types (global seed data — Food, Herb, Material, Equipment, etc.)
+// Classification tags for items — many-to-many via Item_Type.
+// Tags drive which systems query for an item and how it appears in UI filters.
+// Seeded: Weapon, Armor, Shield, Trait, Ability, Spell, Tool, Plant, Medicine, Fuel, Food
+model ItemType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(100)
+
+  items        Item_Type[]
+  storageTypes Storage_ItemType[]
+  eventEffects EventEffect[]
+}
+
+// Biological sex options (global seed data — Male, Female, Intersex, Other)
+model Sex {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  entities Entity[]
+}
+
+// Gender identity options (global seed data — Female, Male, Any, Other)
+model Gender {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  entities Entity[]
+}
+
+// High-level classification of what a condition is *for* — drives display and query filtering.
+// showInHealthPanel: shown on the entity health/conditions view with discovery and severity
+// isTrait:           shown in the separate traits view; always visible regardless of discoveryLevel
+model ConditionContext {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  showInHealthPanel Boolean @default(false)
+  isTrait           Boolean @default(false)
+
+  conditions ConditionDef[]
+}
+
+// Defines the behavioral lifecycle pattern of a condition — drives how the app ticks progression each day.
+// tracksDays:        engine counts days against maxDays on ConditionDef
+// tracksProgression: engine tracks a progression value and runs the daily CON roll vs. dailyRollDC
+// canSelfResolve:    condition can remove or advance itself at an endpoint; false = floors at 0/cap and persists
+// canSpawn:          spawn link checks fire when spawnThreshold is crossed
+model ConditionType {
+  id          Int    @id @default(autoincrement())
+  name        String @unique @db.VarChar(50)
+  description String @db.VarChar(500)
+
+  tracksDays        Boolean @default(false)
+  tracksProgression Boolean @default(false)
+  canSelfResolve    Boolean @default(false)
+  canSpawn          Boolean @default(false)
+
+  conditionDefs ConditionDef[]
+}
+
+// Static seed values: block | recover | worsen | spawn
+model ConditionLinkType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  links ConditionDef_Link[]
+}
+
+// Base stats (global seed — Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma)
+// Used as FK target for modifier tables; name matches the column on Entity
+model Stat {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  envConditionModifiers  EnvCondition_StatModifier[]
+  conditionStatEffects   ConditionDef_StatEffect[]
+  eventChoiceDefs      EventChoiceDef[]
+  skillDefs                  SkillDef[]
+  profilesAsDamageStat ItemEquipmentProfile[] @relation("ProfileDamageStat")
+  profilesAsHitStat    ItemEquipmentProfile[] @relation("ProfileHitStat")
+  profilesAsHealStat   ItemEquipmentProfile[] @relation("ProfileHealStat")
+  conditionCombatEffects       ConditionDef_CombatEffect[]
+}
+
+// Symptom labels — shared between ConditionDef (via ConditionDef_SymptomTag) and ItemEffect.
+// defaultRoll: examination roll threshold to reveal this symptom; 0 = always visible; null = not part of discovery system
+model Symptom {
+  id          Int    @id @default(autoincrement())
+  name        String @unique @db.VarChar(100)
+  defaultRoll Int?
+
+  conditionSymptomTags ConditionDef_SymptomTag[]
+  itemEffects          ItemEffect[]
+}
+
+// ============================================================
+// DROP TABLES
+// ============================================================
+
+// A reusable drop table owned by a species (loot on catch/kill) or a biome (gather yields).
+// Resolution: for each entry, roll d20 ≥ dropDC to drop; if success, quantity = avgQuantity × (1 ± quantityVariance).
+// For count-based items, the rolled quantity is rounded to the nearest integer by the app.
+// Seasonal/territory/weather multipliers are applied on top at the app layer.
+model DropTable {
+  id          Int     @id @default(autoincrement())
+  name        String  @db.VarChar(200)
+  description String? @db.VarChar(500)
+
+  entries             DropTable_Entry[]
+  species             Species[]                  // species whose loot resolves from this table (catch/kill + NPC combat defeat)
+  biomes              Biome[]                    // biomes whose gather yields resolve from this table
+  combatParticipants  ActiveCombat_Participant[]  // snapshotted per-participant at combat spawn
+}
+
+// One item entry within a drop table
+model DropTable_Entry {
+  id          Int   @id @default(autoincrement())
+  dropTableId Int
+  itemId      Int
+
+  dropDC           Int   @default(1)     // minimum d20 roll needed to drop this item; 1 = always drops, 20 = only on a natural 20
+  avgQuantity      Float @default(1.0)  // average quantity dropped (in item's unit)
+  quantityVariance Float @default(0.0)  // ± fraction applied to avgQuantity; 0.2 = rolls between [0.8×, 1.2×] of avg
+  weightMultiplier Float @default(1.0)  // biome-specific weight modifier applied to Item.averageWeight at StoredItem creation
+                                        // stacks multiplicatively with active EnvCondition_Modifier prey_weight values
+
+  dropTable DropTable @relation(fields: [dropTableId], references: [id], onDelete: Cascade)
+  item      Item      @relation(fields: [itemId],      references: [id], onDelete: Restrict)
+
+  @@unique([dropTableId, itemId])
+  @@index([dropTableId])
+  @@index([itemId])
+}
+
+// ============================================================
+// ENTITIES
+// ============================================================
+
+// Entity Status (static seed data — active, hiatus)
+model EntityStatus {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  entities Entity[]
+}
+
+// Entity Type (static seed data — character, side_character, npc)
+// canModifyStats:        true = entity can spend stat/skill points after creation
+// canParticipateCombat:  true = entity can be added to combat encounters
+// canParticipateEvents:  true = entity can be assigned to event chains
+// adminOnly:             true = only users with ManageGuild permission can create this type
+model EntityType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  canModifyStats       Boolean @default(false)
+  canParticipateCombat Boolean @default(false)
+  canParticipateEvents Boolean @default(false)
+  adminOnly            Boolean @default(false)
+
+  entities Entity[]
+}
+
+// Species (guild-extensible; guildId = "global" for pre-seeded options e.g. Cat, Fox, Badger)
+// Age brackets are universal (child / teen / adult / elder); thresholds are species-specific (in moons for Cat).
+// App resolves bracket: age <= childMaxAge → child; <= teenMaxAge → teen; <= adultMaxAge → adult; else → elder.
+// Nutrition and hydration drain rates are per-bracket; food digestion multipliers are per food category (Meat, Plant).
+//
+// isBaseSpecies: exactly one species is the reference baseline (seeded: Cat, all stats = 10).
+//   All other species are designed relative to this baseline. Uniqueness of isBaseSpecies = true
+//   is enforced at the application/seed level.
+//
+// Base combat stats: used directly for NPC instances of this species.
+//   For player entities, these serve as the species reference point — players distribute their own
+//   stats individually (stored on EntityStats), but the species baseline informs starting values.
+//
+// HP dice formula (hpDiceCount + hpDiceSides):
+//   Represents the hit dice for this species, e.g. hpDiceCount=2, hpDiceSides=10 → 2d10.
+//   Players roll hpDiceCount d hpDiceSides + CON modifier on character creation.
+//   NPC instances always use the floor average: floor(hpDiceCount * hpDiceSides / 2) + CON modifier.
+//   CON modifier = floor((constitution - 10) / 2), same formula as D&D.
+//   Example: Cat 2d10, base CON 10 → modifier 0 → NPC maxHp = floor(20/2) + 0 = 10.
+model Species {
+  id      Int    @id @default(autoincrement())
+  guildId String @default("global") @db.VarChar(50)
+  name    String @db.VarChar(100)
+
+  isBaseSpecies      Boolean @default(false)  // true for the reference species (Cat); unique-true enforced app-side
+  isPlayerCreatable  Boolean @default(false)  // true = players can select this species during character creation; admins bypass this flag
+
+  // Stat allocation rules — enforced at app layer on character creation and stat point spending
+  initialStatMinimum Int @default(1)   // minimum value any stat can be set to during character creation
+  initialStatMaximum Int @default(14)  // maximum value any stat can be set to during character creation
+  totalStartingStats Int @default(60)  // total points available to distribute across all stats at creation
+  statCap            Int @default(20)  // hard ceiling a stat can reach through raw stat points on the character (does not include items, conditions, etc.)
+
+  // Age bracket upper bounds (inclusive, in the species' age unit e.g. moons for Cat)
+  childMaxAge Int  // 0–childMaxAge            = child
+  teenMaxAge  Int  // childMaxAge+1–teenMaxAge  = teen
+  adultMaxAge Int  // teenMaxAge+1–adultMaxAge  = adult; above = elder
+
+  // Daily nutrition and hydration drain per age bracket.
+  // Worker looks up the entity's current bracket (age vs. childMaxAge/teenMaxAge/adultMaxAge)
+  // and drains Entity.nutritionLevel / hydrationLevel by these amounts each cycle.
+  childNutritionDrain Float
+  teenNutritionDrain  Float
+  adultNutritionDrain Float
+  elderNutritionDrain Float
+
+  childHydrationDrain Float
+  teenHydrationDrain  Float
+  adultHydrationDrain Float
+  elderHydrationDrain Float
+
+  // Food digestion multipliers — applied per category when computing nutrition/hydration gained from eating.
+  // net = quantity × ItemFoodProfile.*PerGram × species multiplier
+  // Default 1.0; carnivores set plantNutritionMultiplier low (~0.1); omnivores near 1.0 for both.
+  meatNutritionMultiplier  Float @default(1.0)
+  meatHydrationMultiplier  Float @default(1.0)
+  plantNutritionMultiplier Float @default(1.0)
+  plantHydrationMultiplier Float @default(1.0)
+
+  // Daily filth contribution per bracket
+  childFilthPerDay Float
+  teenFilthPerDay  Float
+  adultFilthPerDay Float
+  elderFilthPerDay Float
+
+  // Base combat stats — all default to 10 (the Cat baseline)
+  baseStrength     Int @default(10)  // physical power, melee damage
+  baseDexterity    Int @default(10)  // movement, AC modifier, initiative
+  baseConstitution Int @default(10)  // health pool and illness resistance
+  baseIntelligence Int @default(10)  // reasoning, learned knowledge
+  baseWisdom       Int @default(10)  // instinct, perception, environmental judgment
+  baseCharisma     Int @default(10)  // leadership, social influence, morale
+  baseAc           Int @default(10)  // racial AC floor; effective AC = baseAc + floor((dexterity - 10) / 2)
+  hpDiceCount      Int @default(2)   // number of dice rolled for HP (e.g. 2 for 2d10)
+  hpDiceSides      Int @default(10)  // sides per die (e.g. 10 for 2d10)
+
+  // Creature role flags — a species can be both (e.g. a large bird: prey AND territorial predator)
+  isPrey       Boolean @default(false)  // can be hunted by patrols; must have a dropTable and Species_Biome entries
+  isPredator   Boolean @default(false)  // spawns in predator encounters; must have an NpcDef
+  combatRating Float   @default(1.0)   // CR used by encounter generator to fill a max-CR budget (predators only)
+
+  dropTableId Int?
+  dropTable   DropTable? @relation(fields: [dropTableId], references: [id], onDelete: SetNull)
+
+  entities            Entity[]
+  skillRestrictions   SkillDef_Species[]
+  bodyParts           BodyPart[]
+  combatBehavior      SpeciesCombatBehavior?
+  defaultLoadout      SpeciesDefaultLoadout[]
+  encounterDefs       CombatEncounterDef[]
+  biomes              Species_Biome[]
+  defaultConditions   Species_DefaultCondition[]
+  equipmentLoadout    Species_EquipmentLoadout[]
+  summonedByProfiles  ItemEquipmentProfile[]     @relation("ProfileSummonSpecies")
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+// Inherent conditions automatically applied to every entity of this species at creation.
+// Intended for inherentTrait-category conditions (e.g. Poison Immunity, Night Vision, Aquatic).
+// The condition's own endpointType controls permanence — inherentTraits should use endpointType = permanent.
+model Species_DefaultCondition {
+  speciesId      Int
+  conditionDefId Int
+
+  species   Species      @relation(fields: [speciesId],      references: [id], onDelete: Cascade)
+  condition ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
+
+  @@id([speciesId, conditionDefId])
+  @@index([conditionDefId])
+}
+
+// Per-species equipment slot capacity overrides.
+// If no row exists for a given slotTypeId, fall back to EquipmentSlotType.defaultCapacity.
+model Species_EquipmentLoadout {
+  speciesId  Int
+  slotTypeId Int
+  capacity   Int  // overrides EquipmentSlotType.defaultCapacity for this species
+
+  species  Species           @relation(fields: [speciesId],  references: [id], onDelete: Cascade)
+  slotType EquipmentSlotType @relation(fields: [slotTypeId], references: [id], onDelete: Restrict)
+
+  @@id([speciesId, slotTypeId])
+  @@index([slotTypeId])
+}
+
+// Biomes a prey or predator species can inhabit — pure presence join, no spawn weight needed.
+//
+// Tracking (encounter phase):
+//   Cat rolls d20 + Tracking skill (+ any active EnvCondition_SkillModifier bonuses for Tracking).
+//   All species present in the location's biomes whose passive stealth <= effective roll are candidates.
+//   Passive stealth is derived from the species' base stats at runtime — no per-biome override stored here.
+//   Env conditions (plentiful prey, season bonuses, etc.) apply flat Tracking bonuses via
+//   EnvCondition_SkillModifier, which raises the effective roll and opens up higher-stealth candidates.
+//   One candidate is selected at random (quick hunt) or presented as choices (extended hunt flow).
+//
+// Catch (pursuit phase):
+//   Cat rolls Stealth vs prey's passive perception: 10 + floor((prey.baseWisdom - 10) / 2)
+model Species_Biome {
+  speciesId   Int
+  biomeId     Int
+  spawnWeight Float @default(1.0) // relative frequency this species appears in this biome; higher = more common
+
+  species Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  biome   Biome   @relation(fields: [biomeId],   references: [id], onDelete: Restrict)
+
+  @@id([speciesId, biomeId])
+  @@index([biomeId])
+}
+
+// Named body part for a specific species — used to record injury location on EntityCondition
+// Seeded per species; guild-extensible for custom species in future
+model BodyPart {
+  id        Int    @id @default(autoincrement())
+  speciesId Int
+  name      String @db.VarChar(100)
+
+  species          Species           @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  entityConditions EntityCondition[]
+
+  @@unique([speciesId, name])
+  @@index([speciesId])
+}
+
+model Entity {
+  id      Int    @id @default(autoincrement())
+  guildId String
+  userId  String?  // null for NPC entities (entityType = "npc")
+
+  name String @db.VarChar(200)
+
+  statusId Int
+  status   EntityStatus @relation(fields: [statusId], references: [id], onDelete: Restrict)
+
+  typeId Int
+  type   EntityType @relation(fields: [typeId], references: [id], onDelete: Restrict)
+
+  speciesId Int
+  species   Species @relation(fields: [speciesId], references: [id], onDelete: Restrict)
+
+  age      Int     @default(0)
+  isDeceased Boolean @default(false)
+  clanRep  Int     @default(0)  // clan reputation; range -500 to +500; clamped at app layer
+
+  // Hunger and hydration — drained daily by the worker; raised by eating.
+  // Worker distributes food from group storage automatically; manual eating is the fallback.
+  // Condition system maps threshold breaches to hunger/thirst condition chains.
+  // Drain rates are not stored here — derived at runtime from Species.*NutritionDrain / *HydrationDrain
+  // fields based on the entity's current age bracket.
+  nutritionLevel Float @default(100.0)  // current nutrition (0–100); worker drains per cycle
+  hydrationLevel Float @default(100.0)  // current hydration (0–100); worker drains per cycle
+
+  sexId    Int?
+  genderId Int?
+  sex    Sex?    @relation(fields: [sexId],    references: [id], onDelete: SetNull)
+  gender Gender? @relation(fields: [genderId], references: [id], onDelete: SetNull)
+
+  groupId Int?
+  rankId  Int?
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  group Group? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  rank  Rank?  @relation(fields: [rankId],  references: [id], onDelete: SetNull)
+
+  stats         EntityStats?
+  bio           EntityBio?
+  images        EntityImage[]
+  skills        Entity_Skill[]
+  conditions        EntityCondition[] @relation("EntityConditions")
+  appliedConditions EntityCondition[] @relation("AppliedConditions")
+  behaviorCounters EntityBehaviorCounter[]
+
+  storages      Storage[]
+
+  actionParticipations  ActionInstance_Entity[]
+  actionLeaderships     ActionInstance[]          @relation("ActionInstanceLeader")
+  eventParticipations   ActiveEvent_Participant[]
+  combatParticipations  ActiveCombat_Participant[]
+  combatActionsPerformed ActiveCombat_Action[] @relation("CombatActionActor")
+  combatActionsTargeted  ActiveCombat_Action[] @relation("CombatActionTarget")
+  namedEncounterDefs     CombatEncounterDef_NamedEntity[]
+
+  relationships EntityRelationship[] @relation("EntityRelationshipsFrom")
+  relatedTo     EntityRelationship[] @relation("EntityRelationshipsTo")
+
+  discoveredRecipes    Entity_DiscoveredRecipe[]
+
+  inspectionsAsPatient EntityInspectionLog[] @relation("InspectionPatient")
+  inspectionsAsMedic   EntityInspectionLog[] @relation("InspectionMedic")
+  treatmentsGiven      EntityTreatmentLog[]  @relation("TreatmentMedic")
+
+  @@index([guildId, userId])
+  @@index([groupId])
+  @@index([rankId])
+  @@index([statusId])
+  @@index([typeId])
+  @@index([speciesId])
+  @@index([sexId])
+  @@index([genderId])
+}
+
+// One-to-one stats record; only created for entity types that use stats
+model EntityStats {
+  entityId     Int @id
+
+  exp            Int @default(0)  // global EXP bar; resets to 0 and increments skillPoints by 1 when GuildSettings.expCap is reached
+  skillPoints    Int @default(0)  // unallocated points waiting to be assigned to a skill bonus
+  currentEnergy  Int @default(0)  // current energy; replenished daily up to GuildSettings.defaultDailyEnergy (or premium override)
+
+  // HP — set during character creation via a d20+CON modifier roll or taken as average; null until first set
+  // maxHp reroll is available when constitution improves (requires moderator approval)
+  maxHp     Int?   // maximum health pool
+  currentHp Int?   // current health; persists between combats; null until maxHp is set
+
+  // nutritionLevel and hydrationLevel live on Entity — not duplicated here
+
+  strength     Int @default(10)  // physical power, melee damage, grappling
+  dexterity    Int @default(10)  // movement, AC modifier, initiative, fine control
+  constitution Int @default(10)  // health pool, illness resistance, endurance
+  intelligence Int @default(10)  // learned knowledge, reasoning, problem-solving
+  wisdom       Int @default(10)  // instinct, perception, environmental judgment
+  charisma     Int @default(10)  // leadership, social influence, morale
+
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+}
+
+// Tracks integer state counters that drive behavior-based condition progression.
+// counterKey — string identifier matching ConditionDef.behaviorCounterKey (e.g. 'hunger', 'exhaustion')
+// value      — current counter; Worker increments/decrements each daily tick
+//              e.g. hunger: +1 per unfed day, -1 per fed day, floor 0
+// Row is created on first increment; deleted when value returns to 0 (app layer)
+model EntityBehaviorCounter {
+  entityId   Int
+  counterKey String   @db.VarChar(50)
+  value      Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@id([entityId, counterKey])
+  @@index([counterKey])
+}
+
+// Images attached to an entity — one thumbnail (isThumbnail = true) and up to 5 gallery images.
+// sortOrder is only meaningful for gallery images (isThumbnail = false).
+model EntityImage {
+  id          Int     @id @default(autoincrement())
+  entityId    Int
+  photoUrl    String  @db.VarChar(500)
+  isThumbnail Boolean @default(false)
+  sortOrder   Int     @default(0)
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([entityId])
+}
+
+// One-to-one bio record for extended profile information
+model EntityBio {
+  entityId    Int     @id
+
+  casualName  String? @db.VarChar(200)   // informal or nickname (e.g. "Fire" for Firestar)
+  description String? @db.VarChar(1000)  // physical appearance
+  personality String? @db.VarChar(1000)  // personality traits
+  history     String? @db.VarChar(2000)  // backstory
+
+  embedColor  String? @db.VarChar(7)    // hex color code e.g. #a3f0c2; only used if premiumCustomColor = true
+
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+}
+
+// Skills (guild-extensible; guildId = "global" for seeded skills)
+//
+// Each skill is governed by exactly one stat (D&D style). Roll = 1d20 + stat modifier.
+// If the entity is proficient in the skill, add the guild proficiency bonus on top.
+//
+// Species scoping via SkillDef_Species:
+//   No rows → skill is available to all species in the guild (global)
+//   One row  → species-specific (e.g. Cat-only)
+//   Many rows → shared across those species only
+model SkillDef {
+  id          Int     @id @default(autoincrement())
+  guildId     String  @default("global") @db.VarChar(50)
+  name        String  @db.VarChar(100)
+  description String? @db.VarChar(500)
+
+  statId Int   // the single governing stat for this skill
+  stat   Stat  @relation(fields: [statId], references: [id], onDelete: Restrict)
+
+  entitySkills               Entity_Skill[]
+  speciesRestrictions        SkillDef_Species[]
+  conditionEffects           ConditionDef_SkillEffect[]
+  envConditionMods           EnvCondition_SkillModifier[]
+  eventChoiceDefs            EventChoiceDef[]
+  combatActionConditions      ItemEquipmentProfile_Condition[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([statId])
+}
+
+// Species restrictions for a skill.
+// No rows = available to all species in the guild.
+// One or more rows = restricted to those species only.
+model SkillDef_Species {
+  skillDefId Int
+  speciesId  Int
+
+  skillDef SkillDef @relation(fields: [skillDefId], references: [id], onDelete: Cascade)
+  species  Species  @relation(fields: [speciesId],  references: [id], onDelete: Cascade)
+
+  @@id([skillDefId, speciesId])
+  @@index([skillDefId])
+  @@index([speciesId])
+}
+
+// App layer must ensure the entity's species is allowed by SkillDef_Species (or the skill is global)
+model Entity_Skill {
+  entityId   Int
+  skillDefId Int
+
+  bonus        Int     @default(0)
+  isProficient Boolean @default(false) // true = roll is doubled for this skill
+
+  entity   Entity   @relation(fields: [entityId],   references: [id], onDelete: Cascade)
+  skillDef SkillDef @relation(fields: [skillDefId], references: [id], onDelete: Restrict)
+
+  @@id([entityId, skillDefId])
+  @@index([entityId])
+}
+
+// An active or past condition instance on an entity.
+// Covers both persistent conditions (injury, illness) and combat-scoped conditions (buffs, debuffs).
+//
+// bodyPartId: required when category = INJURY; must match entity's species body parts.
+//
+// sourceEntityId: the entity whose action caused this condition to be applied. Null for natural onset
+//   (illness, environmental). Used by ConditionBehaviorEffect redirect target "source" to resolve the
+//   correct entity, and by linked condition pairs (grapple, guard) to identify the other party.
+//
+// linkedConditionId: self-referential FK to the paired EntityCondition on another entity. Used for
+//   mutually dependent conditions (e.g. "Grappling" on A linked to "Grappled" on B). When either is
+//   removed, the app also removes the linked partner.
+//
+// Combat fields — only relevant when the condition was applied during combat:
+//   combatInstancedOnly: when true the condition is removed at combat end (e.g. Rallying Cry, Weakened).
+//     when false it persists after combat (e.g. Bite Wound, Poisoned).
+//   appliedInCombatId: the combat that applied this condition; used to bulk-remove combatInstancedOnly
+//     conditions and to tick ConditionDef_CombatEffect per-round damage at the right time.
+//   combatRoundApplied / combatRoundExpires: round-limited effects (e.g. Rallying Cry lasts 2 rounds).
+//     combatRoundExpires null = lasts until combat ends (for combatInstancedOnly) or indefinitely.
+//   resolvedFlatModifier: snapshotted at application time for skill-derived conditions (e.g. Rallying Cry
+//     stores the caster's computed Leadership bonus here). ConditionDef_CombatEffect uses this value
+//     when its own flatModifier is null.
+model EntityCondition {
+  id             Int  @id @default(autoincrement())
+  entityId       Int
+  conditionDefId Int
+  bodyPartId     Int?
+
+  sourceEntityId   Int?  // entity whose action applied this condition; null for natural onset
+  linkedConditionId Int? // paired EntityCondition on another entity (e.g. Grappling ↔ Grappled)
+
+  onsetAt          DateTime? @db.Timestamptz
+  progressionValue Float @default(1.0) // starts at 1.0; roll below difficultyRating → increases; treatment subtracts directly
+                                       // clamped to 0.0; reaching 0.0 fires recoverToId path (or removes if null + endpointType = remove)
+  lastTreatedAt    DateTime? @db.Timestamptz
+  discoveryLevel   Int @default(0)     // highest examination roll; symptoms at or below this threshold are visible
+
+  // Combat-scoped fields
+  combatInstancedOnly  Boolean @default(false)
+  appliedInCombatId    Int?
+  appliedByActionId    Int?    // the ActiveCombat_Action that created this condition; null for out-of-combat onset
+  combatRoundApplied   Int?
+  combatRoundExpires   Int?  // null = lasts until combat end (combatInstancedOnly) or indefinite
+  resolvedFlatModifier Int?  // snapshotted skill-derived modifier; used by ConditionDef_CombatEffect when flatModifier is null
+
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  entity          Entity               @relation("EntityConditions",    fields: [entityId],          references: [id], onDelete: Cascade)
+  sourceEntity    Entity?              @relation("AppliedConditions",   fields: [sourceEntityId],    references: [id], onDelete: SetNull)
+  linkedCondition EntityCondition?     @relation("LinkedConditions",    fields: [linkedConditionId], references: [id], onDelete: SetNull)
+  linkedBy        EntityCondition[]    @relation("LinkedConditions")
+  condition       ConditionDef         @relation(fields: [conditionDefId],    references: [id], onDelete: Restrict)
+  bodyPart        BodyPart?            @relation(fields: [bodyPartId],        references: [id], onDelete: Restrict)
+  appliedInCombat ActiveCombat?        @relation(fields: [appliedInCombatId], references: [id], onDelete: SetNull)
+  appliedByAction ActiveCombat_Action? @relation(fields: [appliedByActionId], references: [id], onDelete: SetNull)
+  treatmentLogs   EntityTreatmentLog[]
+
+  // Allows the same condition on different body parts (scratch on tail AND scratch on leg)
+  // For non-injury conditions (bodyPart = null), PostgreSQL treats NULLs as distinct; app enforces uniqueness
+  @@unique([entityId, conditionDefId, bodyPartId])
+  @@index([entityId])
+  @@index([conditionDefId])
+  @@index([sourceEntityId])
+  @@index([linkedConditionId])
+  @@index([appliedInCombatId])
+  @@index([appliedByActionId])
+}
+
+// ============================================================
+// CONDITIONS
+// ============================================================
+
+// Guild-extensible condition definition — name is freely chosen by guild owners
+// conditionTypeId: FK to ConditionType — determines the progression lifecycle and display label
+// visibility is tracked per-instance via EntityCondition.discoveryLevel, not on the definition
+model ConditionDef {
+  id          Int     @id @default(autoincrement())
+  guildId     String  @default("global") @db.VarChar(50)
+  name        String  @db.VarChar(200)
+  description String? @db.VarChar(1000)
+
+  conditionTypeId    Int
+  conditionContextId Int
+
+  conditionType    ConditionType   @relation(fields: [conditionTypeId],    references: [id], onDelete: Restrict)
+  conditionContext ConditionContext @relation(fields: [conditionContextId], references: [id], onDelete: Restrict)
+
+  isSecondWindConsequence Boolean @default(false)  // eligible to be rolled when combat ends with entity in second wind below the HP threshold
+  isHidden                Boolean @default(false)  // condition name hidden until discoveryLevel >= linked symptomTag.defaultRoll
+  isFatalAtCap            Boolean @default(false)  // Progressive only: entity dies if cap is hit with no worsen link
+
+  // Progressive / Chronic fields — null for Timed / Permanent / Trait
+  progressionCap Float? // maximum progression value; when hit, worsen link fires (or death if isFatalAtCap)
+  dailyRollDC    Int?   // CON roll DC for daily delta: delta = roll - DC; positive = recover, negative = worsen
+
+  // Timed field — null for all other types
+  maxDays Int?  // number of days until the condition resolves forward via worsen/remove link
+
+  // Spawn fields — applicable to Timed, Progressive, and Chronic
+  spawnThreshold Float?  // 0.0–1.0 fraction of cap/maxDays at which spawn link checks fire; null = no spawning
+
+  contagionResistDC Int?   // null = not contagious; roll d20 ≥ this value to resist; higher = more contagious
+  energyDebuf       Float? // fractional reduction to energy cap (e.g. 0.4 = -40%)
+
+  // Action component blocking — if true, this condition prevents the entity from performing
+  // actions that require that component (checked at action resolution)
+  blocksVerbal  Boolean @default(false)  // e.g. Muteness — prevents verbal-component actions
+  blocksSomatic Boolean @default(false)  // e.g. future paralysis — prevents somatic-component actions
+
+  links        ConditionDef_Link[] @relation("ConditionLinkParent")
+  linkTargets  ConditionDef_Link[] @relation("ConditionLinkChild")
+  symptomTags           ConditionDef_SymptomTag[]
+  itemConditionEffects        ItemConditionEffect[] @relation("ItemConditionEffectTarget")
+  itemConditionEffectOutputs  ItemConditionEffect[] @relation("ItemConditionEffectOutput")
+  envRules              ConditionDef_EnvRule[]
+  statEffects           ConditionDef_StatEffect[]
+  skillEffects          ConditionDef_SkillEffect[]
+  combatEffects         ConditionDef_CombatEffect[]
+  eventConditionEffects EventEffect[]
+  combatActions         ItemEquipmentProfile_Condition[]
+  itemWarnings          ItemWarning[]
+  entityConditions      EntityCondition[]
+  speciesDefaults       Species_DefaultCondition[]
+  damageModifiers       ConditionDef_DamageModifier[]
+  behaviorEffects       ConditionBehaviorEffect[]
+  grantedItems          ConditionDef_GrantedItem[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([conditionTypeId])
+  @@index([conditionContextId])
+}
+
+// Damage type resistance or immunity granted while this condition is active.
+// isResistant = true  → entity takes half damage from this damage type
+// isResistant = false → entity takes no damage from this damage type (full immunity)
+// Condition blocking is handled via ConditionDef_Link with linkType = "block".
+model ConditionDef_DamageModifier {
+  conditionDefId Int
+  damageTypeId   Int
+  isResistant    Boolean  // true = half damage; false = immune (no damage)
+
+  condition  ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
+  damageType DamageType   @relation(fields: [damageTypeId],   references: [id], onDelete: Restrict)
+
+  @@id([conditionDefId, damageTypeId])
+  @@index([damageTypeId])
+}
+
+// How a condition's progression is modified when an environmental condition is active.
+// e.g. "asthma" worsens faster when "Smoke" or "Cold" is active.
+// difficultyMod is added once per active stack of the env condition — the more sources applying
+// the condition (season + weather + biomes + location), the larger the total DC shift.
+model ConditionDef_EnvRule {
+  conditionDefId Int
+  envConditionId Int
+
+  difficultyMod Int  // added to dailyRollDC per active stack; positive = harder to recover (DC goes up)
+
+  condition    ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Cascade)
+
+  @@id([conditionDefId, envConditionId])
+  @@index([envConditionId])
+}
+
+// Flat stat modifier applied by a condition — one row per affected stat
+// amount: signed integer; positive = buff (e.g. +2 Strength), negative = debuff (e.g. -3 Constitution)
+model ConditionDef_StatEffect {
+  conditionDefId Int
+  statId         Int
+
+  amount Int  // positive = buff, negative = debuff
+
+  condition ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
+  stat      Stat         @relation(fields: [statId],         references: [id], onDelete: Restrict)
+
+  @@id([conditionDefId, statId])
+  @@index([statId])
+}
+
+// Skill effects for a condition — one row per affected skill
+// amount:         signed flat modifier to the skill roll (e.g. +3 or -2); null = no flat modifier
+// hasDisadvantage: roll twice, keep the lower result
+model ConditionDef_SkillEffect {
+  conditionDefId Int
+  skillDefId     Int
+
+  amount          Int?
+  hasDisadvantage Boolean @default(false)
+
+  condition ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
+  skill     SkillDef     @relation(fields: [skillDefId],     references: [id], onDelete: Cascade)
+
+  @@id([conditionDefId, skillDefId])
+  @@index([skillDefId])
+}
+
+// In-combat effects for a condition — applied each round while the EntityCondition is active.
+// Complements ConditionDef_StatEffect / ConditionDef_SkillEffect, which are the out-of-combat effects.
+// One ConditionDef can have multiple combat effects (e.g. Poisoned: damage per round + hit penalty).
+//
+// effectType:
+//   "damage_per_round" — rolls diceCount d diceSides and deals the result as HP damage each round
+//   "heal_per_round"   — rolls diceCount d diceSides and restores HP each round
+//   "hit_mod"          — adds flatModifier (or EntityCondition.resolvedFlatModifier if null) to all hit rolls
+//   "damage_mod"       — flat bonus/penalty to damage rolls
+//   "stat_mod"         — temporary in-combat stat modifier (statId + flatModifier); distinct from the
+//                        out-of-combat ConditionDef_StatEffect, which persists outside of combat
+//   "action_denial"    — entity skips flatModifier turns each time this effect triggers (null = 1 turn)
+//   "ac_mod"           — flat bonus/penalty to the entity's effective AC (e.g. defensive stance +2, broken guard -2)
+//   "advantage"        — roll twice on affected rolls, take the higher result
+//   "disadvantage"     — roll twice on affected rolls, take the lower result
+//
+// flatModifier: null when the magnitude is skill-derived (read from EntityCondition.resolvedFlatModifier).
+//               positive = bonus, negative = penalty.
+//               for "action_denial", null means skip 1 turn.
+model ConditionDef_CombatEffect {
+  id             Int @id @default(autoincrement())
+  conditionDefId Int
+  effectTypeId   Int
+
+  // damage_per_round / heal_per_round
+  diceCount Int?
+  diceSides Int?
+
+  // hit_mod / damage_mod / stat_mod / ac_mod
+  statId       Int?  // stat_mod only
+  flatModifier Int?  // null = use EntityCondition.resolvedFlatModifier; positive = bonus, negative = penalty
+
+  condition  ConditionDef     @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
+  effectType CombatEffectType @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+  stat       Stat?            @relation(fields: [statId],         references: [id], onDelete: Restrict)
+
+  @@unique([conditionDefId, effectTypeId])
+  @@index([effectTypeId])
+  @@index([statId])
+}
+
+// Stat modifier applied when an environmental condition is active.
+// value is applied once per active stack — two sources of Cold each apply the modifier independently.
+model EnvCondition_StatModifier {
+  envConditionId Int
+  statId         Int
+  value          Float  // flat additive modifier; applied once per active stack
+
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Cascade)
+  stat         Stat         @relation(fields: [statId],         references: [id], onDelete: Restrict)
+
+  @@id([envConditionId, statId])
+  @@index([statId])
+}
+
+// Skill roll modifier applied when an environmental condition is active.
+// value is applied once per active stack — two sources of Cold each apply the modifier independently.
+// hasDisadvantage triggers if at least one stack is active (not per stack).
+model EnvCondition_SkillModifier {
+  envConditionId  Int
+  skillDefId      Int
+  value           Float   @default(0.0)  // flat additive modifier to the skill roll; applied once per active stack
+  hasDisadvantage Boolean @default(false) // triggers if at least one stack is active (not per stack)
+
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Cascade)
+  skill        SkillDef     @relation(fields: [skillDefId],     references: [id], onDelete: Cascade)
+
+  @@id([envConditionId, skillDefId])
+  @@index([skillDefId])
+}
+
+// Links between condition definitions — drives the full condition chain system.
+// linkType: block | recover | worsen | spawn
+//   block:   parent condition prevents child from being applied (e.g. nursing blocks pregnancy)
+//   recover: when parent value hits 0, replace parent with child (e.g. moderate infection → minor infection)
+//   worsen:  when parent value hits cap, replace parent with child (e.g. moderate infection → major infection)
+//   spawn:   when parent hits spawnThreshold, add child alongside parent (e.g. asthma → pneumonia)
+// weight: relative probability weight among multiple spawn candidates; ignored for block/recover/worsen
+model ConditionDef_Link {
+  id                Int   @id @default(autoincrement())
+  parentConditionId Int
+  childConditionId  Int
+  linkTypeId        Int
+  weight            Float @default(1.0)
+
+  parentCondition ConditionDef     @relation("ConditionLinkParent", fields: [parentConditionId], references: [id], onDelete: Cascade)
+  childCondition  ConditionDef     @relation("ConditionLinkChild",  fields: [childConditionId],  references: [id], onDelete: Restrict)
+  linkType        ConditionLinkType @relation(                      fields: [linkTypeId],         references: [id], onDelete: Restrict)
+
+  @@unique([parentConditionId, childConditionId, linkTypeId])
+  @@index([parentConditionId, linkTypeId])
+  @@index([childConditionId])
+  @@index([linkTypeId])
+}
+
+// Symptom labels attached to a condition definition
+// Both the condition (here) and the ItemEffect targeting that symptom reference the same Symptom row
+// e.g. Asthma → [Difficulty Breathing, Wheezing]
+// Herb ItemEffect → [Difficulty Breathing] — shared symptom drives treatment matching
+model ConditionDef_SymptomTag {
+  conditionDefId Int
+  symptomId      Int
+
+  condition ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
+  symptom   Symptom      @relation(fields: [symptomId],      references: [id], onDelete: Restrict)
+
+  @@id([conditionDefId, symptomId])
+  @@index([symptomId])
+}
+
+// ----------------------------------------------------------------
+// CONDITION BEHAVIOR EFFECTS
+// ----------------------------------------------------------------
+// Data-driven combat action interception — defines how a condition modifies
+// incoming or outgoing combat actions for the entity holding it.
+//
+// perspective: "outgoing" = triggers on actions made BY this entity (e.g. Confused redirects
+//              their own attacks); "incoming" = triggers on actions directed AT this entity
+//              (e.g. Being Guarded redirects attacks on the guarded entity to the guardian).
+//
+// behaviorType (seed values: redirect, cancel, bias, restrict)
+//   redirect — moves the action to a different target (redirectTarget required)
+//   cancel   — action is prevented entirely (triggerChance = probability of cancel)
+//   bias     — shifts targeting weight; biasWeight positive = toward redirectTarget,
+//              negative = away from redirectTarget (e.g. Fear pushes actions away from source)
+//   restrict — limits what action types the entity may/must use (restrictActionTypeId required)
+//
+// redirectTarget (seed values: source, self, random_ally, random_enemy)
+//   source      — the entity stored in EntityCondition.sourceEntityId (covers Taunt, Guard, Mark)
+//   self        — the entity holding the condition (confusion self-hit)
+//   random_ally — a random member of the holder's own side
+//   random_enemy — a random member of the opposing side
+//
+// triggerChance: 1.0 = always fires; 0.5 = 50% chance (used for confusion, parry, etc.)
+// biasWeight:    signed float, bias behavior only; positive = toward target, negative = away
+// restrictActionTypeId: the action type being allowed or blocked (restrict behavior only)
+// restrictIsBlock: false = entity may ONLY use this action type; true = entity may NOT use it
+
+model ConditionBehaviorType {
+  id      Int    @id @default(autoincrement())
+  name    String @unique
+  // redirect | cancel | bias | restrict
+  effects ConditionBehaviorEffect[]
+}
+
+model BehaviorRedirectTarget {
+  id      Int    @id @default(autoincrement())
+  name    String @unique
+  // source | self | random_ally | random_enemy
+  effects ConditionBehaviorEffect[]
+}
+
+model ConditionBehaviorEffect {
+  id             Int @id @default(autoincrement())
+  conditionDefId Int
+
+  actionTypeId   Int?    // null = affects all action types
+  perspective    String  // "outgoing" | "incoming"
+
+  behaviorTypeId   Int
+  triggerChance    Float @default(1.0)
+
+  // redirect + bias
+  redirectTargetId Int?
+  biasWeight       Float?  // bias only; positive = toward, negative = away from redirectTarget
+
+  // restrict
+  restrictActionTypeId Int?
+  restrictIsBlock      Boolean @default(false)  // false = may ONLY use; true = may NOT use
+
+  conditionDef   ConditionDef           @relation(fields: [conditionDefId],        references: [id], onDelete: Cascade)
+  actionType     ItemActionType?        @relation(fields: [actionTypeId],          references: [id], onDelete: Restrict)
+  behaviorType   ConditionBehaviorType  @relation(fields: [behaviorTypeId],        references: [id], onDelete: Restrict)
+  redirectTarget BehaviorRedirectTarget? @relation(fields: [redirectTargetId],     references: [id], onDelete: Restrict)
+  restrictAction ItemActionType?        @relation("RestrictActionType", fields: [restrictActionTypeId], references: [id], onDelete: Restrict)
+
+  @@index([conditionDefId])
+  @@index([actionTypeId])
+  @@index([behaviorTypeId])
+  @@index([redirectTargetId])
+  @@index([restrictActionTypeId])
+}
+
+// Items granted to an entity while a condition is active.
+// The item's combat actions appear in the entity's action menu without requiring the item
+// to be in inventory (e.g. "Grappled" grants "Break Free"; "Grappling" grants "Release").
+//
+// grantedToSource: false (default) = item granted to the condition holder.
+//                  true = item granted to EntityCondition.sourceEntityId (the entity that applied it).
+//                  Enables exploitation actions — e.g. applying "Marked" grants the attacker "Hunter's Strike".
+//
+// usesPerApplication: max times the granted action can be used during this condition instance.
+//                     null = unlimited. Tracked per EntityCondition at runtime.
+//
+// minProgression / maxProgression: gate the item behind the condition's current progressionValue.
+//   minProgression: item only available when progressionValue >= this value (e.g. Last Stand at >= 3.0)
+//   maxProgression: item only available when progressionValue <= this value (e.g. Apply Pressure at <= 4.0)
+//   Both null = always available while condition is active.
+
+model ConditionDef_GrantedItem {
+  conditionDefId Int
+  itemId         Int
+
+  grantedToSource    Boolean @default(false)
+  usesPerApplication Int?
+  minProgression     Float?
+  maxProgression     Float?
+
+  conditionDef ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
+  item         Item         @relation(fields: [itemId],         references: [id], onDelete: Cascade)
+
+  @@id([conditionDefId, itemId])
+  @@index([conditionDefId])
+  @@index([itemId])
+}
+
+// ============================================================
+// ENTITY RELATIONSHIPS
+// ============================================================
+
+// Relationship Types (static seed data — tracks parents and mentors)
+model RelationshipType {
+  id           Int     @id @default(autoincrement())
+  name     String  @unique @db.VarChar(50)
+  label    String  @db.VarChar(100)  // display label (e.g. "Parent")
+  isUnique Boolean @default(false)   // true = only one of this type allowed per entity
+
+  relationships EntityRelationship[]
+}
+
+model EntityRelationship {
+  id                 Int     @id @default(autoincrement())
+  entityId           Int
+  targetEntityId     Int
+  relationshipTypeId Int
+  isBiological       Boolean @default(false)
+
+  // Populated only for Mentor relationships — tracks when the apprentice last requested a training session.
+  // Used to enforce the once-per-day training request cooldown.
+  lastMentorRequestAt DateTime? @db.Timestamptz
+
+  entity   Entity           @relation("EntityRelationshipsFrom", fields: [entityId],           references: [id], onDelete: Cascade)
+  target   Entity           @relation("EntityRelationshipsTo",   fields: [targetEntityId],     references: [id], onDelete: Cascade)
+  relType  RelationshipType @relation(                           fields: [relationshipTypeId],  references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@unique([entityId, targetEntityId, relationshipTypeId])
+  @@index([entityId])
+  @@index([targetEntityId])
+  @@index([relationshipTypeId])
+}
+
+// ============================================================
+// GROUPS
+// ============================================================
+
+// Seed table: "neutral" | "allied" | "hostile" | "truce" | "unknown"
+model GroupStandingType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  standings GroupStanding[]
+}
+
+// Directional standing between two groups — one row per direction.
+// groupId = the group holding this view; targetGroupId = the group being viewed.
+// App creates/updates both directions independently to allow asymmetric standings.
+model GroupStanding {
+  groupId        Int
+  targetGroupId  Int
+  standingTypeId Int
+
+  group        Group            @relation("GroupStandingFrom", fields: [groupId],        references: [id], onDelete: Cascade)
+  targetGroup  Group            @relation("GroupStandingTo",   fields: [targetGroupId],  references: [id], onDelete: Cascade)
+  standingType GroupStandingType @relation(                    fields: [standingTypeId],  references: [id], onDelete: Restrict)
+
+  @@id([groupId, targetGroupId])
+  @@index([targetGroupId])
+  @@index([standingTypeId])
+}
+
+model Group {
+  id          Int     @id @default(autoincrement())
+  guildId     String
+  name        String  @db.VarChar(200)
+  description String? @db.VarChar(1000)
+
+  groupTypeId Int
+  groupType   GroupType @relation(fields: [groupTypeId], references: [id], onDelete: Restrict)
+
+  // Camp filth — cap = filthPerCat (app constant) × living entity count; computed at app layer
+  // Daily gain: baseRate × Π(effectiveMod) where effectiveMod = 1.0 + (EnvCondition_Modifier[filth].value − 1.0) × stackCount
+  filth Int @default(0)
+
+  // Group-level event cooldown — null = no event has ever fired for this group; updated whenever any event fires.
+  // Worker skips firing any new event for this group if now() < lastEventAt + EventDef.cooldownDays.
+  lastEventAt DateTime? @db.Timestamptz
+
+  // Water access — assumed true for most groups (river, stream nearby).
+  // Worker uses this for baseline hydration: if true, water drinking is available and covers hydration not met by food.
+  // Set false during drought events or to model desert/arid territories.
+  hasWaterAccess Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  members                  Entity[]
+  locations                Location_Group[]
+  borders                  LocationBorder[]
+  storages                 Storage[]
+  ranks                    Rank_Group[]
+  activeEvents             ActiveEvent[]
+  actionInstances          ActionInstance[]
+  // no recipeDiscoveries — discovery is tracked per entity, not per group
+  standingsFrom            GroupStanding[]           @relation("GroupStandingFrom")
+  standingsTo              GroupStanding[]           @relation("GroupStandingTo")
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([groupTypeId])
+}
+
+// Seed table for world-effect modifier categories used by EnvCondition_Modifier.
+// Seeded values: filth, prey_weight, herb_chance, herb_amount,
+//               gather_chance, gather_amount, spoilage, predator, sickness, hazard_chance
+// All scaling formula: effectiveMod = 1.0 + (value − 1.0) × stackCount
+//   filth          — daily filth gain multiplier (e.g. Windy value=1.30 → +30% filth per stack)
+//   prey_weight    — prey yield / carcass size multiplier
+//   herb_chance    — herb find rate multiplier (medicine cat gathering)
+//   herb_amount    — herb yield / quantity per gather multiplier
+//   gather_chance  — general forage / drop table find rate multiplier (non-herb items from biome drop table)
+//   gather_amount  — general forage yield multiplier
+//   spoilage       — food spoilage rate multiplier
+//   predator       — predator encounter rate multiplier
+//   sickness       — illness spawn chance multiplier
+//   hazard_chance  — global multiplier on all hazard-type event weights at this location/biome
+model EnvModifierType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  envConditionModifiers EnvCondition_Modifier[]
+}
+
+// Per-env-condition world effect modifiers. One row per (envCondition, modType) pair.
+// value is the base multiplier at severity 1.0; Worker scales it via the formula above.
+model EnvCondition_Modifier {
+  envConditionId Int
+  modTypeId      Int
+  value          Float
+
+  envCondition EnvCondition    @relation(fields: [envConditionId], references: [id], onDelete: Cascade)
+  modType      EnvModifierType @relation(fields: [modTypeId],      references: [id], onDelete: Restrict)
+
+  @@id([envConditionId, modTypeId])
+  @@index([envConditionId])
+  @@index([modTypeId])
+}
+
+// A named territory / point of interest in a guild's world (e.g. Sunningrocks, Fourtrees, Mothermouth).
+// Ownership and status are managed via Location_Group join rows.
+model Location {
+  id          Int     @id @default(autoincrement())
+  guildId     String
+  name        String  @db.VarChar(200)
+  description String? @db.VarChar(1000)
+
+  preyChance     Float @default(1.0)
+  preyWeight     Float @default(1.0)
+  herbChance     Float @default(1.0)
+  herbWeight     Float @default(1.0)
+  predatorChance Float @default(1.0)
+  hazardChance   Float @default(1.0)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  groups          Location_Group[]
+  borders         LocationBorder[]
+  biomes          Location_Biome[]
+  envConditions   Location_EnvCondition[]
+  actionInstances ActionInstance[]
+  eventTriggers   EventDef_Location[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+// Which groups are associated with a territory, and what their relationship to it is (Owned, Shared, Disputed).
+// A territory can have multiple groups with different statuses.
+model Location_Group {
+  locationId Int
+  groupId    Int
+  statusId   Int
+
+  location Location        @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  group    Group           @relation(fields: [groupId],    references: [id], onDelete: Cascade)
+  status   LocationStatus  @relation(fields: [statusId],   references: [id], onDelete: Restrict)
+
+  @@id([locationId, groupId])
+  @@index([groupId])
+  @@index([statusId])
+}
+
+// A neighboring group that borders this location from outside the owning group's territory
+// Used to determine whether a cat could trespass without crossing all of another group's land
+model LocationBorder {
+  locationId       Int
+  borderingGroupId Int
+
+  location       Location @relation(fields: [locationId],       references: [id], onDelete: Cascade)
+  borderingGroup Group    @relation(fields: [borderingGroupId], references: [id], onDelete: Cascade)
+
+  @@id([locationId, borderingGroupId])
+  @@index([borderingGroupId])
+}
+
+// ============================================================
+// BIOMES
+// ============================================================
+
+// A named biome / terrain type. Determines what species spawn here and what can be gathered.
+// Guild-extensible; guildId = "global" for seeded defaults (Forest, Moorland, River, etc.)
+model Biome {
+  id          Int     @id @default(autoincrement())
+  guildId     String  @default("global") @db.VarChar(50)
+  name        String  @db.VarChar(100)
+  description String? @db.VarChar(500)
+  color       String? @db.Char(6)        // RRGGBB hex color code, no leading #
+
+  dropTableId Int?
+  dropTable   DropTable? @relation(fields: [dropTableId], references: [id], onDelete: SetNull)
+
+  locations    Location_Biome[]
+  species      Species_Biome[]
+  envConditions Biome_EnvCondition[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([dropTableId])
+}
+
+// Biomes present at a location — a location can have multiple biomes (e.g. Forest + River)
+model Location_Biome {
+  locationId Int
+  biomeId    Int
+  weight     Float @default(1.0)  // relative contribution of this biome at this location; higher = more likely items/spawns from this biome; compared against sum of all biome weights at the location
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  biome    Biome    @relation(fields: [biomeId],    references: [id], onDelete: Restrict)
+
+  @@id([locationId, biomeId])
+  @@index([biomeId])
+}
+
+// Inherent environmental conditions for a biome — the terrain's persistent baseline.
+// Inherent environmental conditions for a biome — always active regardless of weather or season.
+// e.g. Wetland biome always contributes a stack of Damp; River biome always contributes Damp.
+// A location with multiple biomes stacks each biome's conditions independently.
+model Biome_EnvCondition {
+  biomeId        Int
+  envConditionId Int
+  stacks         Int @default(1)  // number of stacks this biome contributes; minimum 1 (enforced app-side)
+
+  biome        Biome        @relation(fields: [biomeId],        references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+
+  @@id([biomeId, envConditionId])
+  @@index([envConditionId])
+}
+
+// Per-location environmental condition additions — use for locations that deviate from their biome baseline.
+// e.g. a Forest location in a low valley might add an extra Damp stack beyond what Forest normally carries.
+// Stacks on top of biome contributions; a location with no entries relies entirely on its biomes + active season/weather.
+model Location_EnvCondition {
+  locationId     Int
+  envConditionId Int
+  stacks         Int @default(1)  // additional stacks beyond what the location's biomes contribute; minimum 1 (enforced app-side)
+
+  location     Location     @relation(fields: [locationId],     references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+
+  @@id([locationId, envConditionId])
+  @@index([envConditionId])
+}
+
+// ============================================================
+// STORAGE
+// ============================================================
+
+// A named storage container belonging to a group or an entity (never both)
+// acceptedTypes restricts which item types this storage accepts; empty = accepts nothing
+// App layer must ensure exactly one of groupId or entityId is set
+model Storage {
+  id      Int    @id @default(autoincrement())
+  guildId String
+  name    String @db.VarChar(200)
+
+  groupId  Int?
+  entityId Int?
+
+  weightCapacity     Float?          // null = no weight limit; sum of (StoredItem.quantity × Item.averageWeight) for Count items, or StoredItem.quantity for Weight items
+  fluidCapacity      Float?          // null = no fluid limit (ml); sum of StoredItem.quantity for Volume items
+  expirationModifier Float @default(1.0)  // multiplier on item spoilage rates; >1.0 = spoils faster
+  isPrimaryStorage   Boolean @default(false)  // true = this is the group's designated primary storage for its accepted item types
+  acceptsAll         Boolean @default(false)  // true = accepts any item type regardless of Storage_ItemType rows; used for personal entity storage
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  group  Group?  @relation(fields: [groupId],  references: [id], onDelete: Cascade)
+  entity Entity? @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  acceptedTypes Storage_ItemType[]
+  storedItems   StoredItem[]
+
+  @@unique([groupId, name])   // enforced when groupId is non-null (PostgreSQL treats NULLs as distinct)
+  @@unique([entityId, name])  // enforced when entityId is non-null
+  @@index([guildId])
+  @@index([groupId])
+  @@index([entityId])
+}
+
+// Item types accepted by a storage — a storage with no entries accepts nothing
+model Storage_ItemType {
+  storageId  Int
+  itemTypeId Int
+
+  storage  Storage  @relation(fields: [storageId],  references: [id], onDelete: Cascade)
+  itemType ItemType @relation(fields: [itemTypeId], references: [id], onDelete: Restrict)
+
+  @@id([storageId, itemTypeId])
+  @@index([itemTypeId])
+}
+
+// One physical instance of an item in a storage
+// One row per instance — items are not stacked, so each has its own quantity and storedAt for decay tracking
+// isEquipped: only meaningful for entity-owned storage; true = item is currently equipped by the owning entity
+// chosenProfileId + equippedAt are set together with isEquipped = true and cleared when unequipped
+model StoredItem {
+  id        Int   @id @default(autoincrement())
+  storageId Int
+  itemId    Int
+
+  quantity   Float    // amount in item's unit (e.g. weight in grams, or 1.0 for count-based items)
+  storedAt   DateTime @default(now()) @db.Timestamptz  // used for decay; decay% = days elapsed / (item.decayDays * storage.expirationModifier * season modifier); only relevant when item.decayDays is not null
+  craftBonus Float    @default(0.0)     // flat bonus accumulated through crafting skill rolls; added to ItemEffect.effectiveness on use
+                                        // carries forward to ephemeral outputs when RecipeOutput.craftBonusApplies = true
+
+  currentDurability Int?  // null when item.maxDurability is null; initialized from maxDurability on creation
+  usesRemaining     Int?  // null when item.maxUses is null; initialized from maxUses on creation, decremented on use
+
+  isEquipped      Boolean   @default(false)
+  chosenProfileId Int?      // set at equip time; null when not equipped
+  equippedAt      DateTime? @db.Timestamptz  // null when not equipped
+
+  storage       Storage               @relation(fields: [storageId],       references: [id], onDelete: Cascade)
+  item          Item                  @relation(fields: [itemId],           references: [id], onDelete: Restrict)
+  chosenProfile ItemEquipmentProfile? @relation(fields: [chosenProfileId],  references: [id], onDelete: Restrict)
+
+  @@index([storageId])
+  @@index([itemId])
+  @@index([storedAt])
+  @@index([chosenProfileId])
+}
+
+// ============================================================
+// ITEMS
+// ============================================================
+
+// Item definition (guild-extensible; guildId = "global" for seeded items)
+model Item {
+  id          Int     @id @default(autoincrement())
+  guildId     String  @default("global") @db.VarChar(50)
+  codeName    String  @db.VarChar(200)  // snake_case slug; unique per guild (see @@unique below)
+                                        // seeded:   yarrow_leaf
+                                        // ephemeral: yarrow_leaf_a3f9b2 (source codeName + random suffix)
+  name        String  @db.VarChar(200)  // display name; not unique — ephemeral items share names
+  description String? @db.VarChar(1000)
+
+  measurementTypeId Int?               // how this item's quantity is counted (Count/Weight/Volume); null = count-based
+  averageWeight     Float @default(0.0) // grams per unit; used by storage weight calculations for Count and Weight items; 0 = weightless
+  weightVariance    Float @default(0.0) // ± fraction applied to averageWeight at StoredItem creation; 0 = static weight
+                                        // e.g. 0.1 → actual weight rolls between 0.9× and 1.1× of averageWeight
+  averageVolume     Float @default(0.0) // ml per unit; used by storage fluid calculations for Volume items; 0 = ignored
+  decayDays         Int?                // base days until fully decayed; null = does not decay
+  maxDurability Int?                 // max durability for equipment; null = indestructible
+  maxUses       Int?                 // max uses before depletion; null = unlimited
+  fuelValue     Int?                 // fuel units provided when used as a heat/cooking source; null = not a fuel item
+
+  // Ephemeral items are created at craft time by the recipe system (e.g. Dried Yarrow Leaf, Yarrow Paste).
+  // App deletes the Item row when the last StoredItem referencing it is consumed or removed.
+  isEphemeral Boolean @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  measurementType MeasurementType? @relation(fields: [measurementTypeId], references: [id], onDelete: Restrict)
+
+  types           Item_Type[]
+  warnings        Item_Warning[]
+  dropTableEntries DropTable_Entry[]
+  actions     ItemAction[]
+  storedItems StoredItem[]
+  equipmentProfiles ItemEquipmentProfile[]
+
+  ingredientTypes        Item_IngredientType[]
+  slotOptions            RecipeSlotOption[]
+  recipeOutputs          RecipeOutput[]
+
+  actionOutputs          ItemAction_Output[]  @relation("ItemActionOutputItem")  // back-relation: this item appears as an output of these actions
+  eventItemEffects       EventEffect[]
+  speciesDefaultLoadouts SpeciesDefaultLoadout[]
+  rankDefaultItems        Rank_DefaultItem[]
+  conditionGrants         ConditionDef_GrantedItem[]
+  foodProfile             ItemFoodProfile?
+  actionTypeDefaultItems  ActionType_DefaultItem[]
+  treatmentLogs          EntityTreatmentLog[]
+  requiredByProfiles     ItemEquipmentProfile_RequiredItem[] @relation("ProfileRequiredItem")
+
+  @@unique([guildId, codeName])  // ephemeral random suffix guarantees uniqueness without special handling
+  @@index([guildId])
+  @@index([guildId, name])       // non-unique display name lookup
+}
+
+// Item type tags attached to an item — many-to-many
+model Item_Type {
+  itemId     Int
+  itemTypeId Int
+
+  item     Item     @relation(fields: [itemId],     references: [id], onDelete: Cascade)
+  itemType ItemType @relation(fields: [itemTypeId], references: [id], onDelete: Restrict)
+
+  @@id([itemId, itemTypeId])
+  @@index([itemTypeId])
+}
+
+// Reusable warning labels for items — e.g. "Dangerous for kits", "Dangerous for elders"
+model ItemWarning {
+  id      Int    @id @default(autoincrement())
+  guildId String @default("global") @db.VarChar(50)
+  name    String @db.VarChar(200)
+
+  // If both are set: when a cat performs triggeredByInteraction on this item, conditionDef is applied
+  // If both are null: display-only warning (e.g. "Dangerous for Kits") — informational, no automation
+  conditionDefId           Int?
+  triggeredByInteractionId Int?
+
+  conditionDef           ConditionDef?    @relation(fields: [conditionDefId],           references: [id], onDelete: SetNull)
+  triggeredByInteraction ItemInteraction? @relation(fields: [triggeredByInteractionId], references: [id], onDelete: SetNull)
+
+  items Item_Warning[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([conditionDefId])
+  @@index([triggeredByInteractionId])
+}
+
+model Item_Warning {
+  itemId      Int
+  warningId   Int
+  durationDays Int?  // overrides the condition's natural duration when this warning fires; null = use condition default
+
+  item    Item        @relation(fields: [itemId],    references: [id], onDelete: Cascade)
+  warning ItemWarning @relation(fields: [warningId], references: [id], onDelete: Restrict)
+
+  @@id([itemId, warningId])
+  @@index([warningId])
+}
+
+// Equipment slot categories (global seed data — Hand, Head, Chest, Innate)
+// defaultCapacity: how many slots of this type an entity has unless overridden by Species_EquipmentLoadout
+// isUnlimited: true = capacity is never enforced (used for Innate slot — biological attacks, rank abilities, spells)
+model EquipmentSlotType {
+  id              Int     @id @default(autoincrement())
+  name            String  @unique @db.VarChar(50)
+  defaultCapacity Int     @default(1)
+  isUnlimited     Boolean @default(false)
+
+  equipmentProfiles ItemEquipmentProfile[]
+  speciesLoadouts   Species_EquipmentLoadout[]
+}
+
+// Equipment properties for items that can be equipped (weapons, shields, armor, traits, spells, tools).
+// An item can have multiple profiles representing different equip modes (e.g. one-handed vs two-handed grip).
+//
+// Slot enforcement (app-side):
+//   When equipping, sum chosenProfile.slotCost for all currently equipped items with the same slotTypeId.
+//   Compare against: Species_EquipmentLoadout.capacity (if row exists) else EquipmentSlotType.defaultCapacity.
+//   Slots with isUnlimited = true skip capacity enforcement (Innate slot for biological attacks, spells, etc.)
+//
+// Combat action — all damage, heal, and action metadata lives here.
+//   null actionCategoryId = this profile has no combat use (e.g. pure armor, shield with no attack).
+model ItemEquipmentProfile {
+  id     Int @id @default(autoincrement())
+  itemId Int
+
+  slotTypeId Int
+  slotCost   Int     @default(1)     // how many slots this profile consumes; 2 for two-handed grip, 1 for everything else
+  label      String? @db.VarChar(100) // display name for this equip mode, e.g. "One-Handed", "Two-Handed"; null = no label
+
+  acModifier Int @default(0)  // flat AC modifier while equipped; positive = bonus, negative = penalty; 0 = no effect
+
+  // Damage — null = this profile deals no inherent damage (shields, armor)
+  damageDiceCount Int?
+  damageDiceSides Int?
+  damageTypeId    Int?  // FK to DamageType; any type — physical or elemental; null = untyped
+
+  // Secondary elemental damage — rolled separately on hit; null = no elemental component
+  elementalDiceCount    Int?
+  elementalDiceSides    Int?
+  elementalDamageTypeId Int?
+
+  // Heal power — for tool/kit items used in combat (e.g. Field Medic Kit: 1d6 heal)
+  healDiceCount Int?
+  healDiceSides Int?
+
+  isMagical Boolean @default(false)  // true = damage/heal is magical
+
+  // Combat action metadata — null actionCategoryId = no combat use
+  actionCategoryId     Int?
+  actionTypeId         Int?
+  targetScopeId        Int?
+  cooldownRounds       Int     @default(0)
+  durationRounds       Int     @default(0)   // 0 = instantaneous
+  behaviorEffectTypeId Int?                  // set for stateful behaviors (guard, taunt, parry, etc.)
+  requiresVerbal       Boolean @default(false)  // action has a verbal component — blocked by conditions with blocksVerbal
+  requiresSomatic      Boolean @default(false)  // action has a somatic component — blocked by conditions with blocksSomatic
+  allowedInSpar        Boolean @default(true)
+
+  // Roll modifiers
+  hitStatId    Int?  // stat modifier added to the 1d20 hit roll
+  damageStatId Int?  // stat modifier added to damage roll
+  healStatId   Int?  // stat modifier added to heal amount
+  hitBonus     Int   @default(0)
+  damageBonus  Int   @default(0)
+  healBonus    Int   @default(0)
+
+  // Optional event trigger on action use
+  triggersEventDefId Int?
+  triggerDC          Int @default(1)  // minimum d20 roll to fire the event; 1 = always, 20 = nat 20 only
+
+  // Summon fields — populated only when actionType.name = 'summon'; null otherwise
+  summonSpeciesId   Int?  // which species to spawn into the encounter
+  summonDiceCount   Int?  // number of dice rolled to determine how many entities spawn (e.g. 1)
+  summonDiceSides   Int?  // sides per die (e.g. 3 for 1d3 = 1–3 rats)
+
+  damageType          DamageType?           @relation("EquipmentDamageType",         fields: [damageTypeId],          references: [id], onDelete: SetNull)
+  elementalDamageType DamageType?           @relation("EquipmentElementalDamageType", fields: [elementalDamageTypeId], references: [id], onDelete: SetNull)
+  slotType            EquipmentSlotType     @relation(fields: [slotTypeId],           references: [id], onDelete: Restrict)
+  actionCategory      CombatActionCategory? @relation(fields: [actionCategoryId],     references: [id], onDelete: SetNull)
+  actionType          ItemActionType?       @relation(fields: [actionTypeId],          references: [id], onDelete: Restrict)
+  targetScope         CombatTargetScope?    @relation(fields: [targetScopeId],         references: [id], onDelete: Restrict)
+  behaviorEffectType  CombatEffectType?     @relation("ProfileBehaviorEffect",         fields: [behaviorEffectTypeId], references: [id], onDelete: Restrict)
+  hitStat             Stat?                 @relation("ProfileHitStat",                fields: [hitStatId],    references: [id], onDelete: Restrict)
+  damageStat          Stat?                 @relation("ProfileDamageStat",             fields: [damageStatId], references: [id], onDelete: Restrict)
+  healStat            Stat?                 @relation("ProfileHealStat",               fields: [healStatId],   references: [id], onDelete: Restrict)
+  triggersEventDef    EventDef?             @relation(fields: [triggersEventDefId],     references: [id], onDelete: SetNull)
+  summonSpecies       Species?              @relation("ProfileSummonSpecies",          fields: [summonSpeciesId], references: [id], onDelete: SetNull)
+
+  // Conditions applied on action use or while equipped (see onEquip flag)
+  conditions    ItemEquipmentProfile_Condition[]
+  requiredItems ItemEquipmentProfile_RequiredItem[]
+  equippedItems    StoredItem[]
+  participantCooldowns ActiveCombat_Participant_ActionCooldown[]
+  combatActionRecords  ActiveCombat_Action[]
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@index([slotTypeId])
+  @@index([damageTypeId])
+  @@index([elementalDamageTypeId])
+  @@index([actionCategoryId])
+  @@index([actionTypeId])
+  @@index([targetScopeId])
+  @@index([behaviorEffectTypeId])
+  @@index([triggersEventDefId])
+  @@index([summonSpeciesId])
+  @@index([hitStatId])
+  @@index([damageStatId])
+  @@index([healStatId])
+}
+
+// Seed table: "attack" | "heal" | "buff" | "debuff"
+model ItemActionType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  dealsDamage      Boolean @default(false)  // resolve damage roll against target AC
+  restoresHealth   Boolean @default(false)  // resolve healing
+  appliesCondition Boolean @default(false)  // check condition application on target
+  isHarmful        Boolean @default(false)  // action is hostile — affects targeting and aggro
+
+  equipmentProfiles    ItemEquipmentProfile[]
+  behaviorEffects      ConditionBehaviorEffect[]
+  restrictedByEffects  ConditionBehaviorEffect[] @relation("RestrictActionType")
+}
+
+// Seed table: "self" | "single" | "all_allies" | "all_enemies" | "all"
+// targetsAllies includes self; "all" = targetsAllies + targetsEnemies both true
+model CombatTargetScope {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  targetsSelf     Boolean @default(false)  // action targets only the user
+  targetsSingle   Boolean @default(false)  // action targets one selected entity
+  targetsAllies   Boolean @default(false)  // action targets all allies including self
+  targetsEnemies  Boolean @default(false)  // action targets all enemies
+
+  equipmentProfiles ItemEquipmentProfile[]
+}
+
+// Herb/medicine/crafting action for an item (e.g. catmint + eat, catmint + chew).
+// One row per item+interaction combo — items can have multiple interactions.
+// Effects are attached here, not directly to the item.
+// Combat actions (attacks, spells, rank abilities) live entirely on ItemEquipmentProfile — no ItemAction row needed.
+model ItemAction {
+  id                Int @id @default(autoincrement())
+  itemId            Int
+  itemInteractionId Int
+
+  energyCost    Int     @default(0)    // energy consumed when used outside combat
+  consumedOnUse Boolean @default(true) // false = item stays after use (tools, reusable applicators)
+
+  item            Item            @relation(fields: [itemId],            references: [id], onDelete: Cascade)
+  itemInteraction ItemInteraction @relation(fields: [itemInteractionId], references: [id], onDelete: Restrict)
+
+  effects           ItemEffect[]
+  conditionEffects  ItemConditionEffect[]
+  outputs           ItemAction_Output[]
+
+  @@unique([itemId, itemInteractionId])
+  @@index([itemId])
+  @@index([itemInteractionId])
+}
+
+// Shared effect type seed table for ItemEffect and ItemConditionEffect.
+// treat / worsen apply to both; cure / transform apply to conditions only.
+// Seeded: treat, worsen, cure, transform
+model ItemEffectType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  symptomEffects   ItemEffect[]
+  conditionEffects ItemConditionEffect[]
+}
+
+// An effect of performing a specific action with a specific item on a symptom
+// e.g. eat + catmint → treats Coughing; eat + yarrow → worsens Nausea
+// Valid effectTypes for symptoms: treat, worsen
+// use ItemWarning instead for hard condition spawns (e.g. "kills kits", "lethal above dose")
+model ItemEffect {
+  id           Int @id @default(autoincrement())
+  itemActionId Int
+  symptomId    Int
+  effectTypeId Int
+
+  effectiveness Float @default(1.0)  // base effectiveness for this item+action+symptom combo
+                                     // added to craftBonus when used as concoction ingredient
+
+  itemAction ItemAction   @relation(fields: [itemActionId], references: [id], onDelete: Cascade)
+  symptom    Symptom      @relation(fields: [symptomId],    references: [id], onDelete: Restrict)
+  effectType ItemEffectType @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([itemActionId, symptomId])
+  @@index([itemActionId])
+  @@index([symptomId])
+  @@index([effectTypeId])
+}
+
+// Direct condition-level effect for an item action — separate from symptom-level ItemEffect.
+// treat    — reduces conditionDef progressionValue by effectiveness
+// worsen   — increases conditionDef progressionValue by effectiveness
+// cure     — removes the EntityCondition row entirely regardless of progressionValue
+// transform — replaces the condition with outputConditionDef
+// App rule: treat/worsen require effectiveness; transform requires outputConditionDefId; cure needs neither.
+model ItemConditionEffect {
+  id           Int @id @default(autoincrement())
+  itemActionId Int
+  conditionDefId Int
+  effectTypeId   Int
+
+  effectiveness        Float?  // treat / worsen only
+  outputConditionDefId Int?    // transform only
+
+  itemAction   ItemAction              @relation(fields: [itemActionId],   references: [id], onDelete: Cascade)
+  conditionDef ConditionDef            @relation("ItemConditionEffectTarget", fields: [conditionDefId],       references: [id], onDelete: Restrict)
+  effectType   ItemEffectType          @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+  outputCondition ConditionDef?        @relation("ItemConditionEffectOutput", fields: [outputConditionDefId], references: [id], onDelete: SetNull)
+
+  @@unique([itemActionId, conditionDefId])
+  @@index([itemActionId])
+  @@index([conditionDefId])
+  @@index([effectTypeId])
+  @@index([outputConditionDefId])
+}
+
+// Nutritional values for food items. One optional row per item — only present on items
+// with the Food ItemType. Items without a row cannot be eaten for nutrition.
+//
+// Nutrition and hydration are split by food category (Meat, Plant) so species digestion
+// multipliers can be applied per category. A crafted meal with both meat and plant components
+// sets non-zero values in both pairs.
+//
+// Runtime formula:
+//   net_nutrition = quantity × (meatNutritionPerGram × species.meatNutritionMultiplier
+//                             + plantNutritionPerGram × species.plantNutritionMultiplier)
+//   net_hydration = quantity × (meatHydrationPerGram × species.meatHydrationMultiplier
+//                             + plantHydrationPerGram × species.plantHydrationMultiplier)
+model ItemFoodProfile {
+  itemId Int @unique
+
+  meatNutritionPerGram  Float @default(0.0)
+  meatHydrationPerGram  Float @default(0.0)
+  plantNutritionPerGram Float @default(0.0)
+  plantHydrationPerGram Float @default(0.0)
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+}
+
+// Defines one item produced when an ItemAction is performed.
+// Supports single and multi-output actions — herb grinding, cooking, butchering, crafting, etc.
+//
+// Output quantity is proportional to input: outputQty = inputQty × avgQuantity × (1 ± quantityVariance)
+//   e.g. grind catmint (stalks): avgQuantity=3.0  → 5 stalks produces ~15g of catmint powder
+//   e.g. butcher rabbit (grams): avgQuantity=0.55 → 1200g rabbit produces ~660g of meat
+//
+// dropDC:           minimum d20 roll for this output to appear; 1 = always produced; higher = probabilistic byproduct
+// craftBonusApplies: true = input StoredItem.craftBonus carries forward to this output's StoredItem.craftBonus
+model ItemAction_Output {
+  id           Int @id @default(autoincrement())
+  itemActionId Int
+  outputItemId Int
+
+  avgQuantity      Float   @default(1.0)  // output units per 1 unit of input
+  quantityVariance Float   @default(0.0)  // ± fraction; 0.2 = final output rolls between ×0.8 and ×1.2 of calculated amount; 0 = deterministic
+  dropDC           Int     @default(1)    // minimum d20 roll to produce this output; 1 = always, 20 = only on nat 20
+  craftBonusApplies Boolean @default(false)  // whether input craftBonus propagates to this output's StoredItem
+
+  itemAction ItemAction @relation(fields: [itemActionId], references: [id], onDelete: Cascade)
+  outputItem Item       @relation("ItemActionOutputItem", fields: [outputItemId], references: [id], onDelete: Restrict)
+
+  @@unique([itemActionId, outputItemId])
+  @@index([itemActionId])
+  @@index([outputItemId])
+}
+
+// ============================================================
+// CRAFTING SYSTEM
+// ============================================================
+// Unified recipe system covering single-item transforms, multi-ingredient crafting,
+// processing chains (dry → grind → brew), and butchering.
+// Ingredient tags are internal to this system — not used by events, storage, or UI.
+// See docs/crafting-system.md for full design reference.
+
+// Measurement units for ingredient quantities (global seed — Weight/g, Count/units, Volume/ml)
+model MeasurementType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+  unit String @db.VarChar(20)  // display label: "g", "units", "ml"
+
+  ingredientTypes  IngredientType[]
+  recipeSlots      RecipeSlot[]
+  items            Item[]
+  recipeOutputs    RecipeOutput[]
+}
+
+// Ingredient classification labels — internal to the crafting system (global seed, no guildId).
+// Each type has one canonical measurement unit. Examples: Powder → Weight, Stick → Count, Liquid → Volume.
+model IngredientType {
+  id                Int    @id @default(autoincrement())
+  name              String @unique @db.VarChar(100)
+  measurementTypeId Int?   // null = descriptive/modifier tag with no canonical measurement (e.g. Sweet, Dried, Cooked)
+                           // The recipe slot's own measurementTypeId always governs quantity; this is advisory only.
+
+  measurementType MeasurementType? @relation(fields: [measurementTypeId], references: [id], onDelete: Restrict)
+
+  itemIngredientTypes    Item_IngredientType[]
+  slotOptionRequiredTags RecipeSlotOption_RequiredTag[]
+  slotOptionExcludedTags RecipeSlotOption_ExcludedTag[]
+  recipeOutputAddTags    RecipeOutput_AddTag[]
+  recipeOutputRemoveTags RecipeOutput_RemoveTag[]
+
+  @@index([measurementTypeId])
+}
+
+// Attaches ingredient type tags to items for crafting slot matching.
+// Guild-scoped: guildId = "global" for seeded assignments; guild snowflake for custom overrides.
+// The same item can be categorized differently per guild.
+model Item_IngredientType {
+  guildId          String @db.VarChar(50)
+  itemId           Int
+  ingredientTypeId Int
+
+  item           Item           @relation(fields: [itemId],           references: [id], onDelete: Cascade)
+  ingredientType IngredientType @relation(fields: [ingredientTypeId], references: [id], onDelete: Restrict)
+
+  @@id([guildId, itemId, ingredientTypeId])
+  @@index([guildId])
+  @@index([itemId])
+  @@index([ingredientTypeId])
+}
+
+// Crafting verbs — entirely separate from ItemInteraction (global seed).
+// Examples: Brew, Dry, Grind, Mash, Butcher, Craft, Bake, Render, Crush
+model CraftingInteraction {
+  id          Int    @id @default(autoincrement())
+  name        String @unique @db.VarChar(100)
+  description String @db.VarChar(300)
+
+  recipes Recipe[]
+}
+
+// Output quantity modes (global seed).
+//   fixed:        outputQuantity = avgQuantity ± (avgQuantity × quantityVariance)
+//   proportional: outputQuantity = inputWeight × inputProportion (butchering, rendering)
+model RecipeOutputMode {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  recipeOutputs RecipeOutput[]
+}
+
+// A crafting recipe: one CraftingInteraction + input slots + output definitions.
+// guildId = "global" for globally available recipes; guild snowflake for custom guild recipes.
+model Recipe {
+  id          Int     @id @default(autoincrement())
+  guildId     String  @default("global") @db.VarChar(50)
+  name        String  @db.VarChar(200)
+  description String? @db.VarChar(1000)
+
+  craftingInteractionId Int
+
+  requiresDiscovery Boolean @default(false)  // true = hidden until discovered via experimentation or admin grant
+  craftingTimeMins  Int?    // null = instant; non-null = minutes required before output is produced
+  maxBatchSize      Int?    // null = unlimited; maximum recipe executions per crafting action
+  minCraftingLevel  Int?    // null = no minimum; minimum crafting skill level required to attempt
+  craftingXpReward  Int     @default(0)  // XP granted on a successful craft
+
+  craftingInteraction CraftingInteraction @relation(fields: [craftingInteractionId], references: [id], onDelete: Restrict)
+
+  slots             RecipeSlot[]
+  outputs           RecipeOutput[]
+  entityDiscoveries Entity_DiscoveredRecipe[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([craftingInteractionId])
+}
+
+// Tracks which entities have discovered a recipe through experimentation or admin grant.
+// Discovery is per-entity — each cat must discover a recipe themselves.
+model Entity_DiscoveredRecipe {
+  entityId     Int
+  recipeId     Int
+  discoveredAt DateTime @default(now()) @db.Timestamptz
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@id([entityId, recipeId])
+  @@index([recipeId])
+}
+
+// One input requirement in a recipe. Multiple slots = multiple required ingredients.
+// consumedOnUse = false: tool slot — item is required but returned after crafting (e.g. mortar and pestle).
+// measurementTypeId: unit used to interpret the quantity field.
+model RecipeSlot {
+  id        Int     @id @default(autoincrement())
+  recipeId  Int
+  slotIndex Int     // display/processing order; ascending
+  label     String? @db.VarChar(100)  // optional display label, e.g. "Binding", "Tool"
+
+  quantity          Float   // per-batch minimum; total = quantity × batch_count when scalesWithBatch = true
+  measurementTypeId Int
+  consumedOnUse     Boolean @default(true)   // false = tool slot; item returned after crafting
+  scalesWithBatch   Boolean @default(true)   // true  = total required scales with batch count (quantity × batches)
+                                             // false = quantity is fixed regardless of batch count
+                                             // consumedOnUse=false + scalesWithBatch=true  → 1 durability deducted per batch
+                                             // consumedOnUse=false + scalesWithBatch=false → 1 durability deducted total
+
+  recipe          Recipe          @relation(fields: [recipeId],          references: [id], onDelete: Cascade)
+  measurementType MeasurementType @relation(fields: [measurementTypeId], references: [id], onDelete: Restrict)
+
+  options RecipeSlotOption[]
+
+  @@index([recipeId])
+  @@index([measurementTypeId])
+}
+
+// One way to satisfy a RecipeSlot (OR relationship — any option satisfies the slot).
+// Exactly one matching strategy (app-enforced):
+//   itemId non-null: only this specific item satisfies the option
+//   itemId null:     any item carrying ALL requiredTags and NONE of excludedTags satisfies the option
+model RecipeSlotOption {
+  id     Int  @id @default(autoincrement())
+  slotId Int
+  itemId Int?  // specific item; null if tag-based
+
+  slot RecipeSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  item Item?      @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  requiredTags RecipeSlotOption_RequiredTag[]
+  excludedTags RecipeSlotOption_ExcludedTag[]
+
+  @@index([slotId])
+  @@index([itemId])
+}
+
+// Ingredient type an item MUST have to satisfy this slot option (AND relationship).
+model RecipeSlotOption_RequiredTag {
+  slotOptionId     Int
+  ingredientTypeId Int
+
+  slotOption     RecipeSlotOption @relation(fields: [slotOptionId],     references: [id], onDelete: Cascade)
+  ingredientType IngredientType   @relation(fields: [ingredientTypeId], references: [id], onDelete: Restrict)
+
+  @@id([slotOptionId, ingredientTypeId])
+  @@index([ingredientTypeId])
+}
+
+// Ingredient type an item must NOT have to satisfy this slot option.
+// e.g. Dry recipe excludes the Dried tag — cannot dry an already-dried item.
+model RecipeSlotOption_ExcludedTag {
+  slotOptionId     Int
+  ingredientTypeId Int
+
+  slotOption     RecipeSlotOption @relation(fields: [slotOptionId],     references: [id], onDelete: Cascade)
+  ingredientType IngredientType   @relation(fields: [ingredientTypeId], references: [id], onDelete: Restrict)
+
+  @@id([slotOptionId, ingredientTypeId])
+  @@index([ingredientTypeId])
+}
+
+// One output produced by a recipe. A recipe can have multiple outputs (different outputModes allowed).
+//
+// Seeded output:   outputItemId non-null; ephemeral name/modifier fields unused.
+// Ephemeral output: outputItemId null; app creates a new Item row at craft time:
+//   - name computed from preName/postName + source item name (e.g. "Dried Yarrow Leaf")
+//   - isEphemeral = true; child rows (ItemAction, ItemEffect, ItemFoodProfile, etc.) copied from source
+//   - decayDaysMultiplier applied to source item's decayDays
+//   - addTags/removeTags applied to the new Item_IngredientType rows
+//   - app deletes the Item row when the last StoredItem referencing it is consumed or removed
+//
+// onFailure:
+//   false (default) = produced on successful skill roll
+//   true            = produced on failed skill roll
+//   A recipe can have both success and failure outputs simultaneously.
+model RecipeOutput {
+  id       Int @id @default(autoincrement())
+  recipeId Int
+
+  outputItemId Int?  // null for ephemeral outputs
+
+  outputModeId     Int
+  avgQuantity      Float  @default(1.0)  // fixed mode: base output quantity
+  quantityVariance Float  @default(0.0)  // fixed mode: ± fraction; 0.2 = ×0.8–×1.2
+  inputProportion  Float?               // proportional mode: fraction of consumed input weight → output quantity
+
+  dropDC    Int     @default(1)      // min d20 roll to produce this output; 1 = always, 20 = nat 20 only
+  onFailure Boolean @default(false)  // true = produced on failed skill roll only
+
+  craftBonusApplies Boolean @default(false)  // carry source StoredItem.craftBonus to output StoredItem
+
+  // Ephemeral output naming and modifiers (ignored for seeded outputs)
+  preName                 String? @db.VarChar(100)  // prepended to source item display name: "Dried Yarrow Leaf"
+  postName                String? @db.VarChar(100)  // appended to source item display name:  "Yarrow Paste"
+  decayDaysMultiplier     Float?                    // multiplied against source item's decayDays; null = unchanged
+  decayVariance           Float?                    // overrides source item's weightVariance for decay spread; null = inherit
+  effectivenessMultiplier Float?                    // multiplied against all copied ItemEffect/ItemConditionEffect effectiveness values; null = unchanged
+  outputMeasurementTypeId Int?                      // overrides measurementTypeId on the ephemeral item; null = inherit from source
+                                                    // must be consistent with any addTags whose ingredient type implies a different unit (enforced app-side)
+
+  recipe               Recipe           @relation(fields: [recipeId],               references: [id], onDelete: Cascade)
+  outputItem           Item?            @relation(fields: [outputItemId],           references: [id], onDelete: Restrict)
+  outputMode           RecipeOutputMode @relation(fields: [outputModeId],           references: [id], onDelete: Restrict)
+  outputMeasurementType MeasurementType? @relation(fields: [outputMeasurementTypeId], references: [id], onDelete: Restrict)
+
+  addTags    RecipeOutput_AddTag[]
+  removeTags RecipeOutput_RemoveTag[]
+  foodOverride RecipeOutput_FoodOverride?
+
+  @@index([recipeId])
+  @@index([outputItemId])
+  @@index([outputModeId])
+  @@index([outputMeasurementTypeId])
+}
+
+// Ingredient type added to the ephemeral output item's Item_IngredientType rows at craft time.
+// e.g. Dry recipe adds the Dried ingredient type to the output.
+model RecipeOutput_AddTag {
+  recipeOutputId   Int
+  ingredientTypeId Int
+
+  recipeOutput   RecipeOutput   @relation(fields: [recipeOutputId],   references: [id], onDelete: Cascade)
+  ingredientType IngredientType @relation(fields: [ingredientTypeId], references: [id], onDelete: Restrict)
+
+  @@id([recipeOutputId, ingredientTypeId])
+  @@index([ingredientTypeId])
+}
+
+// Ingredient type removed from the ephemeral output item's Item_IngredientType rows at craft time.
+// e.g. remove Fresh tag when an item is dried or cooked.
+model RecipeOutput_RemoveTag {
+  recipeOutputId   Int
+  ingredientTypeId Int
+
+  recipeOutput   RecipeOutput   @relation(fields: [recipeOutputId],   references: [id], onDelete: Cascade)
+  ingredientType IngredientType @relation(fields: [ingredientTypeId], references: [id], onDelete: Restrict)
+
+  @@id([recipeOutputId, ingredientTypeId])
+  @@index([ingredientTypeId])
+}
+
+// Sparse food profile overrides for ephemeral outputs (ignored for seeded outputs).
+// Only non-null fields are applied; null = inherit value from source item's food profile.
+// e.g. grinding a leaf into powder might increase plantNutritionPerGram while leaving hydration unchanged.
+model RecipeOutput_FoodOverride {
+  recipeOutputId Int @unique
+
+  meatNutritionPerGram  Float?
+  meatHydrationPerGram  Float?
+  plantNutritionPerGram Float?
+  plantHydrationPerGram Float?
+
+  recipeOutput RecipeOutput @relation(fields: [recipeOutputId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================
+// RANKS
+// ============================================================
+
+model Rank {
+  id          Int     @id @default(autoincrement())
+  guildId     String
+  name        String  @db.VarChar(100)
+  description String? @db.VarChar(500)
+  sortOrder     Int     @default(0)  // lower = higher seniority (e.g. 0 = leader, 1 = deputy, 2 = senior warrior); used for display ordering and hierarchy comparisons
+  maxCount      Int?    // null = unlimited; max entities that can hold this rank simultaneously
+  canMentor     Boolean @default(false)  // true = entities with this rank may act as a mentor
+  canBeMentored Boolean @default(false)  // true = entities with this rank may be assigned a mentor
+  canLeadEvents Boolean @default(false)  // true = entities with this rank may fill the leader slot on events that requiresLeader = true
+
+  members              Entity[]
+  groups               Rank_Group[]
+  defaultItems         Rank_DefaultItem[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+// Assigns a rank to one or more groups — rank must have at least one group (enforced at app layer)
+// Only entities whose group is listed here may be assigned this rank
+model Rank_Group {
+  rankId  Int
+  groupId Int
+
+  rank  Rank  @relation(fields: [rankId],  references: [id], onDelete: Cascade)
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([rankId, groupId])
+  @@index([groupId])
+}
+
+// Items shadow-added to an entity's inventory when they are assigned this rank, and removed when the rank changes.
+// Intended for equippable items only (weapons, armor, spells, biological traits are not needed here).
+// autoEquip = true  → front-end immediately equips the item on the entity as well as adding it to inventory
+// autoEquip = false → item is added to inventory only; entity or leader equips it manually
+model Rank_DefaultItem {
+  rankId     Int
+  itemId     Int
+  autoEquip  Boolean @default(true)
+
+  rank Rank @relation(fields: [rankId], references: [id], onDelete: Cascade)
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([rankId, itemId])
+  @@index([itemId])
+}
+
+// ============================================================
+// ACTION TYPES
+// ============================================================
+
+// Defines the set of actions cats can spend daily energy on (patrol, hunt, gather herbs, train, etc.)
+// Guild-extensible; guildId = "global" for seeded defaults.
+// Eligibility mirrors EventDef: requiresCanMentor gates adult-only actions; allowApprenticesWithAdult permits
+// apprentices when at least one canMentor cat is present.
+model ActionType {
+  id          Int     @id @default(autoincrement())
+  guildId     String  @default("global") @db.VarChar(50)
+  name        String  @db.VarChar(100)    // internal key e.g. "border_patrol"
+  displayName String  @db.VarChar(200)
+  description String? @db.VarChar(1000)
+
+  energyCost      Int  @default(10)
+  minCats         Int  @default(1)   // minimum cats required to start this action
+  maxCats         Int?               // null = unlimited
+  durationMinutes Int?               // null = resolves immediately on next tick
+
+  // Rewards granted to each participating cat on successful completion.
+  // clanRepReward may be negative (e.g. a risky or taboo activity).
+  baseExpReward      Int @default(0)
+  baseClanRepReward  Int @default(0)
+
+  // Eligibility
+  requiresCanMentor         Boolean @default(false)
+  allowApprenticesWithAdult Boolean @default(false)
+  requiresCanLeadEvents     Boolean @default(false)  // true = the cat initiating this action must have Rank.canLeadEvents
+  minAgeMoons               Int?
+
+  // Resolution mode
+  // false = quick (auto-resolves in background, posts summary): hunting rolls all computed server-side
+  // true  = interactive (step-by-step): each cat's roll is surfaced and the user can choose their skill
+  isInteractive Boolean @default(false)
+
+  eventTriggers EventDef_ActionType[]
+  instances     ActionInstance[]
+  defaultItems  ActionType_DefaultItem[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+// Items shadow-added and equipped to the patrol leader when they start an ActionInstance, removed when it ends.
+// leaderOnly = true  → only granted to the entity in ActionInstance.leaderCatId (default)
+// leaderOnly = false → granted to all participants (e.g. a shared patrol item every cat carries)
+model ActionType_DefaultItem {
+  actionTypeId Int
+  itemId       Int
+  autoEquip    Boolean @default(true)
+  leaderOnly   Boolean @default(true)
+
+  actionType ActionType @relation(fields: [actionTypeId], references: [id], onDelete: Cascade)
+  item       Item       @relation(fields: [itemId],       references: [id], onDelete: Cascade)
+
+  @@id([actionTypeId, itemId])
+  @@index([itemId])
+}
+
+// An in-progress or completed instance of an activity taken by a group of cats
+model ActionInstance {
+  id           Int    @id @default(autoincrement())
+  actionTypeId Int
+  groupId      Int
+  locationId   Int?   // where the action takes place; null = at camp
+  leaderCatId  Int?   // the cat leading this instance; null until set at start
+
+  isActive    Boolean   @default(true)  // false = ended (completed or interrupted)
+  startedAt   DateTime  @default(now()) @db.Timestamptz
+  completedAt DateTime? @db.Timestamptz
+
+  actionType ActionType @relation(fields: [actionTypeId], references: [id], onDelete: Restrict)
+  group      Group      @relation(fields: [groupId],      references: [id], onDelete: Cascade)
+  location   Location?  @relation(fields: [locationId],   references: [id], onDelete: SetNull)
+  leader     Entity?    @relation("ActionInstanceLeader", fields: [leaderCatId], references: [id], onDelete: SetNull)
+
+  participants ActionInstance_Entity[]
+  activeEvent  ActiveEvent?
+
+  @@index([groupId])
+  @@index([actionTypeId])
+  @@index([locationId])
+  @@index([leaderCatId])
+}
+
+// The cats participating in an action instance and how much energy each spent
+model ActionInstance_Entity {
+  actionInstanceId Int
+  catId            Int
+
+  energySpent   Int @default(0)
+  expEarned     Int @default(0)  // snapshot of EXP granted to this cat on completion
+  clanRepEarned Int @default(0)  // snapshot of clan rep granted to this cat on completion; may be negative
+
+  actionInstance ActionInstance @relation(fields: [actionInstanceId], references: [id], onDelete: Cascade)
+  cat            Entity         @relation(fields: [catId],            references: [id], onDelete: Cascade)
+
+  @@id([actionInstanceId, catId])
+  @@index([catId])
+}
+
+// ============================================================
+// EVENTS — SEED TABLES
+// ============================================================
+
+// Seed table: "admin" | "activity" | "weather_onset" | "filth" | "daily"
+model EventTriggerType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  eventDefs EventDef[]
+}
+
+// Seed table: "global" | "group" | "action"
+model EventScope {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  eventDefs EventDef[]
+}
+
+// Seed table: "narrative" | "choice" | "combat"
+model EventStepType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  stepDefs EventStepDef[]
+}
+
+// Seed table: "all_participants" | "random_participant" | "leader" | "group"
+// appliesToAll:    effect applies to every participant
+// appliesToRandom: effect applies to one randomly selected participant
+// appliesToLeader: effect applies to the patrol/group leader only
+// appliesToGroup:  effect applies to the group/clan entity (not individual participants)
+model EventParticipantScope {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  appliesToAll    Boolean @default(false)
+  appliesToRandom Boolean @default(false)
+  appliesToLeader Boolean @default(false)
+  appliesToGroup  Boolean @default(false)
+
+  stepDefs     EventStepDef[]
+  outcomeDefs  EventOutcomeDef[]
+  eventEffects EventEffect[]
+}
+
+// Seed table: "condition" | "item"
+model EventEffectType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  eventEffects EventEffect[]
+}
+
+// Seed table: "individual" | "group_average" | "leader_designates"
+model EventCheckMode {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  choiceDefs EventChoiceDef[]
+}
+
+// ============================================================
+// EVENTS
+// ============================================================
+
+// Top-level event definition.
+//
+// triggerType:
+//   "admin"         — admin-initiated; participants provided via signup before the chain starts
+//   "activity"      — fires during an ActionInstance; participants pulled from the activity roster
+//   "weather_onset" — fires automatically when a matching WeatherState becomes active
+//   "filth"         — fires when group filth/cap ratio crosses a threshold (see EventDef_FilthTrigger)
+//   "daily"         — Worker rolls once per day per guild; chancePerDay controls probability
+//
+// scope:
+//   "global" — posted guild-wide; not tied to any group or activity
+//   "group"  — scoped to one group
+//   "action" — scoped to a specific ActionInstance
+//
+// Eligibility (checked before the chain begins against the provided participant list):
+//   requiresLeader            — at least one participant must have Rank.canLeadEvents = true
+//   requiresCanMentor         — all participants must have Rank.canMentor = true
+//   allowApprenticesWithAdult — non-mentor ranks OK if ≥1 canMentor cat is present
+//   minAgeMoons               — minimum cat age gate; null = no requirement
+model EventDef {
+  id          Int     @id @default(autoincrement())
+  guildId     String  @default("global") @db.VarChar(50)
+  name        String  @db.VarChar(200)
+  description String? @db.VarChar(1000)
+
+  triggerTypeId Int
+  scopeId       Int
+
+  baseWeight   Float  @default(1.0)  // base spawn weight for activity/daily selection
+  chancePerDay Float?                // triggerType = "daily" only
+
+  // Eligibility
+  requiresLeader            Boolean @default(false)
+  requiresCanMentor         Boolean @default(false)
+  allowApprenticesWithAdult Boolean @default(false)
+  minAgeMoons               Int?
+
+  // Cooldown — days before this event can fire again for the same group/guild
+  cooldownDays Int @default(3)
+
+  // Trigger conditions
+  weatherTriggers     EventDef_WeatherTrigger[]
+  actionTriggers      EventDef_ActionType[]
+  filthTrigger        EventDef_FilthTrigger?
+  envConditionWeights EnvCondition_EventDef[]
+  locationTriggers    EventDef_Location[]
+  prerequisites       EventDef_Prerequisite[] @relation("EventPrerequisites")
+  isPrerequisiteFor   EventDef_Prerequisite[] @relation("EventIsPrerequisiteFor")
+
+  // Content
+  steps EventStepDef[]
+
+  triggerType EventTriggerType @relation(fields: [triggerTypeId], references: [id], onDelete: Restrict)
+  scope       EventScope       @relation(fields: [scopeId],       references: [id], onDelete: Restrict)
+
+  // Back-relations
+  profileTriggers ItemEquipmentProfile[]
+  cooldowns       EventCooldown[]
+  activeEvents       ActiveEvent[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([triggerTypeId])
+  @@index([scopeId])
+}
+
+// Weather state that gates or boosts an event.
+// required = true:  event can ONLY fire when this weather state is active
+// required = false: weather boosts the event's effective selection weight by weightMod
+// triggersOnOnset:  for triggerType = "weather_onset", fires when the weather state activates
+model EventDef_WeatherTrigger {
+  eventDefId     Int
+  weatherStateId Int
+
+  required        Boolean @default(false)
+  weightMod       Float   @default(0.0)
+  triggersOnOnset Boolean @default(false)
+
+  eventDef     EventDef     @relation(fields: [eventDefId],     references: [id], onDelete: Cascade)
+  weatherState WeatherState @relation(fields: [weatherStateId], references: [id], onDelete: Cascade)
+
+  @@id([eventDefId, weatherStateId])
+  @@index([weatherStateId])
+}
+
+// Which action types can trigger this event, and how much they boost its selection weight
+model EventDef_ActionType {
+  eventDefId   Int
+  actionTypeId Int
+
+  weightMod Float @default(0.0)
+
+  eventDef   EventDef   @relation(fields: [eventDefId],   references: [id], onDelete: Cascade)
+  actionType ActionType @relation(fields: [actionTypeId], references: [id], onDelete: Cascade)
+
+  @@id([eventDefId, actionTypeId])
+  @@index([actionTypeId])
+}
+
+// Filth threshold trigger.
+// chancePerDay scales linearly above filthThreshold.
+// isOngoing: true = event persists and re-applies effects each tick until filth drops below threshold.
+model EventDef_FilthTrigger {
+  eventDefId Int @id
+
+  filthThreshold Float   // filth/cap ratio (0.0–1.0) at which daily roll begins
+  chancePerDay   Float   // base daily chance at filth/cap = 1.0; scales linearly above threshold
+  isOngoing      Boolean @default(false)
+
+  eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
+}
+
+// Another EventDef that must have at least one completed ActiveEvent in the guild before this event is eligible.
+model EventDef_Prerequisite {
+  eventDefId         Int
+  requiredEventDefId Int
+  withinDays         Int?  // null = any past occurrence qualifies; non-null = must have fired within this many days
+
+  eventDef         EventDef @relation("EventPrerequisites",     fields: [eventDefId],         references: [id], onDelete: Cascade)
+  requiredEventDef EventDef @relation("EventIsPrerequisiteFor", fields: [requiredEventDefId],  references: [id], onDelete: Cascade)
+
+  @@id([eventDefId, requiredEventDefId])
+  @@index([requiredEventDefId])
+}
+
+// Event weight boost when an environmental condition is active (from season or weather)
+model EnvCondition_EventDef {
+  envConditionId Int
+  eventDefId     Int
+
+  weightMod Float  // added to effective weight when this condition is active
+
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Cascade)
+  eventDef     EventDef     @relation(fields: [eventDefId],     references: [id], onDelete: Cascade)
+
+  @@id([envConditionId, eventDefId])
+  @@index([eventDefId])
+}
+
+// ============================================================
+// EVENTS — STEPS
+// ============================================================
+
+// A single step in an event chain.
+//
+// stepType:
+//   "narrative" — auto-resolves; posts prompt text, applies effects to effectScope, then advances
+//                 to nextStepId. No player input required.
+//   "choice"    — patrol leader selects from EventChoiceDef options. Each choice leads to a
+//                 weighted outcome roll which determines effects and the next step.
+//   "combat"    — triggers an ActiveCombat for the group vs. the defined NPC. The event chain
+//                 pauses until combat resolves, then advances to winStepId or loseStepId.
+//
+// isStarter: true on exactly one step per EventDef — the entry point of the chain.
+//
+// sortOrder: display/seeding hint only — NOT used for execution order.
+//            Execution flows via isStarter → outcomes / winStep / loseStep / nextStep links.
+//
+// expiresAfterMinutes: "choice" steps only — how long the leader has to respond before the step
+//   auto-resolves via defaultChoiceDefId. null = no time limit.
+model EventStepDef {
+  id         Int     @id @default(autoincrement())
+  eventDefId Int
+  sortOrder  Int
+  isStarter    Boolean @default(false)  // true on the entry-point step of the chain
+  stepTypeId   Int
+  prompt       String  @db.VarChar(2000)
+
+  // ── narrative step fields ────────────────────────────────────────────────
+  // effectScope: who the narrative effects apply to
+  effectScopeId Int?  // null for non-narrative steps
+  nextStepId  Int?   // null = event ends after this step
+
+  // ── choice step fields ───────────────────────────────────────────────────
+  expiresAfterMinutes Int?  // time window for the leader to choose; null = no limit
+  defaultChoiceDefId  Int?  // choice applied automatically when the window expires
+
+  // ── combat step fields ───────────────────────────────────────────────────
+  combatEncounterDefId Int?  // which CombatEncounterDef to spawn
+  winStepId            Int?  // next step when players win; null = event ends
+  loseStepId           Int?  // next step when players lose; null = event ends
+  winExpReward         Int   @default(0)  // exp awarded to each non-fleeing player participant on win
+  winClanRepReward     Int   @default(0)  // clan rep awarded to each non-fleeing player participant on win
+
+  // ── relations ────────────────────────────────────────────────────────────
+  eventDef           EventDef            @relation(fields: [eventDefId],           references: [id], onDelete: Cascade)
+  stepType           EventStepType       @relation(fields: [stepTypeId],           references: [id], onDelete: Restrict)
+  effectScope        EventParticipantScope? @relation(fields: [effectScopeId],      references: [id], onDelete: Restrict)
+  nextStep           EventStepDef?       @relation("NarrativeNext", fields: [nextStepId],  references: [id], onDelete: Restrict)
+  winStep            EventStepDef?       @relation("CombatWin",     fields: [winStepId],   references: [id], onDelete: Restrict)
+  loseStep           EventStepDef?       @relation("CombatLose",    fields: [loseStepId],  references: [id], onDelete: Restrict)
+  defaultChoice      EventChoiceDef?     @relation("StepDefaultChoice", fields: [defaultChoiceDefId], references: [id], onDelete: Restrict)
+  combatEncounterDef CombatEncounterDef? @relation(fields: [combatEncounterDefId], references: [id], onDelete: SetNull)
+
+  choices  EventChoiceDef[]
+  effects  EventEffect[]
+
+  // Back-references for self-joins
+  incomingNarrativeSteps EventStepDef[] @relation("NarrativeNext")
+  incomingWinSteps       EventStepDef[] @relation("CombatWin")
+  incomingLoseSteps      EventStepDef[] @relation("CombatLose")
+
+  incomingOutcomes EventOutcomeDef[] @relation("OutcomeNextStep")
+  activeEvents     ActiveEvent[]
+
+  @@unique([eventDefId, sortOrder])
+  @@index([eventDefId])
+  @@index([stepTypeId])
+  @@index([effectScopeId])
+  @@index([defaultChoiceDefId])
+  @@index([combatEncounterDefId])
+  @@index([nextStepId])
+  @@index([winStepId])
+  @@index([loseStepId])
+}
+
+// Narrative step: condition applied or removed on auto-resolve.
+// Unified event effect — applies to either a narrative step or a choice outcome.
+// Exactly one of stepDefId or outcomeDefId must be set (app-enforced).
+//
+// effectType: "condition" | "item"
+//
+// condition fields (effectType = "condition"):
+//   conditionDefId — which condition to apply or remove
+//   remove         — true = remove the condition; false = apply it
+//
+// item fields (effectType = "item"):
+//   itemId / itemTypeId — specific item or any item of this type (mutually exclusive, app-enforced)
+//                         itemTypeId: app picks a random item of that type from entity storage (isGain=false)
+//                                     or a random globally seeded item of that type (isGain=true)
+//   minQuantity / maxQuantity — rolled quantity range
+//   isGain        — true = items added; false = items removed/consumed
+//   targetScopeId — who receives/loses the item
+model EventEffect {
+  id           Int @id @default(autoincrement())
+  effectTypeId Int
+
+  stepDefId    Int?  // FK to EventStepDef; null for outcome effects
+  outcomeDefId Int?  // FK to EventOutcomeDef; null for step effects
+
+  // condition effect fields
+  conditionDefId Int?
+  remove         Boolean @default(false)
+
+  // item effect fields
+  itemId      Int?
+  itemTypeId  Int?
+  minQuantity Float @default(1.0)
+  maxQuantity Float @default(1.0)
+  isGain      Boolean @default(true)
+  targetScopeId Int?
+
+  effectType    EventEffectType   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+  stepDef       EventStepDef?     @relation(fields: [stepDefId],      references: [id], onDelete: Cascade)
+  outcomeDef    EventOutcomeDef?  @relation(fields: [outcomeDefId],   references: [id], onDelete: Cascade)
+  conditionDef  ConditionDef?     @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
+  item          Item?             @relation(fields: [itemId],     references: [id], onDelete: SetNull)
+  itemType      ItemType?         @relation(fields: [itemTypeId], references: [id], onDelete: SetNull)
+  targetScope   EventParticipantScope? @relation(fields: [targetScopeId], references: [id], onDelete: Restrict)
+
+  @@index([effectTypeId])
+  @@index([stepDefId])
+  @@index([outcomeDefId])
+  @@index([conditionDefId])
+  @@index([itemId])
+  @@index([itemTypeId])
+  @@index([targetScopeId])
+}
+
+// ============================================================
+// EVENTS — CHOICES AND OUTCOMES
+// ============================================================
+
+// A choice option presented during a "choice" step. The patrol leader selects one.
+// If statId or skillDefId is set, a check is rolled after the choice is made.
+// checkMode determines how the roll is computed across participants:
+//   "individual"        — each cat rolls independently; each may get a different outcome
+//   "group_average"     — single roll using the average stat/skill across all participants
+//   "leader_designates" — leader names one cat to roll on behalf of the group
+model EventChoiceDef {
+  id          Int     @id @default(autoincrement())
+  stepDefId   Int
+  label       String  @db.VarChar(200)
+  description String? @db.VarChar(1000)
+
+  // Optional skill/stat check made after this choice is selected
+  statId      Int?
+  skillDefId  Int?
+  difficulty  Int?
+  checkModeId Int?  // null = no check; FK to EventCheckMode
+
+  stepDef   EventStepDef    @relation(fields: [stepDefId],   references: [id], onDelete: Cascade)
+  stat      Stat?           @relation(fields: [statId],      references: [id], onDelete: Restrict)
+  skill     SkillDef?       @relation(fields: [skillDefId],  references: [id], onDelete: Restrict)
+  checkMode EventCheckMode? @relation(fields: [checkModeId], references: [id], onDelete: Restrict)
+
+  outcomes        EventOutcomeDef[]
+  defaultForSteps EventStepDef[]    @relation("StepDefaultChoice")
+
+  @@index([stepDefId])
+  @@index([checkModeId])
+}
+
+// A possible outcome for a choice — selected by weighted random roll (modified by skill check result).
+// effectScope: "all_participants" | "random_participant" | "leader"
+// nextStepId: null = event ends after this outcome
+// endsAction: true = the linked ActionInstance is immediately marked interrupted
+model EventOutcomeDef {
+  id          Int    @id @default(autoincrement())
+  choiceDefId Int
+  name        String @db.VarChar(200)
+  description String @db.VarChar(2000)
+
+  weight        Float   @default(1.0)
+  effectScopeId Int
+  endsAction    Boolean @default(false)
+  nextStepId    Int?
+
+  choiceDef   EventChoiceDef   @relation(fields: [choiceDefId],   references: [id], onDelete: Cascade)
+  nextStep    EventStepDef?    @relation("OutcomeNextStep", fields: [nextStepId], references: [id], onDelete: Restrict)
+  effectScope EventParticipantScope @relation(fields: [effectScopeId], references: [id], onDelete: Restrict)
+
+  effects EventEffect[]
+
+  @@index([choiceDefId])
+  @@index([effectScopeId])
+  @@index([nextStepId])
+}
+
+// ============================================================
+// EVENTS — ACTIVE INSTANCES
+// ============================================================
+
+// A running or resolved event chain instance.
+//
+// status:
+//   "active"    — chain is progressing; currentStepId is set
+//   "completed" — all steps resolved naturally
+//   "expired"   — a choice step's time window elapsed with no default choice to fall back on
+//
+// currentStepId is the sole runtime state for the chain. History of which choices/outcomes
+// led here is derivable by traversing the step graph from the starter step.
+model ActiveEvent {
+  id         Int    @id @default(autoincrement())
+  eventDefId Int
+  guildId    String
+
+  groupId          Int?
+  actionInstanceId Int?  @unique
+
+  isActive      Boolean   @default(true)  // false = event has ended (completed or expired)
+  currentStepId Int?      // which EventStepDef the chain is currently on; null when event ends
+
+  startedAt   DateTime  @default(now()) @db.Timestamptz
+  completedAt DateTime? @db.Timestamptz
+  expiresAt   DateTime? @db.Timestamptz  // set when the current step has a response window
+
+  eventDef       EventDef        @relation(fields: [eventDefId],       references: [id], onDelete: Restrict)
+  currentStep    EventStepDef?   @relation(fields: [currentStepId],    references: [id], onDelete: SetNull)
+  group          Group?          @relation(fields: [groupId],          references: [id], onDelete: Cascade)
+  actionInstance ActionInstance? @relation(fields: [actionInstanceId], references: [id], onDelete: Cascade)
+
+  participants  ActiveEvent_Participant[]
+  activeCombats ActiveCombat[]
+
+  @@index([guildId])
+  @@index([eventDefId])
+  @@index([groupId])
+  @@index([currentStepId])
+}
+
+// A cat participating in an active event chain.
+model ActiveEvent_Participant {
+  id            Int    @id @default(autoincrement())
+  activeEventId Int
+  catId         Int
+  userId        String
+
+  isLeader Boolean  @default(false)
+  joinedAt DateTime @default(now()) @db.Timestamptz
+
+  activeEvent ActiveEvent @relation(fields: [activeEventId], references: [id], onDelete: Cascade)
+  cat         Entity      @relation(fields: [catId],         references: [id], onDelete: Cascade)
+
+  @@unique([activeEventId, userId])
+  @@unique([activeEventId, catId])
+  @@index([activeEventId])
+  @@index([catId])
+}
+
+// Binds an EventDef to one or more named Locations.
+// weightMod = 0.0: hard gate (event can only fire at this location)
+// weightMod > 0.0: weight boost when the action occurs at this location
+model EventDef_Location {
+  eventDefId Int
+  locationId Int
+  weightMod  Float @default(0.0)
+
+  eventDef EventDef  @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
+  location Location  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([eventDefId, locationId])
+  @@index([locationId])
+}
+
+// Per-group (or per-guild for global events) cooldown tracking.
+// groupId = null means guild-wide cooldown (guild derived from eventDef.guildId).
+model EventCooldown {
+  id         Int  @id @default(autoincrement())
+  eventDefId Int
+  groupId    Int?
+
+  lastEventAt DateTime @db.Timestamptz
+
+  eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
+
+  @@unique([eventDefId, groupId])
+  @@index([eventDefId])
+  @@index([groupId])
+}
+
+// ============================================================
+// NPC COMBAT
+// ============================================================
+
+// Defines a reusable NPC combat encounter that event combat steps can reference.
+// When an event chain reaches a "combat" step, an ActiveCombat is created from this definition.
+//
+// Two spawn modes — at least one must be used; both can be combined (e.g. a named boss + generic adds):
+//
+//   Species mode (speciesId + npcCount set):
+//     The spawner creates npcCount ephemeral Entity records of the given species, initialises
+//     their EntityStats from species defaults, equips them from SpeciesDefaultLoadout, and snapshots
+//     species.dropTableId onto each ActiveCombat_Participant.
+//
+//   Named entity mode (one or more CombatEncounterDef_NamedEntity rows):
+//     Specific pre-created NPC entities (e.g. hand-crafted bosses with custom stats, gear,
+//     and loot tables) participate directly. No ephemeral entity is created — named entities
+//     persist after combat.
+model CombatEncounterDef {
+  id      Int    @id @default(autoincrement())
+  guildId String @default("global") @db.VarChar(50)
+  name    String @db.VarChar(200)
+
+  // Species mode (optional)
+  speciesId Int?
+  npcCount  Int?
+
+  species       Species?                        @relation(fields: [speciesId], references: [id], onDelete: Restrict)
+  namedEntities CombatEncounterDef_NamedEntity[]
+  eventSteps    EventStepDef[]
+  activeCombats ActiveCombat[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([speciesId])
+}
+
+// Named NPC entities attached to a CombatEncounterDef.
+// Each row pins one pre-created entity to the encounter.
+model CombatEncounterDef_NamedEntity {
+  combatEncounterDefId Int
+  entityId             Int
+
+  encounterDef CombatEncounterDef @relation(fields: [combatEncounterDefId], references: [id], onDelete: Cascade)
+  entity       Entity             @relation(fields: [entityId],             references: [id], onDelete: Restrict)
+
+  @@id([combatEncounterDefId, entityId])
+  @@index([entityId])
+}
+
+// ============================================================
+// COMBAT SEED TABLES
+// ============================================================
+
+// Seed table: "spar" | "event" | "boss"
+model CombatInitiationType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  canResultInDeath Boolean @default(false)  // spar = false; event and boss can be fatal
+  isScripted       Boolean @default(false)  // boss = true; pre-defined encounter with specific enemies
+  allowsFleeing    Boolean @default(false)  // event and boss allow fleeing; spar does not
+  canSecondWind    Boolean @default(true)   // entity can enter second wind state at low HP
+
+  activeCombats ActiveCombat[]
+}
+
+// Seed table: "win" | "lose" | "draw" | "completed"
+// isVictory: triggers loot drops, positive morale, XP bonuses
+// isDefeat:  triggers retreat mechanics, morale penalty, injury consequences
+// isDraw:    neither side won; partial consequences applied
+// isExpired: combat ended without resolution (time/round limit, mutual retreat)
+model CombatOutcome {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  isVictory  Boolean @default(false)
+  isDefeat   Boolean @default(false)
+  isDraw     Boolean @default(false)
+  isExpired  Boolean @default(false)  // combat ended without resolution (time/round limit, mutual retreat)
+
+  activeCombats ActiveCombat[]
+}
+
+// Seed table: "damage_per_round" | "heal_per_round" | "hit_mod" | "damage_mod" | "stat_mod" | "action_denial" | "ac_mod"
+//             "advantage" | "disadvantage" | "guard" | "taunt" | "parry" | "absorb" | "dodge_stance"
+//             "counterattack" | "suppress" | "dispel" | "untargetable"
+// isPerRound:           fires actively each round rather than applying as a passive modifier
+// dealsDamage:          applies damage each round (bleed, burn, poison tick)
+// restoresHealth:       restores HP each round (regeneration)
+// modifiesRoll:         adds/subtracts from a roll result (hit_mod, damage_mod)
+// modifiesStat:         changes a base stat value while active
+// deniesActions:        prevents the entity from acting (stun, paralysis)
+// modifiesAC:           changes the AC value that attack rolls are checked against
+// grantsAdvantage:      roll twice, take higher
+// grantsDisadvantage:   roll twice, take lower
+// redirectsDamage:      incoming damage to a protected ally is rerouted to the effect-holder (guard)
+// forcesTargeting:      enemies must select the effect-holder as their target (taunt)
+// isReactive:           effect triggers on an incoming attack rather than on action use (parry, counterattack)
+// absorbsDamage:        creates a damage buffer that absorbs hits before HP is reduced (absorb)
+// grantsEvasion:        chance-based complete avoidance of an incoming attack (dodge_stance)
+// enablesCounterattack: triggers an automatic attack when the effect-holder is hit (counterattack)
+// suppressesReactive:   prevents the target's reactive effects (parry, counterattack) from firing (suppress)
+// removesEffects:       strips existing active effects from the target (dispel)
+// preventedAsTarget:    effect-holder cannot be selected as a target (untargetable)
+model CombatEffectType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  isPerRound           Boolean @default(false)
+  dealsDamage          Boolean @default(false)
+  restoresHealth       Boolean @default(false)
+  modifiesRoll         Boolean @default(false)
+  modifiesStat         Boolean @default(false)
+  deniesActions        Boolean @default(false)
+  modifiesAC           Boolean @default(false)
+  grantsAdvantage      Boolean @default(false)
+  grantsDisadvantage   Boolean @default(false)
+  redirectsDamage      Boolean @default(false)
+  forcesTargeting      Boolean @default(false)
+  isReactive           Boolean @default(false)
+  absorbsDamage        Boolean @default(false)
+  grantsEvasion        Boolean @default(false)
+  enablesCounterattack Boolean @default(false)
+  suppressesReactive   Boolean @default(false)
+  removesEffects       Boolean @default(false)
+  preventedAsTarget    Boolean @default(false)
+
+  combatEffects        ConditionDef_CombatEffect[]
+  profileBehaviors      ItemEquipmentProfile[]        @relation("ProfileBehaviorEffect")
+  activeBehaviorEffects ActiveCombat_BehaviorEffect[] @relation("ActiveBehaviorEffectType")
+}
+
+// Seed table: "advantage" | "disadvantage"
+// Used by damage_mod combat effects to express roll-based modifiers instead of flat values.
+
+// ============================================================
+// COMBAT ACTION CATEGORIES (seed data)
+// ============================================================
+
+// Pre-populated categories that control turn economy.
+// Each entity may use one action per category per turn.
+// Seeded: "Main Action", "Bonus Action" — extensible by adding new rows.
+model CombatActionCategory {
+  id          Int    @id @default(autoincrement())
+  name        String @unique @db.VarChar(100)
+  description String? @db.VarChar(500)
+
+  actionsAllowedPerRound Int @default(1)
+
+  equipmentProfiles   ItemEquipmentProfile[]
+  combatActionRecords ActiveCombat_Action[]
+}
+
+// Seed table: "lowest_health" | "highest_health" | "lowest_strength" | "random"
+// Used by SpeciesCombatBehavior to define how an NPC picks targets offensively and for support.
+model CombatTargetStrategy {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  offensiveUsers SpeciesCombatBehavior[] @relation("OffensiveTargetStrategy")
+  supportUsers   SpeciesCombatBehavior[] @relation("SupportTargetStrategy")
+}
+
+// ============================================================
+// DAMAGE TYPES
+// ============================================================
+
+// Damage type seed table — covers both physical and elemental categories.
+// Physical: blunt, slashing, piercing
+// Global seed: Physical | Magical | True
+// Physical: reduced by physical armor/defense
+// Magical:  bypasses physical armor; checked against magical resistance
+// True:     bypasses all defenses; cannot be resisted or immuned
+model DamageCategory {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  damageTypes DamageType[]
+}
+
+// Guild-extensible — guildId = "global" for base types; guilds may add their own.
+// categoryId drives engine defense resolution; name is the display label.
+// Resistance/immunity to a damage type is modelled via ConditionDef_DamageModifier on inherentTrait conditions.
+model DamageType {
+  id       Int    @id @default(autoincrement())
+  guildId  String @default("global") @db.VarChar(50)
+  name     String @db.VarChar(50)
+  categoryId Int
+
+  category DamageCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  equipmentPrimary   ItemEquipmentProfile[]      @relation("EquipmentDamageType")
+  equipmentElemental ItemEquipmentProfile[]      @relation("EquipmentElementalDamageType")
+  conditionModifiers ConditionDef_DamageModifier[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+  @@index([categoryId])
+}
+
+// Buff, debuff, or heal effects applied by an ItemAction.
+// One action can apply multiple effects (e.g. -2 Strength AND disadvantage on damage rolls).
+//
+// effectType = "stat_mod":
+//   flatModifier applied to statId rolls for durationRounds (negative = debuff, positive = buff)
+//
+// effectType = "damage_mod":
+//   modType "advantage"     — reroll damage, take higher result
+//   modType "disadvantage"  — reroll damage, take lower result
+//   modType "percent_cut"   — multiply damage by (1 - modValue), then floor
+//   modType "percent_bonus" — multiply damage by (1 + modValue), then floor
+//
+// effectType = "heal":
+//   restores healAmount HP to the target immediately; durationRounds is ignored
+//
+// effectType = "hit_bonus":
+//   adds flatModifier (or skill-derived value) to all hit rolls for durationRounds
+//
+// Conditions applied by an equipment profile action — one action can apply multiple conditions.
+// For attacks: conditions are applied on a successful hit.
+// For buffs/debuffs: conditions are applied when the action resolves (no hit roll needed).
+//
+// combatInstancedOnly: when true the created EntityCondition is removed at combat end.
+//   Override for this specific action; the ConditionDef itself has no such flag.
+// roundDuration: how many rounds the condition lasts; null = indefinite (or until combat end if combatInstancedOnly).
+//
+// Skill-derived modifier — when sourceSkillId is set, the app computes EntityCondition.resolvedFlatModifier
+//   at application time from the actor's skill bonus, capped by maxBonusBase (non-proficient) or
+//   maxBonusProficient (isProficient = true). ConditionDef_CombatEffect then uses that value when its
+//   own flatModifier is null.
+model ItemEquipmentProfile_Condition {
+  id                 Int @id @default(autoincrement())
+  equipmentProfileId Int
+  conditionDefId     Int
+
+  onEquip             Boolean @default(false)   // true = condition applied while equipped; false = applied when action fires
+  appliesTo           String  @default("target") // "target" = entity the action targeted; "self" = entity using the action
+  removes             Boolean @default(false)   // true = action removes this condition rather than applying it
+                                                // applicationDC becomes the removal DC; linkedConditionId cascade fires on success
+  applicationDC       Int     @default(1)      // minimum d20 roll to apply/remove on action fire; ignored when onEquip = true
+  combatInstancedOnly Boolean @default(false)   // true = condition removed at combat end; ignored when onEquip = true
+  roundDuration       Int?    // null = indefinite; ignored when onEquip = true (lasts while equipped)
+
+  // Skill-derived modifier (e.g. Rallying Cry uses Leadership bonus)
+  sourceSkillId      Int?
+  maxBonusBase       Int?  // cap when Entity_Skill.isProficient = false
+  maxBonusProficient Int?  // cap when Entity_Skill.isProficient = true
+
+  // Linked profile condition — when both rows are created as EntityConditions, the app links them
+  // via EntityCondition.linkedConditionId (e.g. "Grappling" on self linked to "Grappled" on target)
+  linkedProfileConditionId Int?
+
+  equipmentProfile        ItemEquipmentProfile           @relation(fields: [equipmentProfileId],       references: [id], onDelete: Cascade)
+  conditionDef            ConditionDef                   @relation(fields: [conditionDefId],            references: [id], onDelete: Cascade)
+  sourceSkill             SkillDef?                      @relation(fields: [sourceSkillId],             references: [id], onDelete: SetNull)
+  linkedProfileCondition  ItemEquipmentProfile_Condition? @relation("LinkedProfileConditions",          fields: [linkedProfileConditionId], references: [id], onDelete: SetNull)
+  linkedByProfileCondition ItemEquipmentProfile_Condition[] @relation("LinkedProfileConditions")
+
+  @@unique([equipmentProfileId, conditionDefId, appliesTo])
+  @@index([equipmentProfileId])
+  @@index([conditionDefId])
+  @@index([sourceSkillId])
+  @@index([linkedProfileConditionId])
+}
+
+// An item that must be present (or is consumed) when this equipment profile action is used.
+// isConsumed = false → item must exist in the entity's inventory but is not removed (focus item, totem, etc.)
+// isConsumed = true  → one unit of the item is deducted from inventory on use
+model ItemEquipmentProfile_RequiredItem {
+  equipmentProfileId Int
+  requiredItemId     Int
+  isConsumed         Boolean @default(false)
+  quantity           Float   @default(1.0)   // units required / consumed per use
+
+  equipmentProfile ItemEquipmentProfile @relation(fields: [equipmentProfileId], references: [id], onDelete: Cascade)
+  requiredItem     Item                 @relation("ProfileRequiredItem", fields: [requiredItemId], references: [id], onDelete: Cascade)
+
+  @@id([equipmentProfileId, requiredItemId])
+  @@index([requiredItemId])
+}
+
+// AI combat behaviour profile for a species. One-to-one with Species.
+// Used by isAiControlled participants; ignored for player-controlled entities.
+// All species should have this seeded so NPC cats, foxes, badgers, etc. all have defined behaviour out of the box.
+//
+// Action category weights — normalised into a probability distribution each turn to pick which type of action to use.
+//   e.g. attackWeight 2.0, healWeight 1.0 → 67% chance to attack, 33% chance to heal (ignoring zero-weight categories).
+//   A category is only eligible if the species has at least one equipped item with a combat action of that actionType.
+//
+// Target strategies — FK to CombatTargetStrategy seed table ("lowest_health" | "highest_health" | "lowest_strength" | "random")
+//   offensiveTargetStrategyId: used when choosing a target for attacks and debuffs.
+//   supportTargetStrategyId:   used when choosing a target for buffs and heals.
+//   strategyWeight: probability of following the named strategy; (1 - strategyWeight) = random pick.
+//   One strategyWeight covers both strategies — species are assumed to be consistently decisive or erratic.
+model SpeciesCombatBehavior {
+  speciesId Int @id
+
+  // Outer action-category weights
+  attackWeight Float @default(1.0)
+  buffWeight   Float @default(0.5)
+  debuffWeight Float @default(0.5)
+  healWeight   Float @default(0.3)
+
+  // Target selection
+  offensiveTargetStrategyId Int  // attacks + debuffs
+  supportTargetStrategyId   Int  // buffs + heals
+  strategyWeight            Float @default(0.8)  // probability of following the strategy; remainder = random
+
+  species                   Species              @relation(fields: [speciesId],                   references: [id], onDelete: Cascade)
+  offensiveTargetStrategy   CombatTargetStrategy @relation("OffensiveTargetStrategy", fields: [offensiveTargetStrategyId], references: [id], onDelete: Restrict)
+  supportTargetStrategy     CombatTargetStrategy @relation("SupportTargetStrategy",   fields: [supportTargetStrategyId],   references: [id], onDelete: Restrict)
+
+  @@index([offensiveTargetStrategyId])
+  @@index([supportTargetStrategyId])
+}
+
+// Default item loadout applied to all entities of this species at generation time (players and NPCs alike).
+// autoEquip: true = item is equipped immediately (StoredItem.isEquipped = true); false = placed in storage only.
+// quantity: how many of the item to give (e.g. 3 charges of a healing herb).
+// aiWeight: relative probability weight for NPC AI action selection when this item's combat actions are
+//           considered. Ignored for player-controlled entities. Tune per species to shape how often an
+//           NPC uses one biological trait over another (e.g. claws preferred 2:1 over bite).
+model SpeciesDefaultLoadout {
+  id        Int @id @default(autoincrement())
+  speciesId Int
+  itemId    Int
+
+  quantity  Int     @default(1)
+  autoEquip Boolean @default(true)
+  aiWeight  Float   @default(1.0)
+
+  species Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  item    Item    @relation(fields: [itemId],    references: [id], onDelete: Cascade)
+
+  @@unique([speciesId, itemId])
+  @@index([speciesId])
+  @@index([itemId])
+}
+
+// ============================================================
+// COMBAT — ACTIVE INSTANCES
+// ============================================================
+
+// A live combat encounter. Spawned by event chains (combat steps), /spar, or admin boss fights.
+// When spawned by an event chain, activeEventId links back to the originating ActiveEvent.
+// On completion, the event system reads winningAllyGroupId to determine which participants "won"
+// and advances the chain to winStepId or loseStepId accordingly.
+//
+// initiationType: "spar" | "event" | "patrol" | "boss"
+//   "spar"    — training fight; ItemAction.allowedInSpar = false actions are suppressed
+//   "event"   — spawned from an event chain combat step; no patrol leader required
+//   "patrol"  — spawned during a patrol or hunt; requiresPatrolLeader = true
+//   "boss"    — admin-initiated boss fight
+//
+// requiresPatrolLeader: when true, exactly one participant must have isPatrolLeader = true;
+//   ItemAction.requiresPatrolLeader actions are restricted to that participant.
+//
+// currentTurnOrder: the turnOrder value of the participant currently taking their turn.
+//   Participants and NPC entities each have a unique turnOrder set at combat start.
+//
+// outcome: null = ongoing; "completed" = one ally group remains; "draw" = all groups eliminated simultaneously.
+// winningAllyGroupId: the allyGroupId of the surviving group; null if draw or ongoing.
+model ActiveCombat {
+  id                   Int     @id @default(autoincrement())
+  guildId              String
+  combatEncounterDefId Int?    // null for standalone (spar/admin/patrol) combats not tied to a def
+
+  // Link back to the event chain that spawned this combat; null for standalone combats
+  activeEventId Int?
+
+  initiationTypeId     Int
+  requiresPatrolLeader Boolean  @default(false)
+  isActive             Boolean  @default(true)  // false = combat has ended
+  currentRound         Int      @default(1)
+  currentTurnOrder     Int      @default(1)  // matches turnOrder on the participant whose turn it currently is
+  outcomeId            Int?     // null = ongoing
+  winningAllyGroupId   Int?     // allyGroupId of the surviving group; null if draw or ongoing
+
+  startedAt   DateTime  @default(now()) @db.Timestamptz
+  completedAt DateTime? @db.Timestamptz
+
+  combatEncounterDef CombatEncounterDef?  @relation(fields: [combatEncounterDefId], references: [id], onDelete: SetNull)
+  activeEvent        ActiveEvent?         @relation(fields: [activeEventId],        references: [id], onDelete: Cascade)
+  initiationType     CombatInitiationType @relation(fields: [initiationTypeId],     references: [id], onDelete: Restrict)
+  outcome            CombatOutcome?       @relation(fields: [outcomeId],            references: [id], onDelete: Restrict)
+
+  participants      ActiveCombat_Participant[]
+  actions           ActiveCombat_Action[]
+  behaviorEffects   ActiveCombat_BehaviorEffect[]
+  entityConditions  EntityCondition[]
+
+  @@index([guildId])
+  @@index([activeEventId])
+  @@index([combatEncounterDefId])
+  @@index([initiationTypeId])
+  @@index([outcomeId])
+}
+
+// Per-entity combat state for an active combat encounter.
+// Covers all participant types: player cats, side characters, and NPC entities (entityType = "npc").
+//
+// allyGroupId: participants sharing this value are allies; different values = enemies.
+//   Combat ends when only one distinct allyGroupId remains among non-fled, non-defeated participants.
+// turnOrder: unique position in initiative order within this combat (1 = acts first).
+//   Resolved at combat start (initiative ties broken app-side), then persisted.
+//
+// isAiControlled: true for NPC entity types; false for player-controlled entities.
+//   When true, action selection and targeting are driven by entity.species.combatBehavior — read live, no snapshot.
+//
+// dropTableId: snapshotted from species.dropTableId at spawn time; null for player-controlled entities.
+//   Rolled when this participant is defeated to determine loot drops.
+//
+// isPatrolLeader: true for the designated leader when ActiveCombat.requiresPatrolLeader = true.
+//   At most one participant per combat may have this set.
+//
+// maxHp / currentHp: snapshot at combat start; currentHp synced back to EntityStats on combat end.
+// inSecondWind: true when the entity has triggered second wind (hit 0 HP and chosen to recover).
+//   At combat end: if inSecondWind = true and currentHp < 50% of maxHp, a second wind consequence
+//   condition (ConditionDef.isSecondWindConsequence = true) is rolled and applied.
+//   NPC entities never trigger second wind (isAiControlled = true entities are simply defeated at 0 HP).
+// hasFled: entity chose to flee; removed from turn order, earns no exp or rep.
+// isDefeated: entity eliminated (declined second wind, hit 0 HP while inSecondWind, or NPC at 0 HP).
+// Guard and taunt state are not cached here — query ActiveCombat_BehaviorEffect directly:
+//   guard: WHERE behaviorKey = "guard" AND linkedParticipantId = <this participant>
+//   taunt: WHERE behaviorKey = "taunt" AND affectedParticipantId = <this participant>
+model ActiveCombat_Participant {
+  id             Int  @id @default(autoincrement())
+  activeCombatId Int
+  entityId       Int
+
+  allyGroupId    Int     // same value = ally; different value = enemy
+  turnOrder      Int     // unique within this combat; 1 = acts first
+  isPatrolLeader Boolean @default(false)
+
+  isAiControlled Boolean @default(false)
+  // AI targeting behaviour is read at decision time from entity.species.combatBehavior — no snapshot needed.
+
+  dropTableId Int?  // null for player entities; snapshotted from species.dropTableId at spawn time
+
+  initiativeRoll Int
+  maxHp          Int
+  currentHp      Int
+  baseAc         Int
+  inSecondWind   Boolean @default(false)
+  hasFled        Boolean @default(false)
+  isDefeated     Boolean @default(false)
+
+  activeCombat    ActiveCombat              @relation(fields: [activeCombatId], references: [id], onDelete: Cascade)
+  entity          Entity                    @relation(fields: [entityId],       references: [id], onDelete: Cascade)
+  dropTable       DropTable?                @relation(fields: [dropTableId],    references: [id], onDelete: SetNull)
+  actionCooldowns ActiveCombat_Participant_ActionCooldown[]
+  behaviorEffects ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectTarget")
+  linkedBehaviors ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectLinked")
+
+  @@unique([activeCombatId, entityId])
+  @@unique([activeCombatId, turnOrder])
+  @@index([activeCombatId])
+  @@index([dropTableId])
+}
+
+// Per-action cooldown state for a combat participant.
+// A row exists only while the action is on cooldown; deleted when roundsRemaining reaches 0.
+model ActiveCombat_Participant_ActionCooldown {
+  id                 Int @id @default(autoincrement())
+  participantId      Int
+  equipmentProfileId Int
+
+  roundsRemaining Int
+
+  participant      ActiveCombat_Participant @relation(fields: [participantId],      references: [id], onDelete: Cascade)
+  equipmentProfile ItemEquipmentProfile     @relation(fields: [equipmentProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([participantId, equipmentProfileId])
+  @@index([participantId])
+}
+
+// Persistent behavioral effects lasting one or more rounds (guard, taunt, etc.).
+// At round start: decrement roundsRemaining and delete rows that reach 0.
+//
+// behaviorKey: "guard" | "taunt" | extensible
+// Directional semantics:
+//   guard:   affectedParticipantId = the guarding entity;  linkedParticipantId = the guarded participant
+//   taunt:   affectedParticipantId = the taunted entity;   linkedParticipantId = the taunting participant
+//   parry:   affectedParticipantId = the parrying entity;  linkedParticipantId = null
+//   absorb:  affectedParticipantId = the absorbing entity; linkedParticipantId = null
+model ActiveCombat_BehaviorEffect {
+  id             Int @id @default(autoincrement())
+  activeCombatId    Int
+  effectTypeId      Int
+
+  affectedParticipantId Int
+  linkedParticipantId   Int?
+
+  roundsRemaining Int
+
+  activeCombat        ActiveCombat              @relation(fields: [activeCombatId],    references: [id], onDelete: Cascade)
+  effectType          CombatEffectType          @relation("ActiveBehaviorEffectType",  fields: [effectTypeId],           references: [id], onDelete: Restrict)
+  affectedParticipant ActiveCombat_Participant  @relation("BehaviorEffectTarget",      fields: [affectedParticipantId],  references: [id], onDelete: Cascade)
+  linkedParticipant   ActiveCombat_Participant? @relation("BehaviorEffectLinked",       fields: [linkedParticipantId],    references: [id], onDelete: Cascade)
+
+  @@unique([affectedParticipantId, effectTypeId])
+  @@index([activeCombatId])
+  @@index([effectTypeId])
+  @@index([affectedParticipantId])
+  @@index([linkedParticipantId])
+}
+
+// One action taken during a combat turn — stored for Discord message reconstruction.
+// All actors and targets are entities (player cats, side characters, or NPC entities).
+model ActiveCombat_Action {
+  id             Int @id @default(autoincrement())
+  activeCombatId Int
+  roundNumber    Int
+  turnIndex      Int  // position within the round (for ordering)
+
+  actorEntityId      Int
+  actionCategoryId   Int
+  equipmentProfileId Int
+
+  targetEntityId Int?  // null for self-targeted or area actions resolved entirely app-side
+
+  hitRoll        Int?
+  hitModifier    Int?
+  hit            Boolean?
+  damageRoll     Int?
+  damageModifier Int?
+  damageDealt    Int?
+  healDealt      Int?
+
+  secondWindTriggered Boolean  @default(false)
+
+  occurredAt DateTime @default(now()) @db.Timestamptz
+
+  activeCombat     ActiveCombat         @relation(fields: [activeCombatId],     references: [id], onDelete: Cascade)
+  actionCategory   CombatActionCategory @relation(fields: [actionCategoryId],   references: [id], onDelete: Restrict)
+  equipmentProfile ItemEquipmentProfile @relation(fields: [equipmentProfileId], references: [id], onDelete: Restrict)
+  actorEntity      Entity               @relation("CombatActionActor",  fields: [actorEntityId],  references: [id], onDelete: Cascade)
+  targetEntity     Entity?              @relation("CombatActionTarget", fields: [targetEntityId], references: [id], onDelete: SetNull)
+  appliedConditions EntityCondition[]
+
+  @@unique([activeCombatId, roundNumber, turnIndex])
+  @@index([activeCombatId, roundNumber])
+  @@index([actionCategoryId])
+  @@index([equipmentProfileId])
+  @@index([actorEntityId])
+  @@index([targetEntityId])
+}
+
+// ============================================================
+// MEDICINE CAT ACTIVITY LOGS
+// ============================================================
+
+// One row per examination. A medicine cat (medicEntityId) may examine a
+// patient (patientEntityId) at most once per calendar day — enforced at
+// the application layer. The highest rollResult across all examiners for
+// a given patient on a given day feeds into EntityCondition.discoveryLevel.
+model EntityInspectionLog {
+  id              Int      @id @default(autoincrement())
+  patientEntityId Int
+  medicEntityId   Int
+  inspectedAt     DateTime @default(now()) @db.Timestamptz
+  rollResult      Int      // Medicine/Perception skill roll; determines which symptoms are revealed
+
+  patient Entity @relation("InspectionPatient", fields: [patientEntityId], references: [id], onDelete: Cascade)
+  medic   Entity @relation("InspectionMedic",   fields: [medicEntityId],   references: [id], onDelete: Cascade)
+
+  @@index([patientEntityId])
+  @@index([medicEntityId])
+}
+
+// One row per treatment. A given condition (entityConditionId) may be
+// treated at most once per calendar day — enforced at the application layer.
+// progressionChange is the amount subtracted from EntityCondition.progressionValue
+// that session; stored for history and auditing.
+model EntityTreatmentLog {
+  id                Int      @id @default(autoincrement())
+  entityConditionId Int
+  medicEntityId     Int
+  itemId            Int?     // null only if non-item treatment (e.g. enforced rest); normally required
+  treatedAt         DateTime @default(now()) @db.Timestamptz
+  progressionChange Float    // amount subtracted from progressionValue (positive = reduction)
+
+  entityCondition EntityCondition @relation(fields: [entityConditionId], references: [id], onDelete: Cascade)
+  medic           Entity          @relation("TreatmentMedic", fields: [medicEntityId], references: [id], onDelete: Cascade)
+  item            Item?           @relation(fields: [itemId],            references: [id], onDelete: SetNull)
+
+  @@index([entityConditionId])
+  @@index([medicEntityId])
+  @@index([itemId])
+}
+
+// ============================================================
+// AUTH
+// ============================================================
+
+// Discord users who have logged in via the website
+model User {
+  id            String         @id @default(cuid())
+  discordId     String         @unique
+  username      String
+  avatar        String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  refreshTokens RefreshToken[]
+
+  @@index([discordId])
+}
+
+// Refresh tokens for website users (short-lived access tokens + rotated refresh tokens)
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique  // stored as bcrypt hash — never the raw token
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Service clients (bot, worker, or any future machine-to-machine caller)
+model ServiceClient {
+  id           String   @id @default(cuid())
+  name         String   @unique  // e.g. "discord-bot", "worker"
+  clientId     String   @unique
+  secretHash   String              // bcrypt hash of the client secret
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([clientId])
+}
