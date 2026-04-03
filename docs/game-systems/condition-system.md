@@ -1,6 +1,6 @@
 CONDITION SYSTEM — DESIGN REFERENCE
 ====================================
-Last updated: 2026-03-30
+Last updated: 2026-04-03
 
 This file is the authoritative reference for how conditions work in EchoPaw.
 Read this before touching any condition seeding or condition-adjacent code.
@@ -52,9 +52,6 @@ LifeCycle
 Permanent
   - No rolls, no timers, no links. Stays forever.
   - Use for: broken leg, deafness, lost eye.
-
-Trait
-  - Like Permanent but represents a character trait, not a wound or illness.
 
 
 ─────────────────────────────────────────────
@@ -157,11 +154,18 @@ Reference caps (approved):
 5. LINKS
 ─────────────────────────────────────────────
 
-worsen   — fires when progression reaches cap. Transitions to a worse condition.
-recover  — fires when progression reaches 0. Transitions to a milder condition.
-spawn    — fires once when progression crosses spawnThreshold × cap. Creates a
-           new parallel condition on the entity (e.g. a wound spawning an infection).
-           The original condition continues — it is NOT replaced.
+block      — parent condition prevents the child from being applied while active.
+             e.g. Nursing blocks Pregnancy from being applied.
+recover    — fires when progression reaches 0. Replaces parent with child.
+             Transitions to a milder condition.
+worsen     — fires when progression reaches cap. Replaces parent with child.
+             Transitions to a worse condition.
+spawn      — fires once when progression crosses spawnThreshold × cap. Creates a
+             new parallel condition on the entity (e.g. a wound spawning an infection).
+             The original condition continues — it is NOT replaced.
+spreads_as — defines what condition is transmitted when this condition spreads via
+             contagion. e.g. GreenCough spreads_as WhiteCough (kits contract the
+             milder form). The contagion roll still uses the parent's contagionResistDC.
 
 Important: ANY condition with a worsen or spawn link MUST have progressionCap set,
 or the link trigger value is undefined and can never fire. This includes Timed

@@ -1,6 +1,6 @@
 CRAFTING SYSTEM — DESIGN REFERENCE
 ===================================
-Last updated: 2026-03-29 (per-entity discovery, minCraftingLevel, craftingXpReward, Compost interaction)
+Last updated: 2026-04-03
 
 This file is the authoritative reference for how the crafting and ingredient
 processing systems work in EchoPaw. Read this before writing recipe seeding
@@ -170,10 +170,17 @@ Recipe is the root table. One row per distinct crafting operation.
                         entity must have to attempt this recipe. Checked before
                         the skill roll — an entity below the minimum cannot
                         attempt the recipe at all.
-  craftingXpReward      XP granted to the entity on a successful craft.
-                        0 = no XP (default). Leaf drying and similar trivial
-                        recipes may grant a small amount; more complex recipes
-                        (berry drying, concoctions) grant more.
+  disciplineRewards     Recipe_DisciplineReward rows — one per discipline that
+                        this recipe should credit XP to on a successful craft.
+                        Any number of disciplines can be rewarded. Include the
+                        stat progression DisciplineDef row to grant stat point XP.
+                        Examples:
+                          Dry Yarrow   → Healing, Crafting, StatProgression
+                          Dry Meat     → Farming, StatProgression
+                          Forge Sword  → Crafting, StatProgression
+                          Brew Tea     → Healing, StatProgression
+                        The "Crafting Session" ActionType has no DisciplineReward
+                        rows of its own — all XP flows from the recipes executed.
 
 Discovery tracking:
   Entity_DiscoveredRecipe records which entities have discovered a recipe.
@@ -466,7 +473,33 @@ schema.
 
 
 ─────────────────────────────────────────────
-12. QUICK REFERENCE — WHICH TABLE FOR WHAT
+12. RELATIONSHIP TO OTHER SYSTEMS
+─────────────────────────────────────────────
+
+  Disciplines — Recipe_DisciplineReward defines which disciplines gain XP and
+                how much on a successful craft. The same recipe can reward any
+                combination: Heal, Craft, Farm, StatProgression, etc.
+                The "Crafting Session" ActionType carries no DisciplineReward
+                rows — all XP is recipe-driven. See discipline-system.md.
+
+  Actions     — The "Crafting Session" ActionType (systemType = "crafting") is
+                purely an energy cost and time gate. It triggers the crafting UI
+                on resolution. See action-system.md.
+
+  Items       — All recipe inputs and outputs are Item rows. Crafting does not
+                introduce a separate item model. See item-definitions.md.
+
+  Farming     — Compost recipes consume rotten/spoiled items and will feed into
+                soil quality when the farming system is built. See farming-system.md.
+
+  Conditions  — Crafted medicine items interact with the condition system via
+                ItemAction → ItemEffect / ItemConditionEffect. The crafting system
+                produces the items; the condition system applies them.
+                See condition-system.md.
+
+
+─────────────────────────────────────────────
+13. QUICK REFERENCE — WHICH TABLE FOR WHAT
 ─────────────────────────────────────────────
 
   "What unit does this ingredient use?"               → IngredientType.measurementTypeId → MeasurementType
@@ -476,7 +509,7 @@ schema.
   "How many times can I run this recipe at once?"     → Recipe.maxBatchSize (null = unlimited)
   "Has this entity discovered this recipe?"           → Entity_DiscoveredRecipe
   "What crafting level is required for this recipe?"  → Recipe.minCraftingLevel (null = none)
-  "How much XP does this recipe grant on success?"    → Recipe.craftingXpReward
+  "What XP does this recipe grant, and to which disciplines?" → Recipe_DisciplineReward
   "What does this slot accept?"                       → RecipeSlotOption (itemId or requiredTags)
   "Can I use an already-dried item here?"             → RecipeSlotOption_ExcludedTag (Dried tag excluded)
   "Is this slot a reusable tool?"                     → RecipeSlot.consumedOnUse = false

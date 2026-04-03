@@ -27,11 +27,9 @@ CREATE TABLE "GuildSettings" (
     "currentPatternId" INTEGER,
     "currentPatternStepId" INTEGER,
     "currentStepStartedAt" TIMESTAMPTZ,
-    "maxGroups" INTEGER NOT NULL DEFAULT 10,
+    "maxFactions" INTEGER NOT NULL DEFAULT 10,
     "maxRanks" INTEGER NOT NULL DEFAULT 100,
     "defaultDailyEnergy" INTEGER NOT NULL DEFAULT 100,
-    "expCap" INTEGER NOT NULL DEFAULT 300,
-    "filthCapPerCat" INTEGER NOT NULL DEFAULT 10,
     "doubleAgeMaxThreshold" INTEGER NOT NULL DEFAULT 0,
     "maxCombatRounds" INTEGER NOT NULL DEFAULT 50,
     "defaultProficiencyBonus" INTEGER NOT NULL DEFAULT 2,
@@ -80,6 +78,7 @@ CREATE TABLE "Season" (
 CREATE TABLE "WeatherState" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "isSevere" BOOLEAN NOT NULL DEFAULT false,
 
@@ -90,6 +89,7 @@ CREATE TABLE "WeatherState" (
 CREATE TABLE "EnvCondition" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
     "name" VARCHAR(100) NOT NULL,
 
     CONSTRAINT "EnvCondition_pkey" PRIMARY KEY ("id")
@@ -115,6 +115,7 @@ CREATE TABLE "WeatherState_EnvCondition" (
 CREATE TABLE "WeatherPattern" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "isSevere" BOOLEAN NOT NULL DEFAULT false,
     "cooldownDays" INTEGER NOT NULL DEFAULT 0,
@@ -178,16 +179,6 @@ CREATE TABLE "LocationStatus" (
 );
 
 -- CreateTable
-CREATE TABLE "GroupType" (
-    "id" SERIAL NOT NULL,
-    "name" VARCHAR(100) NOT NULL,
-    "isOrganized" BOOLEAN NOT NULL DEFAULT true,
-    "hasWorldSim" BOOLEAN NOT NULL DEFAULT false,
-
-    CONSTRAINT "GroupType_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "ItemType" (
     "id" SERIAL NOT NULL,
     "name" VARCHAR(100) NOT NULL,
@@ -215,8 +206,6 @@ CREATE TABLE "Gender" (
 CREATE TABLE "ConditionContext" (
     "id" SERIAL NOT NULL,
     "name" VARCHAR(50) NOT NULL,
-    "showInHealthPanel" BOOLEAN NOT NULL DEFAULT false,
-    "isTrait" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "ConditionContext_pkey" PRIMARY KEY ("id")
 );
@@ -305,8 +294,8 @@ CREATE TABLE "EntityType" (
 CREATE TABLE "Species" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
     "name" VARCHAR(100) NOT NULL,
-    "isBaseSpecies" BOOLEAN NOT NULL DEFAULT false,
     "isPlayerCreatable" BOOLEAN NOT NULL DEFAULT false,
     "initialStatMinimum" INTEGER NOT NULL DEFAULT 1,
     "initialStatMaximum" INTEGER NOT NULL DEFAULT 14,
@@ -340,20 +329,11 @@ CREATE TABLE "Species" (
     "baseAc" INTEGER NOT NULL DEFAULT 10,
     "hpDiceCount" INTEGER NOT NULL DEFAULT 2,
     "hpDiceSides" INTEGER NOT NULL DEFAULT 10,
-    "isPrey" BOOLEAN NOT NULL DEFAULT false,
-    "isPredator" BOOLEAN NOT NULL DEFAULT false,
     "combatRating" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    "combatXpReward" INTEGER NOT NULL DEFAULT 50,
     "dropTableId" INTEGER,
 
     CONSTRAINT "Species_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Species_DefaultCondition" (
-    "speciesId" INTEGER NOT NULL,
-    "conditionDefId" INTEGER NOT NULL,
-
-    CONSTRAINT "Species_DefaultCondition_pkey" PRIMARY KEY ("speciesId","conditionDefId")
 );
 
 -- CreateTable
@@ -399,7 +379,7 @@ CREATE TABLE "Entity" (
     "hydrationLevel" DOUBLE PRECISION NOT NULL DEFAULT 100.0,
     "sexId" INTEGER,
     "genderId" INTEGER,
-    "groupId" INTEGER,
+    "factionId" INTEGER,
     "rankId" INTEGER,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ NOT NULL,
@@ -410,7 +390,6 @@ CREATE TABLE "Entity" (
 -- CreateTable
 CREATE TABLE "EntityStats" (
     "entityId" INTEGER NOT NULL,
-    "exp" INTEGER NOT NULL DEFAULT 0,
     "skillPoints" INTEGER NOT NULL DEFAULT 0,
     "currentEnergy" INTEGER NOT NULL DEFAULT 0,
     "maxHp" INTEGER,
@@ -461,32 +440,197 @@ CREATE TABLE "EntityBio" (
 );
 
 -- CreateTable
-CREATE TABLE "SkillDef" (
+CREATE TABLE "ProficiencyDef" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "description" VARCHAR(500),
     "statId" INTEGER NOT NULL,
 
-    CONSTRAINT "SkillDef_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "ProficiencyDef_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "SkillDef_Species" (
-    "skillDefId" INTEGER NOT NULL,
-    "speciesId" INTEGER NOT NULL,
-
-    CONSTRAINT "SkillDef_Species_pkey" PRIMARY KEY ("skillDefId","speciesId")
-);
-
--- CreateTable
-CREATE TABLE "Entity_Skill" (
+CREATE TABLE "Entity_Proficiency" (
     "entityId" INTEGER NOT NULL,
-    "skillDefId" INTEGER NOT NULL,
+    "proficiencyDefId" INTEGER NOT NULL,
     "bonus" INTEGER NOT NULL DEFAULT 0,
     "isProficient" BOOLEAN NOT NULL DEFAULT false,
 
-    CONSTRAINT "Entity_Skill_pkey" PRIMARY KEY ("entityId","skillDefId")
+    CONSTRAINT "Entity_Proficiency_pkey" PRIMARY KEY ("entityId","proficiencyDefId")
+);
+
+-- CreateTable
+CREATE TABLE "DisciplineDef" (
+    "id" SERIAL NOT NULL,
+    "name" VARCHAR(100) NOT NULL,
+    "description" VARCHAR(500),
+    "baseXp" INTEGER NOT NULL DEFAULT 100,
+    "isStatProgression" BOOLEAN NOT NULL DEFAULT false,
+    "dailyXpCap" INTEGER,
+
+    CONSTRAINT "DisciplineDef_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Entity_Discipline" (
+    "entityId" INTEGER NOT NULL,
+    "disciplineId" INTEGER NOT NULL,
+    "level" INTEGER NOT NULL DEFAULT 0,
+    "currentXp" INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT "Entity_Discipline_pkey" PRIMARY KEY ("entityId","disciplineId")
+);
+
+-- CreateTable
+CREATE TABLE "SkillTreeNode" (
+    "id" SERIAL NOT NULL,
+    "guildId" VARCHAR(50) NOT NULL,
+    "disciplineDefId" INTEGER NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+    "levelRequired" INTEGER NOT NULL,
+    "statPointCost" INTEGER NOT NULL DEFAULT 0,
+    "isAutoGranted" BOOLEAN NOT NULL DEFAULT false,
+
+    CONSTRAINT "SkillTreeNode_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SkillTreeNode_Prerequisite" (
+    "nodeId" INTEGER NOT NULL,
+    "prerequisiteNodeId" INTEGER NOT NULL,
+
+    CONSTRAINT "SkillTreeNode_Prerequisite_pkey" PRIMARY KEY ("nodeId","prerequisiteNodeId")
+);
+
+-- CreateTable
+CREATE TABLE "Entity_SkillTreeNode" (
+    "id" SERIAL NOT NULL,
+    "entityId" INTEGER NOT NULL,
+    "nodeId" INTEGER NOT NULL,
+
+    CONSTRAINT "Entity_SkillTreeNode_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "AbilityDef" (
+    "id" SERIAL NOT NULL,
+    "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
+    "name" VARCHAR(200) NOT NULL,
+    "description" VARCHAR(1000),
+
+    CONSTRAINT "AbilityDef_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Entity_Ability" (
+    "id" SERIAL NOT NULL,
+    "entityId" INTEGER NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+    "sourceType" VARCHAR(50) NOT NULL,
+    "sourceId" INTEGER,
+
+    CONSTRAINT "Entity_Ability_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Species_DefaultAbility" (
+    "speciesId" INTEGER NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+
+    CONSTRAINT "Species_DefaultAbility_pkey" PRIMARY KEY ("speciesId","abilityDefId")
+);
+
+-- CreateTable
+CREATE TABLE "Ability_StatModifier" (
+    "id" SERIAL NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+    "statId" INTEGER NOT NULL,
+    "value" INTEGER NOT NULL,
+    "context" VARCHAR(100),
+    "biomeId" INTEGER,
+    "weatherStateId" INTEGER,
+
+    CONSTRAINT "Ability_StatModifier_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Ability_ProficiencyModifier" (
+    "id" SERIAL NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+    "proficiencyDefId" INTEGER NOT NULL,
+    "value" INTEGER NOT NULL,
+    "hasAdvantage" BOOLEAN NOT NULL DEFAULT false,
+    "hasDisadvantage" BOOLEAN NOT NULL DEFAULT false,
+    "biomeId" INTEGER,
+    "weatherStateId" INTEGER,
+
+    CONSTRAINT "Ability_ProficiencyModifier_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Ability_MultiplierEffect" (
+    "id" SERIAL NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+    "targetType" VARCHAR(50) NOT NULL,
+    "targetId" INTEGER,
+    "multiplier" DOUBLE PRECISION NOT NULL,
+    "biomeId" INTEGER,
+    "weatherStateId" INTEGER,
+
+    CONSTRAINT "Ability_MultiplierEffect_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Ability_GrantedAction" (
+    "id" SERIAL NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+    "itemId" INTEGER NOT NULL,
+    "grantedToSource" BOOLEAN NOT NULL DEFAULT false,
+    "usesPerGrant" INTEGER,
+
+    CONSTRAINT "Ability_GrantedAction_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Ability_CombatBehavior" (
+    "id" SERIAL NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+    "perspective" VARCHAR(20) NOT NULL,
+    "behaviorTypeId" INTEGER NOT NULL,
+    "actionTypeId" INTEGER,
+    "triggerChance" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    "redirectTargetId" INTEGER,
+    "biasWeight" DOUBLE PRECISION,
+    "restrictActionTypeId" INTEGER,
+    "restrictIsBlock" BOOLEAN NOT NULL DEFAULT false,
+
+    CONSTRAINT "Ability_CombatBehavior_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Ability_ConditionResistance" (
+    "id" SERIAL NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+    "conditionDefId" INTEGER,
+    "conditionTypeId" INTEGER,
+    "resistDcBonus" INTEGER,
+    "isImmune" BOOLEAN NOT NULL DEFAULT false,
+
+    CONSTRAINT "Ability_ConditionResistance_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Ability_DamageModifier" (
+    "id" SERIAL NOT NULL,
+    "abilityDefId" INTEGER NOT NULL,
+    "damageTypeId" INTEGER NOT NULL,
+    "modifier" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    "isImmune" BOOLEAN NOT NULL DEFAULT false,
+
+    CONSTRAINT "Ability_DamageModifier_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -516,6 +660,7 @@ CREATE TABLE "EntityCondition" (
 CREATE TABLE "ConditionDef" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
     "name" VARCHAR(200) NOT NULL,
     "description" VARCHAR(1000),
     "conditionTypeId" INTEGER NOT NULL,
@@ -563,13 +708,13 @@ CREATE TABLE "ConditionDef_StatEffect" (
 );
 
 -- CreateTable
-CREATE TABLE "ConditionDef_SkillEffect" (
+CREATE TABLE "ConditionDef_ProficiencyEffect" (
     "conditionDefId" INTEGER NOT NULL,
-    "skillDefId" INTEGER NOT NULL,
+    "proficiencyDefId" INTEGER NOT NULL,
     "amount" INTEGER,
     "hasDisadvantage" BOOLEAN NOT NULL DEFAULT false,
 
-    CONSTRAINT "ConditionDef_SkillEffect_pkey" PRIMARY KEY ("conditionDefId","skillDefId")
+    CONSTRAINT "ConditionDef_ProficiencyEffect_pkey" PRIMARY KEY ("conditionDefId","proficiencyDefId")
 );
 
 -- CreateTable
@@ -595,13 +740,13 @@ CREATE TABLE "EnvCondition_StatModifier" (
 );
 
 -- CreateTable
-CREATE TABLE "EnvCondition_SkillModifier" (
+CREATE TABLE "EnvCondition_ProficiencyModifier" (
     "envConditionId" INTEGER NOT NULL,
-    "skillDefId" INTEGER NOT NULL,
+    "proficiencyDefId" INTEGER NOT NULL,
     "value" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     "hasDisadvantage" BOOLEAN NOT NULL DEFAULT false,
 
-    CONSTRAINT "EnvCondition_SkillModifier_pkey" PRIMARY KEY ("envConditionId","skillDefId")
+    CONSTRAINT "EnvCondition_ProficiencyModifier_pkey" PRIMARY KEY ("envConditionId","proficiencyDefId")
 );
 
 -- CreateTable
@@ -691,36 +836,36 @@ CREATE TABLE "EntityRelationship" (
 );
 
 -- CreateTable
-CREATE TABLE "GroupStandingType" (
+CREATE TABLE "FactionStandingType" (
     "id" SERIAL NOT NULL,
     "name" VARCHAR(50) NOT NULL,
 
-    CONSTRAINT "GroupStandingType_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "FactionStandingType_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "GroupStanding" (
-    "groupId" INTEGER NOT NULL,
-    "targetGroupId" INTEGER NOT NULL,
+CREATE TABLE "FactionStanding" (
+    "factionId" INTEGER NOT NULL,
+    "targetFactionId" INTEGER NOT NULL,
     "standingTypeId" INTEGER NOT NULL,
 
-    CONSTRAINT "GroupStanding_pkey" PRIMARY KEY ("groupId","targetGroupId")
+    CONSTRAINT "FactionStanding_pkey" PRIMARY KEY ("factionId","targetFactionId")
 );
 
 -- CreateTable
-CREATE TABLE "Group" (
+CREATE TABLE "Faction" (
     "id" SERIAL NOT NULL,
     "guildId" TEXT NOT NULL,
     "name" VARCHAR(200) NOT NULL,
     "description" VARCHAR(1000),
-    "groupTypeId" INTEGER NOT NULL,
+    "type" VARCHAR(100) NOT NULL,
     "filth" INTEGER NOT NULL DEFAULT 0,
     "lastEventAt" TIMESTAMPTZ,
     "hasWaterAccess" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ NOT NULL,
 
-    CONSTRAINT "Group_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "Faction_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -759,20 +904,20 @@ CREATE TABLE "Location" (
 );
 
 -- CreateTable
-CREATE TABLE "Location_Group" (
+CREATE TABLE "Location_Faction" (
     "locationId" INTEGER NOT NULL,
-    "groupId" INTEGER NOT NULL,
+    "factionId" INTEGER NOT NULL,
     "statusId" INTEGER NOT NULL,
 
-    CONSTRAINT "Location_Group_pkey" PRIMARY KEY ("locationId","groupId")
+    CONSTRAINT "Location_Faction_pkey" PRIMARY KEY ("locationId","factionId")
 );
 
 -- CreateTable
 CREATE TABLE "LocationBorder" (
     "locationId" INTEGER NOT NULL,
-    "borderingGroupId" INTEGER NOT NULL,
+    "borderingFactionId" INTEGER NOT NULL,
 
-    CONSTRAINT "LocationBorder_pkey" PRIMARY KEY ("locationId","borderingGroupId")
+    CONSTRAINT "LocationBorder_pkey" PRIMARY KEY ("locationId","borderingFactionId")
 );
 
 -- CreateTable
@@ -781,7 +926,7 @@ CREATE TABLE "Biome" (
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
     "name" VARCHAR(100) NOT NULL,
     "description" VARCHAR(500),
-    "color" CHAR(6),
+    "color" INTEGER,
     "dropTableId" INTEGER,
 
     CONSTRAINT "Biome_pkey" PRIMARY KEY ("id")
@@ -819,7 +964,7 @@ CREATE TABLE "Storage" (
     "id" SERIAL NOT NULL,
     "guildId" TEXT NOT NULL,
     "name" VARCHAR(200) NOT NULL,
-    "groupId" INTEGER,
+    "factionId" INTEGER,
     "entityId" INTEGER,
     "weightCapacity" DOUBLE PRECISION,
     "fluidCapacity" DOUBLE PRECISION,
@@ -1094,6 +1239,7 @@ CREATE TABLE "RecipeOutputMode" (
 CREATE TABLE "Recipe" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
     "name" VARCHAR(200) NOT NULL,
     "description" VARCHAR(1000),
     "craftingInteractionId" INTEGER NOT NULL,
@@ -1101,7 +1247,6 @@ CREATE TABLE "Recipe" (
     "craftingTimeMins" INTEGER,
     "maxBatchSize" INTEGER,
     "minCraftingLevel" INTEGER,
-    "craftingXpReward" INTEGER NOT NULL DEFAULT 0,
 
     CONSTRAINT "Recipe_pkey" PRIMARY KEY ("id")
 );
@@ -1113,6 +1258,15 @@ CREATE TABLE "Entity_DiscoveredRecipe" (
     "discoveredAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Entity_DiscoveredRecipe_pkey" PRIMARY KEY ("entityId","recipeId")
+);
+
+-- CreateTable
+CREATE TABLE "Recipe_DisciplineReward" (
+    "recipeId" INTEGER NOT NULL,
+    "disciplineId" INTEGER NOT NULL,
+    "xpAmount" INTEGER NOT NULL,
+
+    CONSTRAINT "Recipe_DisciplineReward_pkey" PRIMARY KEY ("recipeId","disciplineId")
 );
 
 -- CreateTable
@@ -1217,11 +1371,11 @@ CREATE TABLE "Rank" (
 );
 
 -- CreateTable
-CREATE TABLE "Rank_Group" (
+CREATE TABLE "Rank_Faction" (
     "rankId" INTEGER NOT NULL,
-    "groupId" INTEGER NOT NULL,
+    "factionId" INTEGER NOT NULL,
 
-    CONSTRAINT "Rank_Group_pkey" PRIMARY KEY ("rankId","groupId")
+    CONSTRAINT "Rank_Faction_pkey" PRIMARY KEY ("rankId","factionId")
 );
 
 -- CreateTable
@@ -1234,6 +1388,14 @@ CREATE TABLE "Rank_DefaultItem" (
 );
 
 -- CreateTable
+CREATE TABLE "ActionSystemType" (
+    "id" VARCHAR(50) NOT NULL,
+    "description" VARCHAR(500) NOT NULL,
+
+    CONSTRAINT "ActionSystemType_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "ActionType" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
@@ -1241,18 +1403,29 @@ CREATE TABLE "ActionType" (
     "displayName" VARCHAR(200) NOT NULL,
     "description" VARCHAR(1000),
     "energyCost" INTEGER NOT NULL DEFAULT 10,
+    "dailyLimit" INTEGER,
     "minCats" INTEGER NOT NULL DEFAULT 1,
     "maxCats" INTEGER,
     "durationMinutes" INTEGER,
-    "baseExpReward" INTEGER NOT NULL DEFAULT 0,
     "baseClanRepReward" INTEGER NOT NULL DEFAULT 0,
     "requiresCanMentor" BOOLEAN NOT NULL DEFAULT false,
     "allowApprenticesWithAdult" BOOLEAN NOT NULL DEFAULT false,
     "requiresCanLeadEvents" BOOLEAN NOT NULL DEFAULT false,
     "minAgeMoons" INTEGER,
+    "systemTypeId" VARCHAR(50),
     "isInteractive" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "ActionType_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ActionType_DisciplineReward" (
+    "actionTypeId" INTEGER NOT NULL,
+    "disciplineId" INTEGER NOT NULL,
+    "xpAmount" INTEGER NOT NULL,
+    "recipientScope" VARCHAR(30) NOT NULL DEFAULT 'all',
+
+    CONSTRAINT "ActionType_DisciplineReward_pkey" PRIMARY KEY ("actionTypeId","disciplineId","recipientScope")
 );
 
 -- CreateTable
@@ -1266,10 +1439,20 @@ CREATE TABLE "ActionType_DefaultItem" (
 );
 
 -- CreateTable
+CREATE TABLE "Entity_ActionUsage" (
+    "entityId" INTEGER NOT NULL,
+    "actionTypeId" INTEGER NOT NULL,
+    "date" DATE NOT NULL,
+    "usageCount" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "Entity_ActionUsage_pkey" PRIMARY KEY ("entityId","actionTypeId","date")
+);
+
+-- CreateTable
 CREATE TABLE "ActionInstance" (
     "id" SERIAL NOT NULL,
     "actionTypeId" INTEGER NOT NULL,
-    "groupId" INTEGER NOT NULL,
+    "factionId" INTEGER NOT NULL,
     "locationId" INTEGER,
     "leaderCatId" INTEGER,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
@@ -1284,10 +1467,19 @@ CREATE TABLE "ActionInstance_Entity" (
     "actionInstanceId" INTEGER NOT NULL,
     "catId" INTEGER NOT NULL,
     "energySpent" INTEGER NOT NULL DEFAULT 0,
-    "expEarned" INTEGER NOT NULL DEFAULT 0,
     "clanRepEarned" INTEGER NOT NULL DEFAULT 0,
 
     CONSTRAINT "ActionInstance_Entity_pkey" PRIMARY KEY ("actionInstanceId","catId")
+);
+
+-- CreateTable
+CREATE TABLE "ActionInstance_Entity_DisciplineXp" (
+    "actionInstanceId" INTEGER NOT NULL,
+    "catId" INTEGER NOT NULL,
+    "disciplineId" INTEGER NOT NULL,
+    "xpEarned" INTEGER NOT NULL,
+
+    CONSTRAINT "ActionInstance_Entity_DisciplineXp_pkey" PRIMARY KEY ("actionInstanceId","catId","disciplineId")
 );
 
 -- CreateTable
@@ -1346,6 +1538,7 @@ CREATE TABLE "EventCheckMode" (
 CREATE TABLE "EventDef" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
     "name" VARCHAR(200) NOT NULL,
     "description" VARCHAR(1000),
     "triggerTypeId" INTEGER NOT NULL,
@@ -1455,7 +1648,7 @@ CREATE TABLE "EventChoiceDef" (
     "label" VARCHAR(200) NOT NULL,
     "description" VARCHAR(1000),
     "statId" INTEGER,
-    "skillDefId" INTEGER,
+    "proficiencyDefId" INTEGER,
     "difficulty" INTEGER,
     "checkModeId" INTEGER,
 
@@ -1481,7 +1674,7 @@ CREATE TABLE "ActiveEvent" (
     "id" SERIAL NOT NULL,
     "eventDefId" INTEGER NOT NULL,
     "guildId" TEXT NOT NULL,
-    "groupId" INTEGER,
+    "factionId" INTEGER,
     "actionInstanceId" INTEGER,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "currentStepId" INTEGER,
@@ -1517,7 +1710,7 @@ CREATE TABLE "EventDef_Location" (
 CREATE TABLE "EventCooldown" (
     "id" SERIAL NOT NULL,
     "eventDefId" INTEGER NOT NULL,
-    "groupId" INTEGER,
+    "factionId" INTEGER,
     "lastEventAt" TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT "EventCooldown_pkey" PRIMARY KEY ("id")
@@ -1527,6 +1720,7 @@ CREATE TABLE "EventCooldown" (
 CREATE TABLE "CombatEncounterDef" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL DEFAULT 'global',
+    "codeName" VARCHAR(200) NOT NULL,
     "name" VARCHAR(200) NOT NULL,
     "speciesId" INTEGER,
     "npcCount" INTEGER,
@@ -1639,7 +1833,7 @@ CREATE TABLE "ItemEquipmentProfile_Condition" (
     "applicationDC" INTEGER NOT NULL DEFAULT 1,
     "combatInstancedOnly" BOOLEAN NOT NULL DEFAULT false,
     "roundDuration" INTEGER,
-    "sourceSkillId" INTEGER,
+    "sourceProficiencyId" INTEGER,
     "maxBonusBase" INTEGER,
     "maxBonusProficient" INTEGER,
     "linkedProfileConditionId" INTEGER,
@@ -1695,7 +1889,7 @@ CREATE TABLE "ActiveCombat" (
     "currentRound" INTEGER NOT NULL DEFAULT 1,
     "currentTurnOrder" INTEGER NOT NULL DEFAULT 1,
     "outcomeId" INTEGER,
-    "winningAllyGroupId" INTEGER,
+    "winningAllyFactionId" INTEGER,
     "startedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "completedAt" TIMESTAMPTZ,
 
@@ -1707,15 +1901,11 @@ CREATE TABLE "ActiveCombat_Participant" (
     "id" SERIAL NOT NULL,
     "activeCombatId" INTEGER NOT NULL,
     "entityId" INTEGER NOT NULL,
-    "allyGroupId" INTEGER NOT NULL,
+    "allyFactionId" INTEGER NOT NULL,
     "turnOrder" INTEGER NOT NULL,
     "isPatrolLeader" BOOLEAN NOT NULL DEFAULT false,
     "isAiControlled" BOOLEAN NOT NULL DEFAULT false,
     "dropTableId" INTEGER,
-    "initiativeRoll" INTEGER NOT NULL,
-    "maxHp" INTEGER NOT NULL,
-    "currentHp" INTEGER NOT NULL,
-    "baseAc" INTEGER NOT NULL,
     "inSecondWind" BOOLEAN NOT NULL DEFAULT false,
     "hasFled" BOOLEAN NOT NULL DEFAULT false,
     "isDefeated" BOOLEAN NOT NULL DEFAULT false,
@@ -1850,13 +2040,19 @@ CREATE UNIQUE INDEX "Season_name_key" ON "Season"("name");
 CREATE INDEX "WeatherState_guildId_idx" ON "WeatherState"("guildId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "WeatherState_guildId_name_key" ON "WeatherState"("guildId", "name");
+CREATE INDEX "WeatherState_guildId_name_idx" ON "WeatherState"("guildId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "WeatherState_guildId_codeName_key" ON "WeatherState"("guildId", "codeName");
 
 -- CreateIndex
 CREATE INDEX "EnvCondition_guildId_idx" ON "EnvCondition"("guildId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "EnvCondition_guildId_name_key" ON "EnvCondition"("guildId", "name");
+CREATE INDEX "EnvCondition_guildId_name_idx" ON "EnvCondition"("guildId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "EnvCondition_guildId_codeName_key" ON "EnvCondition"("guildId", "codeName");
 
 -- CreateIndex
 CREATE INDEX "Season_EnvCondition_envConditionId_idx" ON "Season_EnvCondition"("envConditionId");
@@ -1868,7 +2064,10 @@ CREATE INDEX "WeatherState_EnvCondition_envConditionId_idx" ON "WeatherState_Env
 CREATE INDEX "WeatherPattern_guildId_idx" ON "WeatherPattern"("guildId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "WeatherPattern_guildId_name_key" ON "WeatherPattern"("guildId", "name");
+CREATE INDEX "WeatherPattern_guildId_name_idx" ON "WeatherPattern"("guildId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "WeatherPattern_guildId_codeName_key" ON "WeatherPattern"("guildId", "codeName");
 
 -- CreateIndex
 CREATE INDEX "WeatherPatternStep_weatherStateId_idx" ON "WeatherPatternStep"("weatherStateId");
@@ -1893,9 +2092,6 @@ CREATE UNIQUE INDEX "ItemInteraction_name_key" ON "ItemInteraction"("name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "LocationStatus_name_key" ON "LocationStatus"("name");
-
--- CreateIndex
-CREATE UNIQUE INDEX "GroupType_name_key" ON "GroupType"("name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ItemType_name_key" ON "ItemType"("name");
@@ -1940,10 +2136,10 @@ CREATE UNIQUE INDEX "EntityType_name_key" ON "EntityType"("name");
 CREATE INDEX "Species_guildId_idx" ON "Species"("guildId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Species_guildId_name_key" ON "Species"("guildId", "name");
+CREATE INDEX "Species_guildId_name_idx" ON "Species"("guildId", "name");
 
 -- CreateIndex
-CREATE INDEX "Species_DefaultCondition_conditionDefId_idx" ON "Species_DefaultCondition"("conditionDefId");
+CREATE UNIQUE INDEX "Species_guildId_codeName_key" ON "Species"("guildId", "codeName");
 
 -- CreateIndex
 CREATE INDEX "Species_EquipmentLoadout_slotTypeId_idx" ON "Species_EquipmentLoadout"("slotTypeId");
@@ -1961,7 +2157,7 @@ CREATE UNIQUE INDEX "BodyPart_speciesId_name_key" ON "BodyPart"("speciesId", "na
 CREATE INDEX "Entity_guildId_userId_idx" ON "Entity"("guildId", "userId");
 
 -- CreateIndex
-CREATE INDEX "Entity_groupId_idx" ON "Entity"("groupId");
+CREATE INDEX "Entity_factionId_idx" ON "Entity"("factionId");
 
 -- CreateIndex
 CREATE INDEX "Entity_rankId_idx" ON "Entity"("rankId");
@@ -1988,22 +2184,94 @@ CREATE INDEX "EntityBehaviorCounter_counterKey_idx" ON "EntityBehaviorCounter"("
 CREATE INDEX "EntityImage_entityId_idx" ON "EntityImage"("entityId");
 
 -- CreateIndex
-CREATE INDEX "SkillDef_guildId_idx" ON "SkillDef"("guildId");
+CREATE INDEX "ProficiencyDef_guildId_idx" ON "ProficiencyDef"("guildId");
 
 -- CreateIndex
-CREATE INDEX "SkillDef_statId_idx" ON "SkillDef"("statId");
+CREATE INDEX "ProficiencyDef_guildId_name_idx" ON "ProficiencyDef"("guildId", "name");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "SkillDef_guildId_name_key" ON "SkillDef"("guildId", "name");
+CREATE INDEX "ProficiencyDef_statId_idx" ON "ProficiencyDef"("statId");
 
 -- CreateIndex
-CREATE INDEX "SkillDef_Species_skillDefId_idx" ON "SkillDef_Species"("skillDefId");
+CREATE UNIQUE INDEX "ProficiencyDef_guildId_codeName_key" ON "ProficiencyDef"("guildId", "codeName");
 
 -- CreateIndex
-CREATE INDEX "SkillDef_Species_speciesId_idx" ON "SkillDef_Species"("speciesId");
+CREATE INDEX "Entity_Proficiency_entityId_idx" ON "Entity_Proficiency"("entityId");
 
 -- CreateIndex
-CREATE INDEX "Entity_Skill_entityId_idx" ON "Entity_Skill"("entityId");
+CREATE UNIQUE INDEX "DisciplineDef_name_key" ON "DisciplineDef"("name");
+
+-- CreateIndex
+CREATE INDEX "Entity_Discipline_entityId_idx" ON "Entity_Discipline"("entityId");
+
+-- CreateIndex
+CREATE INDEX "SkillTreeNode_guildId_idx" ON "SkillTreeNode"("guildId");
+
+-- CreateIndex
+CREATE INDEX "SkillTreeNode_disciplineDefId_idx" ON "SkillTreeNode"("disciplineDefId");
+
+-- CreateIndex
+CREATE INDEX "SkillTreeNode_abilityDefId_idx" ON "SkillTreeNode"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Entity_SkillTreeNode_entityId_idx" ON "Entity_SkillTreeNode"("entityId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Entity_SkillTreeNode_entityId_nodeId_key" ON "Entity_SkillTreeNode"("entityId", "nodeId");
+
+-- CreateIndex
+CREATE INDEX "AbilityDef_guildId_idx" ON "AbilityDef"("guildId");
+
+-- CreateIndex
+CREATE INDEX "AbilityDef_guildId_name_idx" ON "AbilityDef"("guildId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AbilityDef_guildId_codeName_key" ON "AbilityDef"("guildId", "codeName");
+
+-- CreateIndex
+CREATE INDEX "Entity_Ability_entityId_idx" ON "Entity_Ability"("entityId");
+
+-- CreateIndex
+CREATE INDEX "Entity_Ability_abilityDefId_idx" ON "Entity_Ability"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Species_DefaultAbility_abilityDefId_idx" ON "Species_DefaultAbility"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Ability_StatModifier_abilityDefId_idx" ON "Ability_StatModifier"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Ability_StatModifier_statId_idx" ON "Ability_StatModifier"("statId");
+
+-- CreateIndex
+CREATE INDEX "Ability_ProficiencyModifier_abilityDefId_idx" ON "Ability_ProficiencyModifier"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Ability_ProficiencyModifier_proficiencyDefId_idx" ON "Ability_ProficiencyModifier"("proficiencyDefId");
+
+-- CreateIndex
+CREATE INDEX "Ability_MultiplierEffect_abilityDefId_idx" ON "Ability_MultiplierEffect"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Ability_GrantedAction_abilityDefId_idx" ON "Ability_GrantedAction"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Ability_GrantedAction_itemId_idx" ON "Ability_GrantedAction"("itemId");
+
+-- CreateIndex
+CREATE INDEX "Ability_CombatBehavior_abilityDefId_idx" ON "Ability_CombatBehavior"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Ability_CombatBehavior_behaviorTypeId_idx" ON "Ability_CombatBehavior"("behaviorTypeId");
+
+-- CreateIndex
+CREATE INDEX "Ability_ConditionResistance_abilityDefId_idx" ON "Ability_ConditionResistance"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Ability_DamageModifier_abilityDefId_idx" ON "Ability_DamageModifier"("abilityDefId");
+
+-- CreateIndex
+CREATE INDEX "Ability_DamageModifier_damageTypeId_idx" ON "Ability_DamageModifier"("damageTypeId");
 
 -- CreateIndex
 CREATE INDEX "EntityCondition_entityId_idx" ON "EntityCondition"("entityId");
@@ -2030,13 +2298,16 @@ CREATE UNIQUE INDEX "EntityCondition_entityId_conditionDefId_bodyPartId_key" ON 
 CREATE INDEX "ConditionDef_guildId_idx" ON "ConditionDef"("guildId");
 
 -- CreateIndex
+CREATE INDEX "ConditionDef_guildId_name_idx" ON "ConditionDef"("guildId", "name");
+
+-- CreateIndex
 CREATE INDEX "ConditionDef_conditionTypeId_idx" ON "ConditionDef"("conditionTypeId");
 
 -- CreateIndex
 CREATE INDEX "ConditionDef_conditionContextId_idx" ON "ConditionDef"("conditionContextId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ConditionDef_guildId_name_key" ON "ConditionDef"("guildId", "name");
+CREATE UNIQUE INDEX "ConditionDef_guildId_codeName_key" ON "ConditionDef"("guildId", "codeName");
 
 -- CreateIndex
 CREATE INDEX "ConditionDef_DamageModifier_damageTypeId_idx" ON "ConditionDef_DamageModifier"("damageTypeId");
@@ -2048,7 +2319,7 @@ CREATE INDEX "ConditionDef_EnvRule_envConditionId_idx" ON "ConditionDef_EnvRule"
 CREATE INDEX "ConditionDef_StatEffect_statId_idx" ON "ConditionDef_StatEffect"("statId");
 
 -- CreateIndex
-CREATE INDEX "ConditionDef_SkillEffect_skillDefId_idx" ON "ConditionDef_SkillEffect"("skillDefId");
+CREATE INDEX "ConditionDef_ProficiencyEffect_proficiencyDefId_idx" ON "ConditionDef_ProficiencyEffect"("proficiencyDefId");
 
 -- CreateIndex
 CREATE INDEX "ConditionDef_CombatEffect_effectTypeId_idx" ON "ConditionDef_CombatEffect"("effectTypeId");
@@ -2063,7 +2334,7 @@ CREATE UNIQUE INDEX "ConditionDef_CombatEffect_conditionDefId_effectTypeId_key" 
 CREATE INDEX "EnvCondition_StatModifier_statId_idx" ON "EnvCondition_StatModifier"("statId");
 
 -- CreateIndex
-CREATE INDEX "EnvCondition_SkillModifier_skillDefId_idx" ON "EnvCondition_SkillModifier"("skillDefId");
+CREATE INDEX "EnvCondition_ProficiencyModifier_proficiencyDefId_idx" ON "EnvCondition_ProficiencyModifier"("proficiencyDefId");
 
 -- CreateIndex
 CREATE INDEX "ConditionDef_Link_parentConditionId_linkTypeId_idx" ON "ConditionDef_Link"("parentConditionId", "linkTypeId");
@@ -2123,22 +2394,19 @@ CREATE INDEX "EntityRelationship_relationshipTypeId_idx" ON "EntityRelationship"
 CREATE UNIQUE INDEX "EntityRelationship_entityId_targetEntityId_relationshipType_key" ON "EntityRelationship"("entityId", "targetEntityId", "relationshipTypeId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "GroupStandingType_name_key" ON "GroupStandingType"("name");
+CREATE UNIQUE INDEX "FactionStandingType_name_key" ON "FactionStandingType"("name");
 
 -- CreateIndex
-CREATE INDEX "GroupStanding_targetGroupId_idx" ON "GroupStanding"("targetGroupId");
+CREATE INDEX "FactionStanding_targetFactionId_idx" ON "FactionStanding"("targetFactionId");
 
 -- CreateIndex
-CREATE INDEX "GroupStanding_standingTypeId_idx" ON "GroupStanding"("standingTypeId");
+CREATE INDEX "FactionStanding_standingTypeId_idx" ON "FactionStanding"("standingTypeId");
 
 -- CreateIndex
-CREATE INDEX "Group_guildId_idx" ON "Group"("guildId");
+CREATE INDEX "Faction_guildId_idx" ON "Faction"("guildId");
 
 -- CreateIndex
-CREATE INDEX "Group_groupTypeId_idx" ON "Group"("groupTypeId");
-
--- CreateIndex
-CREATE UNIQUE INDEX "Group_guildId_name_key" ON "Group"("guildId", "name");
+CREATE UNIQUE INDEX "Faction_guildId_name_key" ON "Faction"("guildId", "name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "EnvModifierType_name_key" ON "EnvModifierType"("name");
@@ -2156,13 +2424,13 @@ CREATE INDEX "Location_guildId_idx" ON "Location"("guildId");
 CREATE UNIQUE INDEX "Location_guildId_name_key" ON "Location"("guildId", "name");
 
 -- CreateIndex
-CREATE INDEX "Location_Group_groupId_idx" ON "Location_Group"("groupId");
+CREATE INDEX "Location_Faction_factionId_idx" ON "Location_Faction"("factionId");
 
 -- CreateIndex
-CREATE INDEX "Location_Group_statusId_idx" ON "Location_Group"("statusId");
+CREATE INDEX "Location_Faction_statusId_idx" ON "Location_Faction"("statusId");
 
 -- CreateIndex
-CREATE INDEX "LocationBorder_borderingGroupId_idx" ON "LocationBorder"("borderingGroupId");
+CREATE INDEX "LocationBorder_borderingFactionId_idx" ON "LocationBorder"("borderingFactionId");
 
 -- CreateIndex
 CREATE INDEX "Biome_guildId_idx" ON "Biome"("guildId");
@@ -2186,13 +2454,13 @@ CREATE INDEX "Location_EnvCondition_envConditionId_idx" ON "Location_EnvConditio
 CREATE INDEX "Storage_guildId_idx" ON "Storage"("guildId");
 
 -- CreateIndex
-CREATE INDEX "Storage_groupId_idx" ON "Storage"("groupId");
+CREATE INDEX "Storage_factionId_idx" ON "Storage"("factionId");
 
 -- CreateIndex
 CREATE INDEX "Storage_entityId_idx" ON "Storage"("entityId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Storage_groupId_name_key" ON "Storage"("groupId", "name");
+CREATE UNIQUE INDEX "Storage_factionId_name_key" ON "Storage"("factionId", "name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Storage_entityId_name_key" ON "Storage"("entityId", "name");
@@ -2366,13 +2634,19 @@ CREATE UNIQUE INDEX "RecipeOutputMode_name_key" ON "RecipeOutputMode"("name");
 CREATE INDEX "Recipe_guildId_idx" ON "Recipe"("guildId");
 
 -- CreateIndex
+CREATE INDEX "Recipe_guildId_name_idx" ON "Recipe"("guildId", "name");
+
+-- CreateIndex
 CREATE INDEX "Recipe_craftingInteractionId_idx" ON "Recipe"("craftingInteractionId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Recipe_guildId_name_key" ON "Recipe"("guildId", "name");
+CREATE UNIQUE INDEX "Recipe_guildId_codeName_key" ON "Recipe"("guildId", "codeName");
 
 -- CreateIndex
 CREATE INDEX "Entity_DiscoveredRecipe_recipeId_idx" ON "Entity_DiscoveredRecipe"("recipeId");
+
+-- CreateIndex
+CREATE INDEX "Recipe_DisciplineReward_disciplineId_idx" ON "Recipe_DisciplineReward"("disciplineId");
 
 -- CreateIndex
 CREATE INDEX "RecipeSlot_recipeId_idx" ON "RecipeSlot"("recipeId");
@@ -2420,7 +2694,7 @@ CREATE INDEX "Rank_guildId_idx" ON "Rank"("guildId");
 CREATE UNIQUE INDEX "Rank_guildId_name_key" ON "Rank"("guildId", "name");
 
 -- CreateIndex
-CREATE INDEX "Rank_Group_groupId_idx" ON "Rank_Group"("groupId");
+CREATE INDEX "Rank_Faction_factionId_idx" ON "Rank_Faction"("factionId");
 
 -- CreateIndex
 CREATE INDEX "Rank_DefaultItem_itemId_idx" ON "Rank_DefaultItem"("itemId");
@@ -2432,10 +2706,16 @@ CREATE INDEX "ActionType_guildId_idx" ON "ActionType"("guildId");
 CREATE UNIQUE INDEX "ActionType_guildId_name_key" ON "ActionType"("guildId", "name");
 
 -- CreateIndex
+CREATE INDEX "ActionType_DisciplineReward_disciplineId_idx" ON "ActionType_DisciplineReward"("disciplineId");
+
+-- CreateIndex
 CREATE INDEX "ActionType_DefaultItem_itemId_idx" ON "ActionType_DefaultItem"("itemId");
 
 -- CreateIndex
-CREATE INDEX "ActionInstance_groupId_idx" ON "ActionInstance"("groupId");
+CREATE INDEX "Entity_ActionUsage_actionTypeId_idx" ON "Entity_ActionUsage"("actionTypeId");
+
+-- CreateIndex
+CREATE INDEX "ActionInstance_factionId_idx" ON "ActionInstance"("factionId");
 
 -- CreateIndex
 CREATE INDEX "ActionInstance_actionTypeId_idx" ON "ActionInstance"("actionTypeId");
@@ -2448,6 +2728,9 @@ CREATE INDEX "ActionInstance_leaderCatId_idx" ON "ActionInstance"("leaderCatId")
 
 -- CreateIndex
 CREATE INDEX "ActionInstance_Entity_catId_idx" ON "ActionInstance_Entity"("catId");
+
+-- CreateIndex
+CREATE INDEX "ActionInstance_Entity_DisciplineXp_disciplineId_idx" ON "ActionInstance_Entity_DisciplineXp"("disciplineId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "EventTriggerType_name_key" ON "EventTriggerType"("name");
@@ -2471,13 +2754,16 @@ CREATE UNIQUE INDEX "EventCheckMode_name_key" ON "EventCheckMode"("name");
 CREATE INDEX "EventDef_guildId_idx" ON "EventDef"("guildId");
 
 -- CreateIndex
+CREATE INDEX "EventDef_guildId_name_idx" ON "EventDef"("guildId", "name");
+
+-- CreateIndex
 CREATE INDEX "EventDef_triggerTypeId_idx" ON "EventDef"("triggerTypeId");
 
 -- CreateIndex
 CREATE INDEX "EventDef_scopeId_idx" ON "EventDef"("scopeId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "EventDef_guildId_name_key" ON "EventDef"("guildId", "name");
+CREATE UNIQUE INDEX "EventDef_guildId_codeName_key" ON "EventDef"("guildId", "codeName");
 
 -- CreateIndex
 CREATE INDEX "EventDef_WeatherTrigger_weatherStateId_idx" ON "EventDef_WeatherTrigger"("weatherStateId");
@@ -2564,7 +2850,7 @@ CREATE INDEX "ActiveEvent_guildId_idx" ON "ActiveEvent"("guildId");
 CREATE INDEX "ActiveEvent_eventDefId_idx" ON "ActiveEvent"("eventDefId");
 
 -- CreateIndex
-CREATE INDEX "ActiveEvent_groupId_idx" ON "ActiveEvent"("groupId");
+CREATE INDEX "ActiveEvent_factionId_idx" ON "ActiveEvent"("factionId");
 
 -- CreateIndex
 CREATE INDEX "ActiveEvent_currentStepId_idx" ON "ActiveEvent"("currentStepId");
@@ -2588,19 +2874,22 @@ CREATE INDEX "EventDef_Location_locationId_idx" ON "EventDef_Location"("location
 CREATE INDEX "EventCooldown_eventDefId_idx" ON "EventCooldown"("eventDefId");
 
 -- CreateIndex
-CREATE INDEX "EventCooldown_groupId_idx" ON "EventCooldown"("groupId");
+CREATE INDEX "EventCooldown_factionId_idx" ON "EventCooldown"("factionId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "EventCooldown_eventDefId_groupId_key" ON "EventCooldown"("eventDefId", "groupId");
+CREATE UNIQUE INDEX "EventCooldown_eventDefId_factionId_key" ON "EventCooldown"("eventDefId", "factionId");
 
 -- CreateIndex
 CREATE INDEX "CombatEncounterDef_guildId_idx" ON "CombatEncounterDef"("guildId");
 
 -- CreateIndex
+CREATE INDEX "CombatEncounterDef_guildId_name_idx" ON "CombatEncounterDef"("guildId", "name");
+
+-- CreateIndex
 CREATE INDEX "CombatEncounterDef_speciesId_idx" ON "CombatEncounterDef"("speciesId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "CombatEncounterDef_guildId_name_key" ON "CombatEncounterDef"("guildId", "name");
+CREATE UNIQUE INDEX "CombatEncounterDef_guildId_codeName_key" ON "CombatEncounterDef"("guildId", "codeName");
 
 -- CreateIndex
 CREATE INDEX "CombatEncounterDef_NamedEntity_entityId_idx" ON "CombatEncounterDef_NamedEntity"("entityId");
@@ -2639,7 +2928,7 @@ CREATE INDEX "ItemEquipmentProfile_Condition_equipmentProfileId_idx" ON "ItemEqu
 CREATE INDEX "ItemEquipmentProfile_Condition_conditionDefId_idx" ON "ItemEquipmentProfile_Condition"("conditionDefId");
 
 -- CreateIndex
-CREATE INDEX "ItemEquipmentProfile_Condition_sourceSkillId_idx" ON "ItemEquipmentProfile_Condition"("sourceSkillId");
+CREATE INDEX "ItemEquipmentProfile_Condition_sourceProficiencyId_idx" ON "ItemEquipmentProfile_Condition"("sourceProficiencyId");
 
 -- CreateIndex
 CREATE INDEX "ItemEquipmentProfile_Condition_linkedProfileConditionId_idx" ON "ItemEquipmentProfile_Condition"("linkedProfileConditionId");
@@ -2825,12 +3114,6 @@ ALTER TABLE "DropTable_Entry" ADD CONSTRAINT "DropTable_Entry_itemId_fkey" FOREI
 ALTER TABLE "Species" ADD CONSTRAINT "Species_dropTableId_fkey" FOREIGN KEY ("dropTableId") REFERENCES "DropTable"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Species_DefaultCondition" ADD CONSTRAINT "Species_DefaultCondition_speciesId_fkey" FOREIGN KEY ("speciesId") REFERENCES "Species"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Species_DefaultCondition" ADD CONSTRAINT "Species_DefaultCondition_conditionDefId_fkey" FOREIGN KEY ("conditionDefId") REFERENCES "ConditionDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "Species_EquipmentLoadout" ADD CONSTRAINT "Species_EquipmentLoadout_speciesId_fkey" FOREIGN KEY ("speciesId") REFERENCES "Species"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -2861,7 +3144,7 @@ ALTER TABLE "Entity" ADD CONSTRAINT "Entity_sexId_fkey" FOREIGN KEY ("sexId") RE
 ALTER TABLE "Entity" ADD CONSTRAINT "Entity_genderId_fkey" FOREIGN KEY ("genderId") REFERENCES "Gender"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Entity" ADD CONSTRAINT "Entity_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "Entity" ADD CONSTRAINT "Entity_factionId_fkey" FOREIGN KEY ("factionId") REFERENCES "Faction"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Entity" ADD CONSTRAINT "Entity_rankId_fkey" FOREIGN KEY ("rankId") REFERENCES "Rank"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -2879,19 +3162,118 @@ ALTER TABLE "EntityImage" ADD CONSTRAINT "EntityImage_entityId_fkey" FOREIGN KEY
 ALTER TABLE "EntityBio" ADD CONSTRAINT "EntityBio_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "SkillDef" ADD CONSTRAINT "SkillDef_statId_fkey" FOREIGN KEY ("statId") REFERENCES "Stat"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ProficiencyDef" ADD CONSTRAINT "ProficiencyDef_statId_fkey" FOREIGN KEY ("statId") REFERENCES "Stat"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "SkillDef_Species" ADD CONSTRAINT "SkillDef_Species_skillDefId_fkey" FOREIGN KEY ("skillDefId") REFERENCES "SkillDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Entity_Proficiency" ADD CONSTRAINT "Entity_Proficiency_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "SkillDef_Species" ADD CONSTRAINT "SkillDef_Species_speciesId_fkey" FOREIGN KEY ("speciesId") REFERENCES "Species"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Entity_Proficiency" ADD CONSTRAINT "Entity_Proficiency_proficiencyDefId_fkey" FOREIGN KEY ("proficiencyDefId") REFERENCES "ProficiencyDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Entity_Skill" ADD CONSTRAINT "Entity_Skill_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Entity_Discipline" ADD CONSTRAINT "Entity_Discipline_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Entity_Skill" ADD CONSTRAINT "Entity_Skill_skillDefId_fkey" FOREIGN KEY ("skillDefId") REFERENCES "SkillDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Entity_Discipline" ADD CONSTRAINT "Entity_Discipline_disciplineId_fkey" FOREIGN KEY ("disciplineId") REFERENCES "DisciplineDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SkillTreeNode" ADD CONSTRAINT "SkillTreeNode_disciplineDefId_fkey" FOREIGN KEY ("disciplineDefId") REFERENCES "DisciplineDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SkillTreeNode" ADD CONSTRAINT "SkillTreeNode_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SkillTreeNode_Prerequisite" ADD CONSTRAINT "SkillTreeNode_Prerequisite_nodeId_fkey" FOREIGN KEY ("nodeId") REFERENCES "SkillTreeNode"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SkillTreeNode_Prerequisite" ADD CONSTRAINT "SkillTreeNode_Prerequisite_prerequisiteNodeId_fkey" FOREIGN KEY ("prerequisiteNodeId") REFERENCES "SkillTreeNode"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_SkillTreeNode" ADD CONSTRAINT "Entity_SkillTreeNode_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_SkillTreeNode" ADD CONSTRAINT "Entity_SkillTreeNode_nodeId_fkey" FOREIGN KEY ("nodeId") REFERENCES "SkillTreeNode"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_Ability" ADD CONSTRAINT "Entity_Ability_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_Ability" ADD CONSTRAINT "Entity_Ability_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Species_DefaultAbility" ADD CONSTRAINT "Species_DefaultAbility_speciesId_fkey" FOREIGN KEY ("speciesId") REFERENCES "Species"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Species_DefaultAbility" ADD CONSTRAINT "Species_DefaultAbility_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_StatModifier" ADD CONSTRAINT "Ability_StatModifier_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_StatModifier" ADD CONSTRAINT "Ability_StatModifier_statId_fkey" FOREIGN KEY ("statId") REFERENCES "Stat"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_StatModifier" ADD CONSTRAINT "Ability_StatModifier_biomeId_fkey" FOREIGN KEY ("biomeId") REFERENCES "Biome"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_StatModifier" ADD CONSTRAINT "Ability_StatModifier_weatherStateId_fkey" FOREIGN KEY ("weatherStateId") REFERENCES "WeatherState"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_ProficiencyModifier" ADD CONSTRAINT "Ability_ProficiencyModifier_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_ProficiencyModifier" ADD CONSTRAINT "Ability_ProficiencyModifier_proficiencyDefId_fkey" FOREIGN KEY ("proficiencyDefId") REFERENCES "ProficiencyDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_ProficiencyModifier" ADD CONSTRAINT "Ability_ProficiencyModifier_biomeId_fkey" FOREIGN KEY ("biomeId") REFERENCES "Biome"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_ProficiencyModifier" ADD CONSTRAINT "Ability_ProficiencyModifier_weatherStateId_fkey" FOREIGN KEY ("weatherStateId") REFERENCES "WeatherState"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_MultiplierEffect" ADD CONSTRAINT "Ability_MultiplierEffect_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_MultiplierEffect" ADD CONSTRAINT "Ability_MultiplierEffect_biomeId_fkey" FOREIGN KEY ("biomeId") REFERENCES "Biome"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_MultiplierEffect" ADD CONSTRAINT "Ability_MultiplierEffect_weatherStateId_fkey" FOREIGN KEY ("weatherStateId") REFERENCES "WeatherState"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_GrantedAction" ADD CONSTRAINT "Ability_GrantedAction_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_GrantedAction" ADD CONSTRAINT "Ability_GrantedAction_itemId_fkey" FOREIGN KEY ("itemId") REFERENCES "Item"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_CombatBehavior" ADD CONSTRAINT "Ability_CombatBehavior_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_CombatBehavior" ADD CONSTRAINT "Ability_CombatBehavior_behaviorTypeId_fkey" FOREIGN KEY ("behaviorTypeId") REFERENCES "ConditionBehaviorType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_CombatBehavior" ADD CONSTRAINT "Ability_CombatBehavior_actionTypeId_fkey" FOREIGN KEY ("actionTypeId") REFERENCES "ItemActionType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_CombatBehavior" ADD CONSTRAINT "Ability_CombatBehavior_redirectTargetId_fkey" FOREIGN KEY ("redirectTargetId") REFERENCES "BehaviorRedirectTarget"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_CombatBehavior" ADD CONSTRAINT "Ability_CombatBehavior_restrictActionTypeId_fkey" FOREIGN KEY ("restrictActionTypeId") REFERENCES "ItemActionType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_ConditionResistance" ADD CONSTRAINT "Ability_ConditionResistance_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_ConditionResistance" ADD CONSTRAINT "Ability_ConditionResistance_conditionDefId_fkey" FOREIGN KEY ("conditionDefId") REFERENCES "ConditionDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_ConditionResistance" ADD CONSTRAINT "Ability_ConditionResistance_conditionTypeId_fkey" FOREIGN KEY ("conditionTypeId") REFERENCES "ConditionType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_DamageModifier" ADD CONSTRAINT "Ability_DamageModifier_abilityDefId_fkey" FOREIGN KEY ("abilityDefId") REFERENCES "AbilityDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Ability_DamageModifier" ADD CONSTRAINT "Ability_DamageModifier_damageTypeId_fkey" FOREIGN KEY ("damageTypeId") REFERENCES "DamageType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "EntityCondition" ADD CONSTRAINT "EntityCondition_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -2939,10 +3321,10 @@ ALTER TABLE "ConditionDef_StatEffect" ADD CONSTRAINT "ConditionDef_StatEffect_co
 ALTER TABLE "ConditionDef_StatEffect" ADD CONSTRAINT "ConditionDef_StatEffect_statId_fkey" FOREIGN KEY ("statId") REFERENCES "Stat"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ConditionDef_SkillEffect" ADD CONSTRAINT "ConditionDef_SkillEffect_conditionDefId_fkey" FOREIGN KEY ("conditionDefId") REFERENCES "ConditionDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ConditionDef_ProficiencyEffect" ADD CONSTRAINT "ConditionDef_ProficiencyEffect_conditionDefId_fkey" FOREIGN KEY ("conditionDefId") REFERENCES "ConditionDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ConditionDef_SkillEffect" ADD CONSTRAINT "ConditionDef_SkillEffect_skillDefId_fkey" FOREIGN KEY ("skillDefId") REFERENCES "SkillDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ConditionDef_ProficiencyEffect" ADD CONSTRAINT "ConditionDef_ProficiencyEffect_proficiencyDefId_fkey" FOREIGN KEY ("proficiencyDefId") REFERENCES "ProficiencyDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ConditionDef_CombatEffect" ADD CONSTRAINT "ConditionDef_CombatEffect_conditionDefId_fkey" FOREIGN KEY ("conditionDefId") REFERENCES "ConditionDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -2960,10 +3342,10 @@ ALTER TABLE "EnvCondition_StatModifier" ADD CONSTRAINT "EnvCondition_StatModifie
 ALTER TABLE "EnvCondition_StatModifier" ADD CONSTRAINT "EnvCondition_StatModifier_statId_fkey" FOREIGN KEY ("statId") REFERENCES "Stat"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "EnvCondition_SkillModifier" ADD CONSTRAINT "EnvCondition_SkillModifier_envConditionId_fkey" FOREIGN KEY ("envConditionId") REFERENCES "EnvCondition"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "EnvCondition_ProficiencyModifier" ADD CONSTRAINT "EnvCondition_ProficiencyModifier_envConditionId_fkey" FOREIGN KEY ("envConditionId") REFERENCES "EnvCondition"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "EnvCondition_SkillModifier" ADD CONSTRAINT "EnvCondition_SkillModifier_skillDefId_fkey" FOREIGN KEY ("skillDefId") REFERENCES "SkillDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "EnvCondition_ProficiencyModifier" ADD CONSTRAINT "EnvCondition_ProficiencyModifier_proficiencyDefId_fkey" FOREIGN KEY ("proficiencyDefId") REFERENCES "ProficiencyDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ConditionDef_Link" ADD CONSTRAINT "ConditionDef_Link_parentConditionId_fkey" FOREIGN KEY ("parentConditionId") REFERENCES "ConditionDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -3011,16 +3393,13 @@ ALTER TABLE "EntityRelationship" ADD CONSTRAINT "EntityRelationship_targetEntity
 ALTER TABLE "EntityRelationship" ADD CONSTRAINT "EntityRelationship_relationshipTypeId_fkey" FOREIGN KEY ("relationshipTypeId") REFERENCES "RelationshipType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "GroupStanding" ADD CONSTRAINT "GroupStanding_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "FactionStanding" ADD CONSTRAINT "FactionStanding_factionId_fkey" FOREIGN KEY ("factionId") REFERENCES "Faction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "GroupStanding" ADD CONSTRAINT "GroupStanding_targetGroupId_fkey" FOREIGN KEY ("targetGroupId") REFERENCES "Group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "FactionStanding" ADD CONSTRAINT "FactionStanding_targetFactionId_fkey" FOREIGN KEY ("targetFactionId") REFERENCES "Faction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "GroupStanding" ADD CONSTRAINT "GroupStanding_standingTypeId_fkey" FOREIGN KEY ("standingTypeId") REFERENCES "GroupStandingType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Group" ADD CONSTRAINT "Group_groupTypeId_fkey" FOREIGN KEY ("groupTypeId") REFERENCES "GroupType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "FactionStanding" ADD CONSTRAINT "FactionStanding_standingTypeId_fkey" FOREIGN KEY ("standingTypeId") REFERENCES "FactionStandingType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "EnvCondition_Modifier" ADD CONSTRAINT "EnvCondition_Modifier_envConditionId_fkey" FOREIGN KEY ("envConditionId") REFERENCES "EnvCondition"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -3029,19 +3408,19 @@ ALTER TABLE "EnvCondition_Modifier" ADD CONSTRAINT "EnvCondition_Modifier_envCon
 ALTER TABLE "EnvCondition_Modifier" ADD CONSTRAINT "EnvCondition_Modifier_modTypeId_fkey" FOREIGN KEY ("modTypeId") REFERENCES "EnvModifierType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Location_Group" ADD CONSTRAINT "Location_Group_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Location_Faction" ADD CONSTRAINT "Location_Faction_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Location_Group" ADD CONSTRAINT "Location_Group_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Location_Faction" ADD CONSTRAINT "Location_Faction_factionId_fkey" FOREIGN KEY ("factionId") REFERENCES "Faction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Location_Group" ADD CONSTRAINT "Location_Group_statusId_fkey" FOREIGN KEY ("statusId") REFERENCES "LocationStatus"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Location_Faction" ADD CONSTRAINT "Location_Faction_statusId_fkey" FOREIGN KEY ("statusId") REFERENCES "LocationStatus"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "LocationBorder" ADD CONSTRAINT "LocationBorder_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "LocationBorder" ADD CONSTRAINT "LocationBorder_borderingGroupId_fkey" FOREIGN KEY ("borderingGroupId") REFERENCES "Group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "LocationBorder" ADD CONSTRAINT "LocationBorder_borderingFactionId_fkey" FOREIGN KEY ("borderingFactionId") REFERENCES "Faction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Biome" ADD CONSTRAINT "Biome_dropTableId_fkey" FOREIGN KEY ("dropTableId") REFERENCES "DropTable"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -3065,7 +3444,7 @@ ALTER TABLE "Location_EnvCondition" ADD CONSTRAINT "Location_EnvCondition_locati
 ALTER TABLE "Location_EnvCondition" ADD CONSTRAINT "Location_EnvCondition_envConditionId_fkey" FOREIGN KEY ("envConditionId") REFERENCES "EnvCondition"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Storage" ADD CONSTRAINT "Storage_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Storage" ADD CONSTRAINT "Storage_factionId_fkey" FOREIGN KEY ("factionId") REFERENCES "Faction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Storage" ADD CONSTRAINT "Storage_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -3200,6 +3579,12 @@ ALTER TABLE "Entity_DiscoveredRecipe" ADD CONSTRAINT "Entity_DiscoveredRecipe_en
 ALTER TABLE "Entity_DiscoveredRecipe" ADD CONSTRAINT "Entity_DiscoveredRecipe_recipeId_fkey" FOREIGN KEY ("recipeId") REFERENCES "Recipe"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Recipe_DisciplineReward" ADD CONSTRAINT "Recipe_DisciplineReward_recipeId_fkey" FOREIGN KEY ("recipeId") REFERENCES "Recipe"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Recipe_DisciplineReward" ADD CONSTRAINT "Recipe_DisciplineReward_disciplineId_fkey" FOREIGN KEY ("disciplineId") REFERENCES "DisciplineDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "RecipeSlot" ADD CONSTRAINT "RecipeSlot_recipeId_fkey" FOREIGN KEY ("recipeId") REFERENCES "Recipe"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -3251,10 +3636,10 @@ ALTER TABLE "RecipeOutput_RemoveTag" ADD CONSTRAINT "RecipeOutput_RemoveTag_ingr
 ALTER TABLE "RecipeOutput_FoodOverride" ADD CONSTRAINT "RecipeOutput_FoodOverride_recipeOutputId_fkey" FOREIGN KEY ("recipeOutputId") REFERENCES "RecipeOutput"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Rank_Group" ADD CONSTRAINT "Rank_Group_rankId_fkey" FOREIGN KEY ("rankId") REFERENCES "Rank"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Rank_Faction" ADD CONSTRAINT "Rank_Faction_rankId_fkey" FOREIGN KEY ("rankId") REFERENCES "Rank"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Rank_Group" ADD CONSTRAINT "Rank_Group_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Rank_Faction" ADD CONSTRAINT "Rank_Faction_factionId_fkey" FOREIGN KEY ("factionId") REFERENCES "Faction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Rank_DefaultItem" ADD CONSTRAINT "Rank_DefaultItem_rankId_fkey" FOREIGN KEY ("rankId") REFERENCES "Rank"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -3263,16 +3648,31 @@ ALTER TABLE "Rank_DefaultItem" ADD CONSTRAINT "Rank_DefaultItem_rankId_fkey" FOR
 ALTER TABLE "Rank_DefaultItem" ADD CONSTRAINT "Rank_DefaultItem_itemId_fkey" FOREIGN KEY ("itemId") REFERENCES "Item"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ActionType" ADD CONSTRAINT "ActionType_systemTypeId_fkey" FOREIGN KEY ("systemTypeId") REFERENCES "ActionSystemType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ActionType_DisciplineReward" ADD CONSTRAINT "ActionType_DisciplineReward_actionTypeId_fkey" FOREIGN KEY ("actionTypeId") REFERENCES "ActionType"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ActionType_DisciplineReward" ADD CONSTRAINT "ActionType_DisciplineReward_disciplineId_fkey" FOREIGN KEY ("disciplineId") REFERENCES "DisciplineDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ActionType_DefaultItem" ADD CONSTRAINT "ActionType_DefaultItem_actionTypeId_fkey" FOREIGN KEY ("actionTypeId") REFERENCES "ActionType"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ActionType_DefaultItem" ADD CONSTRAINT "ActionType_DefaultItem_itemId_fkey" FOREIGN KEY ("itemId") REFERENCES "Item"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Entity_ActionUsage" ADD CONSTRAINT "Entity_ActionUsage_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_ActionUsage" ADD CONSTRAINT "Entity_ActionUsage_actionTypeId_fkey" FOREIGN KEY ("actionTypeId") REFERENCES "ActionType"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ActionInstance" ADD CONSTRAINT "ActionInstance_actionTypeId_fkey" FOREIGN KEY ("actionTypeId") REFERENCES "ActionType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ActionInstance" ADD CONSTRAINT "ActionInstance_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ActionInstance" ADD CONSTRAINT "ActionInstance_factionId_fkey" FOREIGN KEY ("factionId") REFERENCES "Faction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ActionInstance" ADD CONSTRAINT "ActionInstance_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -3285,6 +3685,12 @@ ALTER TABLE "ActionInstance_Entity" ADD CONSTRAINT "ActionInstance_Entity_action
 
 -- AddForeignKey
 ALTER TABLE "ActionInstance_Entity" ADD CONSTRAINT "ActionInstance_Entity_catId_fkey" FOREIGN KEY ("catId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ActionInstance_Entity_DisciplineXp" ADD CONSTRAINT "ActionInstance_Entity_DisciplineXp_actionInstanceId_catId_fkey" FOREIGN KEY ("actionInstanceId", "catId") REFERENCES "ActionInstance_Entity"("actionInstanceId", "catId") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ActionInstance_Entity_DisciplineXp" ADD CONSTRAINT "ActionInstance_Entity_DisciplineXp_disciplineId_fkey" FOREIGN KEY ("disciplineId") REFERENCES "DisciplineDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "EventDef" ADD CONSTRAINT "EventDef_triggerTypeId_fkey" FOREIGN KEY ("triggerTypeId") REFERENCES "EventTriggerType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -3371,7 +3777,7 @@ ALTER TABLE "EventChoiceDef" ADD CONSTRAINT "EventChoiceDef_stepDefId_fkey" FORE
 ALTER TABLE "EventChoiceDef" ADD CONSTRAINT "EventChoiceDef_statId_fkey" FOREIGN KEY ("statId") REFERENCES "Stat"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "EventChoiceDef" ADD CONSTRAINT "EventChoiceDef_skillDefId_fkey" FOREIGN KEY ("skillDefId") REFERENCES "SkillDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "EventChoiceDef" ADD CONSTRAINT "EventChoiceDef_proficiencyDefId_fkey" FOREIGN KEY ("proficiencyDefId") REFERENCES "ProficiencyDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "EventChoiceDef" ADD CONSTRAINT "EventChoiceDef_checkModeId_fkey" FOREIGN KEY ("checkModeId") REFERENCES "EventCheckMode"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -3392,7 +3798,7 @@ ALTER TABLE "ActiveEvent" ADD CONSTRAINT "ActiveEvent_eventDefId_fkey" FOREIGN K
 ALTER TABLE "ActiveEvent" ADD CONSTRAINT "ActiveEvent_currentStepId_fkey" FOREIGN KEY ("currentStepId") REFERENCES "EventStepDef"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ActiveEvent" ADD CONSTRAINT "ActiveEvent_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ActiveEvent" ADD CONSTRAINT "ActiveEvent_factionId_fkey" FOREIGN KEY ("factionId") REFERENCES "Faction"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ActiveEvent" ADD CONSTRAINT "ActiveEvent_actionInstanceId_fkey" FOREIGN KEY ("actionInstanceId") REFERENCES "ActionInstance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -3431,7 +3837,7 @@ ALTER TABLE "ItemEquipmentProfile_Condition" ADD CONSTRAINT "ItemEquipmentProfil
 ALTER TABLE "ItemEquipmentProfile_Condition" ADD CONSTRAINT "ItemEquipmentProfile_Condition_conditionDefId_fkey" FOREIGN KEY ("conditionDefId") REFERENCES "ConditionDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ItemEquipmentProfile_Condition" ADD CONSTRAINT "ItemEquipmentProfile_Condition_sourceSkillId_fkey" FOREIGN KEY ("sourceSkillId") REFERENCES "SkillDef"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ItemEquipmentProfile_Condition" ADD CONSTRAINT "ItemEquipmentProfile_Condition_sourceProficiencyId_fkey" FOREIGN KEY ("sourceProficiencyId") REFERENCES "ProficiencyDef"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ItemEquipmentProfile_Condition" ADD CONSTRAINT "ItemEquipmentProfile_Condition_linkedProfileConditionId_fkey" FOREIGN KEY ("linkedProfileConditionId") REFERENCES "ItemEquipmentProfile_Condition"("id") ON DELETE SET NULL ON UPDATE CASCADE;

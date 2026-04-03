@@ -1,6 +1,6 @@
 ITEM DEFINITIONS — DESIGN REFERENCE
 ====================================
-Last updated: 2026-03-29
+Last updated: 2026-04-03
 
 This file is the authoritative reference for how item definitions work in EchoPaw.
 Read this before writing item seeding code, item-adjacent queries, or any system
