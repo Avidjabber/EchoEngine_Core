@@ -17,6 +17,12 @@ export class ServerRepository {
         });
     }
 
+    deleteDen(guildId: string, channelId: string) {
+        return this.db.echoDens.delete({
+            where: { guildId_channelId: { guildId, channelId } },
+        });
+    }
+
     createDen(guildId: string, channelId: string) {
         return this.db.echoDens.create({
             data: { guildId, channelId },

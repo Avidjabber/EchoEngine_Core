@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
 import { CreateDenDto } from './dto/create-den.dto';
 import { ServerService } from './server.service';
 
@@ -9,6 +9,12 @@ export class ServerController {
     @Get('dens')
     getDens(@Query('guildId') guildId: string) {
         return this.serverService.getDens(guildId);
+    }
+
+    @Delete('dens')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    removeDen(@Query('guildId') guildId: string, @Query('channelId') channelId: string) {
+        return this.serverService.removeDen(guildId, channelId);
     }
 
     @Post('dens')

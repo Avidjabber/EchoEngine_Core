@@ -11,6 +11,10 @@ export interface CreateDenResponse {
     firstTimeSetup: boolean;
 }
 
+export async function removeDen(guildId: string, channelId: string) {
+    return apiClient.delete<void>(`/server/dens?guildId=${encodeURIComponent(guildId)}&channelId=${encodeURIComponent(channelId)}`);
+}
+
 export async function getDens(guildId: string) {
     return apiClient.get<Den[]>(`/server/dens?guildId=${encodeURIComponent(guildId)}`);
 }

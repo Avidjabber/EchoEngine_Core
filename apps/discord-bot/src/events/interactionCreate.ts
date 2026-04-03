@@ -13,7 +13,7 @@ function dispatch(handlers: ComponentHandler[], interaction: Interaction): Promi
 
 function isDenManagementCommand(interaction: Interaction): boolean {
     if (!interaction.isChatInputCommand()) return false;
-    const EXEMPT_SUBCOMMANDS = new Set(['set', 'remove']);
+    const EXEMPT_SUBCOMMANDS = new Set(['set', 'remove', 'list']);
     return (
         interaction.commandName === 'server' &&
         interaction.options.getSubcommandGroup(false) === 'den' &&
@@ -72,9 +72,13 @@ export default async function interactionCreate(
         const subIsPublic    = subcommandName && command.publicSubcommands?.has(subcommandName);
 
         if (!command.usesModal && !subUsesModal && !subIsPublic) {
+            const deferContainer = new ContainerBuilder()
+                .addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(messages.deferMessage),
+                );
             await interaction.reply({
-                content: messages.deferMessage,
-                flags: MessageFlags.Ephemeral,
+                flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
+                components: [deferContainer],
             });
         }
 

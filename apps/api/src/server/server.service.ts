@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { errorCodes } from '@echoengine/shared';
 import { CreateDenDto } from './dto/create-den.dto';
 import { ServerRepository } from './server.repository';
@@ -6,6 +6,19 @@ import { ServerRepository } from './server.repository';
 @Injectable()
 export class ServerService {
     constructor(private readonly serverRepo: ServerRepository) {}
+
+    async removeDen(guildId: string, channelId: string) {
+        const existing = await this.serverRepo.findDen(guildId, channelId);
+
+        if (!existing) {
+            throw new NotFoundException({
+                code: errorCodes.DEN_NOT_FOUND,
+                message: 'This channel is not a registered den.',
+            });
+        }
+
+        return this.serverRepo.deleteDen(guildId, channelId);
+    }
 
     async getDens(guildId: string) {
         return this.serverRepo.findDens(guildId);
