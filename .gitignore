@@ -10,6 +10,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# Prisma generated clients — rebuilt at dev/build time, never committed
+apps/*/src/generated/
+
 # ──────────────────────────────────────────────
 # Environment files — ignore all variants, but keep the example as documentation
 # ──────────────────────────────────────────────

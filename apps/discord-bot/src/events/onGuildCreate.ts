@@ -1,5 +1,12 @@
-import { ChannelType, Guild, PermissionsBitField, TextChannel } from 'discord.js';
-import { messages } from '../core/messages';
+import {
+    ChannelType,
+    ContainerBuilder,
+    Guild,
+    MessageFlags,
+    PermissionsBitField,
+    TextChannel,
+    TextDisplayBuilder,
+} from 'discord.js';
 
 export default async function onGuildCreate(guild: Guild): Promise<void> {
     try {
@@ -8,7 +15,17 @@ export default async function onGuildCreate(guild: Guild): Promise<void> {
             console.log(`Joined guild ${guild.id} but found no sendable channel for welcome message.`);
             return;
         }
-        await channel.send(messages.guildWelcome);
+
+        const welcome = new ContainerBuilder().addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                `## Hi, I'm Echo\n\nI handle activity logs, events, and updates for your server.\n\nTo get started, an admin should run **/server den set** in any channel to choose where I'm allowed to post.`,
+            ),
+        );
+
+        await channel.send({
+            flags: MessageFlags.IsComponentsV2,
+            components: [welcome],
+        });
     } catch (err) {
         console.error(`Error sending welcome message to guild ${guild.id}:`, err);
     }

@@ -17,13 +17,14 @@ COPY package.json ./
 COPY apps/api/package.json ./apps/api/
 RUN npm install --workspace=apps/api
 
-# Generate Prisma client
-RUN npx prisma generate --schema=prisma/primary/schema.prisma
-
-# Copy source
+# Copy source (before prisma generate so generated files land inside src/)
 COPY apps/api/ ./apps/api/
+
+# Generate Prisma client into apps/api/src/generated/prisma-primary/
+# Must run after source copy so it is not overwritten
+RUN npx prisma generate --schema=prisma/primary/schema.prisma
 
 ENV NODE_ENV=production
 WORKDIR /app/apps/api
 
-CMD ["npx", "tsx", "src/main.ts"]
+CMD ["node", "-r", "ts-node/register", "-r", "tsconfig-paths/register", "src/main.ts"]

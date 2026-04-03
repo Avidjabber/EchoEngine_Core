@@ -45,6 +45,9 @@ export class Result<T> {
         try {
             return await fn();
         } catch (err) {
+            if (err instanceof ApiResultError) {
+                return Result.fail<T>(err);
+            }
             console.error('[Result.wrap] Unhandled error:', err);
             return Result.fail<T>(
                 new ApiResultError(
