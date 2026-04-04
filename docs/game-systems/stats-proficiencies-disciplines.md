@@ -1,6 +1,6 @@
 STATS, PROFICIENCIES & DISCIPLINES — DESIGN REFERENCE
 =======================================================
-Last updated: 2026-04-03
+Last updated: 2026-04-04
 
 This file covers three related but distinct systems: base stats, proficiency
 checks, and discipline progression. Read this before touching any seeding,
@@ -54,6 +54,16 @@ the flat threshold instead of the level^1.5 curve used by real disciplines.
 
 Stat points are spent to increase proficiency bonuses (Entity_Proficiency.bonus)
 or to purchase skill tree nodes (SkillTreeNode.statPointCost > 0).
+
+SPENDING & REFUNDS
+───────────────────
+  EntityStats.skillPoints holds the current unallocated count.
+  On purchase: statPointCost is immediately deducted in the same DB write.
+  On node removal (respec): statPointCost is immediately refunded.
+  A spend is rejected if skillPoints < cost at the time of the request.
+  Points may be spent freely between proficiency bonuses and skill tree nodes —
+  there is no separate pool for each.
+
 See ability-system.md for the full ability effect reference.
 
 

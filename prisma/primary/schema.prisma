@@ -904,7 +904,7 @@ model SkillTreeNode_Prerequisite {
   prerequisiteNodeId Int
 
   node         SkillTreeNode @relation("NodePrerequisites", fields: [nodeId],             references: [id], onDelete: Cascade)
-  prerequisite SkillTreeNode @relation("PrerequisiteOf",    fields: [prerequisiteNodeId], references: [id], onDelete: Restrict)
+  prerequisite SkillTreeNode @relation("PrerequisiteOf",    fields: [prerequisiteNodeId], references: [id], onDelete: Cascade)
 
   @@id([nodeId, prerequisiteNodeId])
 }
@@ -916,7 +916,7 @@ model Entity_SkillTreeNode {
   nodeId   Int
 
   entity Entity        @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  node   SkillTreeNode @relation(fields: [nodeId],   references: [id], onDelete: Restrict)
+  node   SkillTreeNode @relation(fields: [nodeId],   references: [id], onDelete: Cascade)
 
   @@unique([entityId, nodeId])
   @@index([entityId])

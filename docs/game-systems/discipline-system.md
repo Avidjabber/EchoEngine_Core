@@ -1,6 +1,6 @@
 DISCIPLINE SYSTEM — DESIGN REFERENCE
 =====================================
-Last updated: 2026-04-03
+Last updated: 2026-04-04
 
 This file is the authoritative reference for how disciplines work in EchoPaw.
 Read this before touching any discipline seeding or discipline-adjacent code.
@@ -144,19 +144,115 @@ NODE SCHEMA
 
 NODE LIFECYCLE
 ───────────────
-  Locked:      entity's discipline level < levelRequired (or prereqs not met)
-  Unlocked:    level reached AND all prerequisites obtained
-  Auto-granted: isAutoGranted = true → Entity_SkillTreeNode row created automatically on level-up
-  Purchasable: unlocked + not yet obtained + statPointCost > 0 → entity spends stat points
+  Locked:       entity's discipline level < levelRequired (or prereqs not met)
+  Unlocked:     level reached AND all prerequisites obtained
+  Auto-granted: isAutoGranted = true → Entity_SkillTreeNode row created immediately
+                on level-up, in the same operation that writes the new level.
+                The corresponding Entity_Ability row (sourceType = "skill_tree",
+                sourceId = nodeId) is also created at the same time.
+  Purchasable:  unlocked + not yet obtained + statPointCost > 0
+                → entity spends stat points from EntityStats.skillPoints
+
+RESPEC / NODE REMOVAL
+──────────────────────
+A purchased node can be removed (respec). On removal:
+  - Entity_SkillTreeNode row is deleted
+  - Entity_Ability row for that node is deleted (ability is no longer accessible)
+  - statPointCost for that node is immediately refunded to EntityStats.skillPoints
+  - Any nodes that listed this node as a prerequisite are also removed recursively,
+    with their costs refunded as well
+  - Auto-granted nodes (isAutoGranted = true) cannot be manually removed
 
 PREREQUISITES
 ──────────────
-Prerequisites are within the same guild's tree. The app layer enforces this.
-Circular prerequisites are rejected at the app layer.
+Prerequisites are within the same guild's tree. The app layer enforces that
+referenced prerequisiteNodeIds belong to the same guildId.
+Circular prerequisites are rejected at the app layer on node creation/update —
+the API validates there is no cycle in the prerequisite graph before saving.
+Guild administrators are responsible for maintaining sensible tree layouts;
+the API provides cycle detection as a safeguard, not a full design validator.
 
-STAT POINTS
-────────────
-Stat points are also spendable on proficiency bonuses (Entity_Proficiency.bonus),
-giving entities a choice between raw proficiency bonuses and ability unlocks.
+SKILL TREES ARE PER-GUILD
+──────────────────────────
+SkillTreeNode rows are scoped to a guild (guildId). Two guilds running the same
+discipline will have entirely separate tree layouts, level thresholds, and costs.
+Global/seeded tree templates do not exist — each guild builds its own.
+Members can view their character's current discipline levels and the full
+skill tree for any discipline via Discord commands.
+
+STAT POINTS & SPENDING
+───────────────────────
+EntityStats.skillPoints tracks unallocated points. When a node is purchased:
+  statPointCost is immediately deducted from skillPoints in the same DB write.
+When a node is removed (respec), the cost is immediately refunded.
+Stat points can also be spent on proficiency bonuses (Entity_Proficiency.bonus).
+A purchase is rejected if skillPoints < statPointCost at the time of the request.
 
 See ability-system.md for the full ability effect reference.
+
+
+─────────────────────────────────────────────
+7. PLANNED API FUNCTIONS
+─────────────────────────────────────────────
+
+These are the service-layer operations the skill/discipline system will need.
+None are implemented yet. Order reflects logical dependency.
+
+DISCIPLINE PROGRESSION
+───────────────────────
+  awardDisciplineXp(entityId, disciplineDefId, amount)
+    - Adds XP to Entity_Discipline
+    - If currentXp >= xpRequired(level), increments level and resets currentXp
+    - On level-up: checks for newly auto-grantable nodes and grants them immediately
+    - Returns: new level, new currentXp, list of any nodes auto-granted
+
+  getDisciplineLevels(entityId)
+    - Returns all Entity_Discipline rows for an entity (excluding isStatProgression row)
+    - Used for Discord "view character levels" command
+
+  getDisciplineTree(guildId, disciplineDefId, entityId)
+    - Returns all SkillTreeNode rows for the guild+discipline
+    - Each node annotated with status: locked / unlocked / obtained
+    - Used for Discord "view skill tree" command
+
+SKILL TREE NODE MANAGEMENT (admin / guild setup)
+──────────────────────────────────────────────────
+  createSkillTreeNode(guildId, disciplineDefId, abilityDefId, levelRequired,
+                      statPointCost, isAutoGranted, prerequisiteNodeIds[])
+    - Validates prerequisiteNodeIds belong to same guildId + disciplineDefId
+    - Validates no cycle is introduced
+    - Creates SkillTreeNode and SkillTreeNode_Prerequisite rows
+
+  updateSkillTreeNode(nodeId, fields)
+    - Same validation as create for any prerequisite changes
+    - Changing levelRequired or statPointCost does not retroactively affect
+      already-obtained Entity_SkillTreeNode rows
+
+  deleteSkillTreeNode(nodeId)
+    - Removes SkillTreeNode and its prerequisite edges
+    - Also removes Entity_SkillTreeNode rows referencing this node
+    - Refunds statPointCost to affected entities
+    - Also removes Entity_Ability rows sourced from this node
+
+  getSkillTree(guildId, disciplineDefId)
+    - Returns full node list with prerequisite edges (admin view, no entity state)
+
+ENTITY NODE PURCHASE / RESPEC
+───────────────────────────────
+  purchaseNode(entityId, nodeId)
+    - Validates: entity discipline level >= levelRequired
+    - Validates: all prerequisiteNodeIds are in entity's obtained set
+    - Validates: entity skillPoints >= statPointCost
+    - Deducts statPointCost from EntityStats.skillPoints immediately
+    - Creates Entity_SkillTreeNode row
+    - Creates Entity_Ability row (sourceType = "skill_tree", sourceId = nodeId)
+
+  removeNode(entityId, nodeId)
+    - Rejects if node isAutoGranted = true
+    - Collects all nodes that depend on this node (recursive prerequisite check)
+    - Removes Entity_SkillTreeNode and Entity_Ability rows for node + dependents
+    - Refunds total statPointCost of all removed nodes to EntityStats.skillPoints
+
+  getEntityNodes(entityId, guildId)
+    - Returns all Entity_SkillTreeNode rows for an entity within a guild
+    - Used to display what an entity has already obtained
