@@ -238,23 +238,45 @@ RULE: Combat actions (attacks, spells, rank abilities) do NOT use ItemAction.
 7. STORAGE AND STORED ITEMS
 ─────────────────────────────────────────────
 
-Storage is a container owned by a group or entity. StoredItem is a physical
-instance of an Item sitting inside a Storage.
+Storage is a pure item container. All capacity limits, type restrictions, and
+expiration modifiers live on the owner join table, not on Storage itself.
 
   Storage — key fields:
-    weightCapacity     Float?  Null = no weight limit. Enforced as:
-                                 Count  → sum of (StoredItem.quantity × Item.averageWeight)
-                                 Weight → sum of StoredItem.quantity directly
-                               Volume items do not consume weightCapacity.
-    fluidCapacity      Float?  Null = no fluid limit (ml). Enforced as:
-                                 Volume → sum of StoredItem.quantity directly
-                               Count and Weight items do not consume fluidCapacity.
-    expirationModifier Float   Multiplier on item spoilage rates. >1.0 = spoils faster.
-    isPrimaryStorage   Boolean The group's designated primary storage for accepted types.
-    acceptsAll         Boolean True = accepts any item type (personal entity storage).
+    guildId  — owning guild
+    name     — display name
 
-  Storage_ItemType — which ItemType tags a storage accepts. An item must match at
-  least one accepted type to be stored. Ignored when acceptsAll = true.
+  Ownership is determined by exactly one of two join tables:
+
+  Entity_Storage — personal entity inventory
+    entityId        FK → Entity
+    storageId       FK → Storage
+    weightCapacity  Float?  Null = no weight limit.
+    fluidCapacity   Float?  Null = no fluid limit (ml).
+    Entity storage accepts all item types. No type restrictions apply.
+    No expirationModifier — items decay at their natural rate in entity storage.
+
+  Structure_Storage — camp structure inventory
+    structureId        FK → Structure
+    storageId          FK → Storage
+    weightCapacity     Float?  Null = no weight limit.
+    fluidCapacity      Float?  Null = no fluid limit (ml).
+    expirationModifier Float   Multiplier on item spoilage rates. >1.0 = spoils faster.
+                               Driven by StructureDef_StorageConfig base value + rot_modifier
+                               upgrade deltas. Recomputed when upgrades are applied.
+    isPrimaryStorage   Boolean Faction's designated primary storage for its accepted types.
+    acceptedTypes      via Structure_Storage_ItemType — an item must match at least one
+                       accepted type to be stored here.
+
+  Structure_Storage_ItemType — accepted item types for a structure storage
+    storageId   FK → Storage
+    itemTypeId  FK → ItemType
+
+  Capacity enforcement:
+    weightCapacity: Count  → sum of (StoredItem.quantity × Item.averageWeight)
+                    Weight → sum of StoredItem.quantity
+                    Volume items do not consume weightCapacity.
+    fluidCapacity:  Volume → sum of StoredItem.quantity
+                    Count and Weight items do not consume fluidCapacity.
 
   StoredItem — key fields:
     quantity          Amount in the item's measurement unit:
@@ -271,7 +293,8 @@ instance of an Item sitting inside a Storage.
     equippedAt        Timestamp set when equipped; null when not equipped.
 
   Decay formula (app-side):
-    decay% = days_elapsed / (item.decayDays × storage.expirationModifier × season_modifier)
+    Structure storage:  decay% = days_elapsed / (item.decayDays × structure_storage.expirationModifier × season_modifier)
+    Entity storage:     decay% = days_elapsed / (item.decayDays × season_modifier)
     Only relevant when item.decayDays is non-null.
 
   RULE: currentDurability and usesRemaining must always be null if their respective

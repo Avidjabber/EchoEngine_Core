@@ -29,11 +29,14 @@ different in-world group (e.g. ThunderClan, ShadowClan).
 
 Faction is the core model. Key fields:
 
-  guildId       — the owning Discord guild
-  name          — display name of the faction
-  codeName      — snake_case slug; unique per guild
-  clanRep       — current clan reputation score; modified by actions and events
-  description   — optional flavour text
+  guildId        — the owning Discord guild
+  name           — display name of the faction
+  codeName       — snake_case slug; unique per guild
+  clanRep        — current clan reputation score; modified by actions and events
+  description    — optional flavour text
+  activeCampId   — FK → Camp (nullable). The faction's currently active camp.
+                   A faction may have multiple camps but only one is active at a
+                   time. null = faction has no camps.
 
 Entities belong to a faction via Entity.factionId.
 
@@ -104,17 +107,19 @@ Each guild has a GuildSettings row controlling bot-wide configuration:
 
   defaultDailyEnergy   — energy replenished per entity per daily tick
   currentSeasonId      — the active season for this guild
-  filthLevel           — current filth accumulation (drives filth-trigger events)
   (other settings TBD as system is built)
 
 Guild settings are not per-faction — they apply across all factions in the guild.
+
+Note: filthLevel was previously tracked here. It now lives on Camp, since filth
+is a property of a specific physical location rather than the guild at large.
 
 
 ─────────────────────────────────────────────
 7. SCHEMA SUMMARY
 ─────────────────────────────────────────────
 
-  Faction               — in-world group; one or more per guild
+  Faction               — in-world group; one or more per guild; activeCampId points to active camp
   FactionStanding       — directional relationship between two factions
   FactionStandingType   — Ally | Neutral | Hostile | Enemy | Truce (seed)
   Location_Faction      — territory ownership records

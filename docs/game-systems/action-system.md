@@ -150,9 +150,84 @@ flows differently depending on the system:
     rows define XP as normal — these are the primary XP source since no
     sub-recipes are executed.
 
-  systemType = "farming"
-    Invokes farming harvest/growth logic. XP defined on ActionType_DisciplineReward.
-    (Farming system not yet implemented — see farming-system.md.)
+  systemType = "farming_plant"
+    Entity plants a propagation item into an open plot slot. Consumes the
+    StoredItem and creates a PlotCrop. Reads Item.plantDefId for the PlantDef.
+
+  systemType = "farming_harvest"
+    Harvests a mature PlotCrop using PlantDef.harvestDropTableId. Crop remains.
+
+  systemType = "farming_uproot"
+    Uproots a PlotCrop at any stage using PlantDef.uprootDropTableId. Crop deleted.
+
+  systemType = "farming_crossbreed"
+    Cross-breeds two mature PlotCrops sharing the same root PlantDef.
+    Solo only (maxCats = 1). Gated via ActionType_DisciplineRequirement.
+    On success: new ephemeral PlantDef + ephemeral seed Item created.
+    On failure: offspring inherits one parent's PlantDef unchanged.
+
+  systemType = "farming_tend"
+    Applies Compost to a Plot, increasing Plot.soilQuality. Consumes a
+    Compost StoredItem from storage.
+
+  systemType = "farming_water"
+    Daily tending action. Updates PlotCrop_TendRecord, increments PlotCrop.carePoints
+    by 1. If the performing entity has a matching Ability_PlotBuff, writes a
+    growth_rate Plot_Buff on the target plot (or refreshes its expiresAt).
+    tendCooldownHours = 24. tendCarePoints = 1.
+
+  systemType = "farming_prune"
+    Weekly tending action. Updates PlotCrop_TendRecord, increments PlotCrop.carePoints
+    by 7. If the performing entity has a matching Ability_PlotBuff, writes a
+    yield Plot_Buff on the target plot (or refreshes its expiresAt).
+    tendCooldownHours = 168. tendCarePoints = 7.
+
+  systemType = "farming_fertilize"
+    Weekly tending action. Updates PlotCrop_TendRecord, increments PlotCrop.carePoints
+    by 7. If the performing entity has a matching Ability_PlotBuff, writes a
+    decay_resistance Plot_Buff on the target plot (or refreshes its expiresAt).
+    tendCooldownHours = 168. tendCarePoints = 7.
+
+  TENDING ACTIONS — ActionSystemType fields
+    tendCooldownHours  Int?  Hours before this action can be performed again on the
+                             same PlotCrop. Null for non-tending actions.
+    tendCarePoints     Int?  Points added to PlotCrop.carePoints on completion.
+                             Null for non-tending actions.
+
+  See farming-system.md section 7 for full farming action type reference.
+
+
+─────────────────────────────────────────────
+5c. ACTION DISCIPLINE REQUIREMENTS
+─────────────────────────────────────────────
+
+ActionType_DisciplineRequirement gates an action type behind a minimum discipline
+level. Guild-specific — each guild controls which of their action types are gated
+and at what threshold.
+
+  guildId          String   The guild that owns this requirement.
+  actionTypeId     Int      FK → ActionType
+  disciplineDefId  Int      FK → DisciplineDef
+  minLevel         Int      Minimum discipline level required.
+  scope            String   Who must meet the requirement:
+                              "leader" — only the leader entity must qualify.
+                              "all"    — every participant must qualify.
+
+No rows for a given action type = no gate; any entity may perform it.
+Multiple rows on the same action type are all enforced (AND logic) — an entity
+could be required to meet both Farming level 3 AND Crafting level 2.
+
+EXAMPLE — Cross-breeding (farming guild gate):
+  actionTypeId → cross_breed
+  disciplineDefId → Farming
+  minLevel → 5
+  scope → "leader"   (solo action; only the performing entity is checked)
+
+EXAMPLE — Advanced Herb Gathering (all participants must qualify):
+  actionTypeId → advanced_herb_gather
+  disciplineDefId → Farming
+  minLevel → 3
+  scope → "all"
 
 
 ─────────────────────────────────────────────
@@ -183,6 +258,7 @@ flows differently depending on the system:
   ActionType_DisciplineReward   — per-discipline XP rewards; PK is (actionTypeId, disciplineId, recipientScope)
                                   allowing the same discipline to reward winners and losers at different amounts
   ActionType_DefaultItem        — items shadow-equipped during the action
+  ActionType_DisciplineRequirement — guild-specific discipline level gates per action type
   ActionInstance                     — a single in-progress or completed run
   ActionInstance_Entity              — per-participant record with reward snapshots
   ActionInstance_Entity_DisciplineXp — per-discipline XP snapshot per participant

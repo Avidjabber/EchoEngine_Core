@@ -169,6 +169,74 @@ Modifies damage taken or dealt for a specific damage type.
   modifier     — 1.0 = normal, 0.5 = resistance (half), 2.0 = vulnerability (double)
   isImmune     — true = no damage of this type; overrides modifier
 
+─────────────────────────────────────────────
+4h. Ability_ActionTrigger
+─────────────────────────────────────────────
+
+Fires an effect when the entity performs a specific action type. Unlike the other
+effect tables (which are passive and always-on), these effects are event-driven —
+they activate on action resolution.
+
+One ability can have multiple Ability_ActionTrigger rows for different actions or
+different effects on the same action.
+
+  triggerSystemType  String  FK → ActionSystemType. The action that fires this trigger.
+  targetScope        String  Who receives the effect:
+                               "self"                — the performing entity
+                               "action_target"       — the direct target of the action
+                                                       (a plot for farming, an entity for
+                                                       combat/social actions)
+                               "action_participants" — all entities in the action instance
+                               "area"                — all valid targets at the camp or location
+  triggerOn          String  When the trigger fires:
+                               "completion" — on action completion regardless of outcome (default)
+                               "success"    — only on a successful outcome
+                               "failure"    — only on a failed outcome
+  triggerChance      Float   0.0–1.0. Probability the trigger fires each time. Default 1.0.
+                             Skill progression naturally expresses itself here — a tier-1
+                             ability at 0.3, a tier-2 ability at 0.6, a mastery node at 1.0.
+                             Higher-tier SkillTreeNodes grant higher-chance variants of the
+                             same conceptual ability.
+  effectType         String  What kind of effect to apply:
+                               "plot_buff"      — writes a Plot_Buff on the target plot(s)
+                               "stat_mod"       — temporary stat modifier on a target entity
+                               "energy_restore" — restores energy to a target entity
+                             Extensible — new effectTypes added as systems require them.
+  stackBehavior      String  How multiple applications interact on the same target:
+                               "refresh" — updates/extends an existing effect (default)
+                               "stack"   — applies additively on top of existing effect
+                               "ignore"  — does not apply if the effect is already present
+
+  Effect-specific fields (null when not applicable to the effectType):
+
+  effectType = "plot_buff":
+    buffEffectType  String?  growth_rate | yield | decay_resistance
+    effectValue     Float?   Delta applied to the plot buff.
+    durationHours   Int?     How long the buff lasts before expiring.
+
+  effectType = "stat_mod":
+    statId          Int?     FK → Stat. Which stat is temporarily modified.
+    statValue       Float?   Positive = bonus, negative = penalty.
+    durationHours   Int?
+
+  effectType = "energy_restore":
+    energyAmount    Float?   Amount restored. Capped at entity's max energy.
+
+EXAMPLE — Farming skill tree, two tiers of the same watering buff:
+  "Green Thumb I"  (Farming level 3, SkillTreeNode):
+    triggerSystemType = "farming_water"
+    targetScope       = "action_target"
+    triggerOn         = "completion"
+    triggerChance     = 0.3
+    effectType        = "plot_buff"
+    buffEffectType    = "growth_rate"
+    effectValue       = 0.2
+    durationHours     = 24
+    stackBehavior     = "refresh"
+
+  "Green Thumb II"  (Farming level 6, SkillTreeNode):
+    Same as above but triggerChance = 0.6
+
 
 ─────────────────────────────────────────────
 5. CONTEXT GATES (biomeId / weatherStateId)
@@ -196,13 +264,14 @@ Null biomeId or weatherStateId means the effect applies in all contexts.
   SkillTreeNode_Prerequisite — prerequisite edges between nodes
   Entity_SkillTreeNode       — records which nodes an entity has obtained
 
-  Ability_StatModifier       — stat bonuses/penalties with optional context gates
+  Ability_StatModifier        — stat bonuses/penalties with optional context gates
   Ability_ProficiencyModifier — proficiency roll bonuses with optional gates
-  Ability_MultiplierEffect   — rate/yield multipliers with optional gates
-  Ability_GrantedAction      — unlocked item actions
-  Ability_CombatBehavior     — combat behavior intercepts
+  Ability_MultiplierEffect    — rate/yield multipliers with optional gates
+  Ability_GrantedAction       — unlocked item actions
+  Ability_CombatBehavior      — combat behavior intercepts
   Ability_ConditionResistance — condition resistance/immunity
-  Ability_DamageModifier     — damage type modifiers
+  Ability_DamageModifier      — damage type modifiers
+  Ability_ActionTrigger       — action-triggered effects: plot buffs, stat mods, energy restore
 
 
 ─────────────────────────────────────────────
@@ -222,3 +291,12 @@ Null biomeId or weatherStateId means the effect applies in all contexts.
 
   Species     — Species_DefaultAbility replaces legacy "Trait" conditions for
                 inherent species traits.
+
+  Farming     — Ability_ActionTrigger with targetScope = "action_target" and
+                effectType = "plot_buff" is how farming skill tree nodes write
+                Plot_Buff rows on tended plots. triggerChance naturally expresses
+                skill progression — higher-tier nodes grant higher chance variants.
+                See farming-system.md for Plot_Buff and PlotCrop_TendRecord details.
+
+  Actions     — Ability_ActionTrigger.triggerSystemType links to ActionSystemType.
+                Any action systemType can be a trigger — farming, combat, scouting, etc.

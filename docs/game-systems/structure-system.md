@@ -1,0 +1,346 @@
+STRUCTURE & CAMP SYSTEM — DESIGN REFERENCE
+==========================================
+Last updated: 2026-04-03
+
+This file is the authoritative reference for how camps and structures work in
+EchoPaw. Read this before touching camp creation, structure definitions, upgrade
+paths, construction progression, or any system that reads structure state.
+
+
+─────────────────────────────────────────────
+1. OVERVIEW
+─────────────────────────────────────────────
+
+Camps are named collections of structures belonging to a faction at a specific
+location. A faction may have zero or more camps — factions with no fixed territory
+(e.g. a raider band) have none.
+
+The system is split across three ownership layers:
+
+  Engine (seeded)    — StructureType defines the mechanical categories (storage,
+                       farming, etc.) and what properties each category exposes.
+  Guild (defined)    — StructureDef is the guild's named structure: what it costs
+                       to build, its base values, and its upgrade path.
+  Instance           — Structure is a specific built installation in a camp.
+
+This means the engine ships with "here is what storage means mechanically." Each
+guild decides what their storage structure is called, what it costs, and how it
+can be upgraded — or whether upgrades exist at all.
+
+
+─────────────────────────────────────────────
+2. CAMP
+─────────────────────────────────────────────
+
+A Camp represents a faction's physical presence at a location. Camps are
+admin-created records — there is no construction process for a camp itself.
+The work is in the structures built within it.
+
+  Field       │ Purpose
+  ────────────┼──────────────────────────────────────────────────────────────
+  factionId   │ FK → Faction. The owning faction.
+  locationId  │ FK → Location. A camp is always tied to exactly one location.
+  name        │ Display name (e.g. "Main Camp", "Northern Outpost")
+  description │ Optional flavour text.
+  filthLevel  │ Int. Current filth accumulation at this camp. Drives filth-trigger
+              │ events. Tracked per camp, not per faction or guild.
+
+Key rules:
+  - A faction may have zero camps (no home territory required).
+  - A faction may have multiple camps at different locations.
+  - Multiple factions may have camps at the same location (contested territory).
+
+STRUCTURE LIMITS
+─────────────────
+Camp_StructureLimit defines how many structures of each type may exist in a camp.
+No row for a given type means that type cannot be built there at all.
+
+  campId           │ FK → Camp
+  structureTypeId  │ FK → StructureType
+  maxCount         │ Int. Maximum number of active structures of this type allowed.
+
+The app enforces this limit when a new Construction is initiated: the count of
+active (non-destroyed) structures of that type in the camp must be below maxCount.
+Destroyed structures do not count against the limit — a replacement can always
+be built up to the cap.
+
+
+─────────────────────────────────────────────
+3. STRUCTURE TYPES (SEEDED)
+─────────────────────────────────────────────
+
+StructureType is the engine-seeded category layer. It defines the mechanical
+purpose of a structure and which effect types are valid for upgrades on it.
+Guilds do not create StructureType rows — they reference them when defining
+their own StructureDefs.
+
+  Seeded types:
+
+  Name      │ Purpose
+  ──────────┼──────────────────────────────────────────────────────────────
+  storage   │ Holds items. Exposes capacity and rot rate properties.
+  farming   │ Contains plots for growing crops. Exposes plot count and growth rate.
+  housing   │ Provides living quarters for entities. (Properties TBD.)
+  other     │ General-purpose; no engine-managed properties.
+
+VALID EFFECT TYPES PER CATEGORY
+─────────────────────────────────
+  storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating
+  farming:  plot_count | growth_rate | season_override | env_override
+  housing:  (TBD)
+  other:    (none enforced — guild may define custom behaviour)
+
+
+─────────────────────────────────────────────
+4. STRUCTURE DEFINITIONS (GUILD-DEFINED)
+─────────────────────────────────────────────
+
+StructureDef is the guild's specific named structure. It references a seeded
+StructureType and defines everything about how that structure is built and upgraded.
+
+  Field            │ Purpose
+  ─────────────────┼────────────────────────────────────────────────────────
+  guildId          │ Owning guild.
+  structureTypeId  │ FK → StructureType. Determines mechanical behaviour.
+  name             │ Internal key e.g. "mossy_storage_den"
+  displayName      │ User-facing label.
+  description      │ Optional flavour text.
+  constructionHours│ Labour hours required for the initial build.
+
+Base values for type-specific properties are defined on extension config rows
+(see section 4a). These represent the structure's state before any upgrades apply.
+
+StructureDef_BuildCost defines the items required to initiate the initial build:
+
+  structureDefId  │ FK → StructureDef
+  itemId          │ FK → Item
+  quantity        │ Int
+
+4a. TYPE-SPECIFIC BASE CONFIG
+───────────────────────────────
+  StructureDef_StorageConfig  (for structureTypeId = storage)
+    structureDefId       FK → StructureDef
+    baseCapacitySolids   Int
+    baseCapacityLiquids  Int
+    baseRotModifier      Float  (1.0 = no effect; < 1.0 = slower rot)
+
+  StructureDef_FarmingConfig  (for structureTypeId = farming)
+    structureDefId       FK → StructureDef
+    plotTypeId           FK → PlotType. All plots in this structure share this type.
+    basePlotCount        Int. Number of plots created when the structure is built.
+    defaultSoilQuality   Float. soilQuality assigned to each plot when created.
+                         Guild-defined — e.g. 1.0 for a basic garden, 1.2 for a
+                         pre-composted bed. Applies to plots added by upgrades too.
+
+
+─────────────────────────────────────────────
+5. UPGRADES (GUILD-DEFINED)
+─────────────────────────────────────────────
+
+StructureDef_Upgrade defines a discrete, independently applicable upgrade for
+a specific StructureDef. Upgrades are modular — there is no required linear
+path. A guild may define as many or as few upgrade options as they like, or none.
+
+  Field            │ Purpose
+  ─────────────────┼────────────────────────────────────────────────────────
+  structureDefId   │ FK → StructureDef
+  name             │ Internal key e.g. "irrigation", "rat_proofing"
+  displayName      │ User-facing label
+  description      │ Plain-language description of what this upgrade does.
+  effectType       │ Which property this upgrade modifies. Must be valid for the
+                   │ parent StructureDef's StructureType. See section 3.
+  effectValue      │ Float. The delta applied per application (additive).
+  maxApplications  │ Int. Max times this upgrade may be applied to one structure.
+                   │ 1 = one-time only; > 1 = stackable up to this limit.
+  constructionHours│ Int. Labour hours required to apply this upgrade.
+
+StructureDef_Upgrade_BuildCost defines items required to apply the upgrade:
+
+  upgradeId  │ FK → StructureDef_Upgrade
+  itemId     │ FK → Item
+  quantity   │ Int
+
+EXAMPLE — Guild-defined upgrades for a "Mossy Storage Den" (type: storage):
+  "solid_expansion"  effectType: solid_capacity,  effectValue: 20,   maxApplications: 3
+  "liquid_barrels"   effectType: liquid_capacity, effectValue: 10,   maxApplications: 3
+  "cold_storage"     effectType: rot_modifier,    effectValue: -0.2, maxApplications: 2
+  "rat_proofing"     effectType: security_rating, effectValue: 1,    maxApplications: 1
+
+EXAMPLE — Guild-defined upgrades for a "Bramble Garden" (type: farming):
+  "extra_plots"      effectType: plot_count,      effectValue: 3,    maxApplications: 6
+  "irrigation"       effectType: growth_rate,     effectValue: 0.15, maxApplications: 1
+  "greenhouse_cover" effectType: season_override, effectValue: 0.5,  maxApplications: 2
+  "windbreak"        effectType: env_override,    effectValue: 0.5,  maxApplications: 1
+
+SEASON AND ENV OVERRIDE EFFECTS
+──────────────────────────────────
+  season_override and env_override pull modifiers toward 1.0 (neutral) rather than
+  adding a flat delta. The effective value is capped at 1.0 (full override).
+
+  structure_season_override = MIN(1.0, SUM of season_override effectValues applied)
+  structure_env_override    = MIN(1.0, SUM of env_override effectValues applied)
+
+  effectiveSeasonMod (per crop tick) =
+    seasonMod + (1.0 − seasonMod) × structure_season_override
+
+  effectiveEnvMod (per active env condition) =
+    envMod + (1.0 − envMod) × structure_env_override
+
+  Examples:
+    season dormant (0.0) + 0.5 override → 0.5 effective (half speed, not stopped)
+    season dormant (0.0) + 1.0 override → 1.0 effective (full greenhouse, season ignored)
+    env stunted  (0.0) + 0.5 override → 0.5 effective
+    env boosted  (1.5) + any override  → unchanged (override only pulls toward 1.0, not above)
+
+
+─────────────────────────────────────────────
+6. STRUCTURE INSTANCES
+─────────────────────────────────────────────
+
+Structure tracks a single built (or in-progress) installation within a camp.
+
+  Field          │ Purpose
+  ───────────────┼──────────────────────────────────────────────────────────
+  id             │
+  campId         │ FK → Camp
+  structureDefId │ FK → StructureDef
+  status         │ active | under_construction | destroyed
+  name           │ Optional custom label for this specific structure.
+
+Structure_AppliedUpgrade records each upgrade application. One row is created
+per application when the upgrade's Construction completes.
+
+  structureId  │ FK → Structure
+  upgradeId    │ FK → StructureDef_Upgrade
+  appliedAt    │ DateTime
+
+Checking whether a further application is allowed:
+  COUNT(Structure_AppliedUpgrade WHERE structureId AND upgradeId) < StructureDef_Upgrade.maxApplications
+
+Effective values are computed at runtime:
+  effectiveValue = base (from StructureDef config) + SUM(effectValue per applied upgrade row)
+
+TYPE-SPECIFIC EXTENSIONS
+──────────────────────────
+  Structure_Storage  (1:1; for structureTypeId = storage)
+    structureId        FK → Structure
+    storageId          FK → Storage
+    weightCapacity     Float?  — null = no weight limit; scales with solid_capacity upgrades
+    fluidCapacity      Float?  — null = no fluid limit; scales with liquid_capacity upgrades
+    expirationModifier Float   — default 1.0; scales with rot_modifier upgrades
+    isPrimaryStorage   Boolean — faction's designated primary for its accepted item types
+    acceptedTypes      via Structure_Storage_ItemType (storageId, itemTypeId)
+
+  When an upgrade with effectType solid_capacity, liquid_capacity, or rot_modifier
+  completes, the app recomputes the effective value and updates the Structure_Storage
+  row directly.
+
+  Farming structures use Plot.structureId (FK → Structure) to link plots to their
+  parent structure. Each Plot is one growing slot — PlotType and defaultSoilQuality
+  come from StructureDef_FarmingConfig. Location is derived via Structure → Camp.
+  New Plot rows are created when a plot_count upgrade completes, initialized with
+  StructureDef_FarmingConfig.defaultSoilQuality.
+
+
+─────────────────────────────────────────────
+7. CONSTRUCTION
+─────────────────────────────────────────────
+
+Every structure begins as a Construction project before becoming active. Upgrades
+also go through Construction. A Construction record exists for the duration of
+the build and closes on completion.
+
+  Field                │ Purpose
+  ─────────────────────┼──────────────────────────────────────────────────
+  id                   │
+  structureId          │ FK → Structure
+  upgradeId            │ FK → StructureDef_Upgrade. null = initial build;
+                       │ non-null = applying a specific upgrade.
+  hoursRequired        │ Total labour hours to complete.
+  hoursRemaining       │ Decrements as entities contribute. 0 = complete.
+  initiatedByEntityId  │ FK → Entity. Must be the faction leader.
+  startedAt            │ DateTime
+  completedAt          │ DateTime. Set on completion; null while in progress.
+
+Item costs (StructureDef_BuildCost or StructureDef_Upgrade_BuildCost) are consumed
+from faction storage when the Construction is initiated.
+
+On completion (hoursRemaining = 0):
+  - Initial build → Structure.status set to active
+  - Upgrade       → Structure_AppliedUpgrade row created; effect applies immediately
+                    For plot_count upgrades: new Plot rows created for the structure
+
+CONTRIBUTING TO CONSTRUCTION
+──────────────────────────────
+After a leader initiates construction, any faction member may contribute.
+Contributing uses the systemType = "structure_contribute" action:
+
+  - Energy cost:       GuildSettings.defaultDailyEnergy ÷ 8 per contribution
+  - Effect:            Construction.hoursRemaining − 1
+  - Reward:            Clan rep (baseClanRepReward on the ActionType)
+  - Natural daily cap: energy runs out after 8 contributions (one full work day)
+
+The bot presents active Construction projects in the faction's camps; the player
+selects one and the action resolves immediately with no further tracking needed.
+
+
+─────────────────────────────────────────────
+8. RELATIONSHIP TO OTHER SYSTEMS
+─────────────────────────────────────────────
+
+  Factions   — Camp.factionId links a camp to its owning faction. A faction with
+               no camps has no fixed territory and no structures or storage.
+
+  Locations  — Camp.locationId places the camp in the world. Farming structures
+               inherit their location's biome and env conditions for crop growth.
+
+  Farming    — Plot.structureId links plots to their farming structure.
+               See farming-system.md for growth, harvest, and crop logic.
+
+  Storage    — Structure_Storage links storage structures to a Storage instance.
+               StoredItem rows live under that Storage record.
+
+  Actions    — Construction contribution uses systemType = "structure_contribute".
+               Energy, clan rep, and the daily contribution cap are all governed
+               by the existing action and energy systems.
+
+  Items      — Build and upgrade item costs are consumed from faction storage on
+               Construction initiation.
+
+
+─────────────────────────────────────────────
+9. OPEN QUESTIONS
+─────────────────────────────────────────────
+
+  1. StructureType list — are storage | farming | housing | other the complete
+     seeded set, or are additional types needed?
+
+  2. Housing base config — what properties does the housing type expose?
+     To be designed when the housing system is built out.
+
+  3. Storage table definition — the Storage and StoredItem tables need to be fully
+     defined. Structure_Storage references Storage but that schema is not yet
+     documented. (Next discussion topic.)
+
+  4. Raid / security system — security_rating is defined as an effect type but the
+     mechanic that reads it (raiding faction storage) is not yet designed.
+
+
+─────────────────────────────────────────────
+10. SCHEMA SUMMARY
+─────────────────────────────────────────────
+
+  StructureType                  — seeded category: storage | farming | housing | other
+  Camp_StructureLimit            — per-camp cap on how many structures of each type may be built
+  StructureDef                   — guild-defined named structure; references a StructureType
+  StructureDef_BuildCost         — items required for initial build
+  StructureDef_StorageConfig     — base capacity and rot values for storage-type defs
+  StructureDef_FarmingConfig     — base plot count for farming-type defs
+  StructureDef_Upgrade           — guild-defined modular upgrade for a StructureDef
+  StructureDef_Upgrade_BuildCost — items required to apply an upgrade
+  Camp                           — faction + location pairing; zero or more per faction
+  Structure                      — a single installation within a camp
+  Structure_AppliedUpgrade       — record of each upgrade application on a structure
+  Structure_Storage              — 1:1 extension; owns the storage record and carries capacity/rot/type rules
+  Structure_Storage_ItemType     — item types accepted by a structure storage
+  Construction                   — active or completed build/upgrade project
