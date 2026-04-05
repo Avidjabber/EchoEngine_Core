@@ -88,6 +88,10 @@ model GuildSettings {
   // Worker skips firing any new global-scope event if now() < lastEventAt + EventDef.cooldownDays.
   lastEventAt DateTime? @db.Timestamptz
 
+  // Max discipline level an entity in this guild can reach. null = no cap.
+  // Stat points are not capped — only discipline levels. Applies to all disciplines equally.
+  disciplineLevelCap Int?
+
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt      @db.Timestamptz
 
@@ -180,8 +184,10 @@ model EnvCondition {
   proficiencyModifiers     EnvCondition_ProficiencyModifier[]
   worldModifiers     EnvCondition_Modifier[]
   eventWeights       EnvCondition_EventDef[]
-  conditionEnvRules  ConditionDef_EnvRule[]
-  plantDefEnvConditions PlantDef_EnvCondition[]
+  conditionEnvRules     ConditionDef_EnvRule[]
+  plantDefRequiredEnvConditions PlantDef_RequiredEnvCondition[]
+  plotTypeEnvConditions         PlotType_EnvCondition[]
+  structureUpgradeTargets       StructureDef_Upgrade[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -404,7 +410,6 @@ model Stat {
   profilesAsHealStat   ItemEquipmentProfile[] @relation("ProfileHealStat")
   conditionCombatEffects       ConditionDef_CombatEffect[]
   abilityStatModifiers   Ability_StatModifier[]
-  abilityActionTriggers  Ability_ActionTrigger[]
 }
 
 // Symptom labels — shared between ConditionDef (via ConditionDef_SymptomTag) and ItemEffect.
@@ -1150,25 +1155,25 @@ model Ability_ActionTrigger {
   targetScope       String  @db.VarChar(50)  // "self" | "action_target" | "action_participants" | "area"
   triggerOn         String  @db.VarChar(20)  // "completion" | "success" | "failure"
   triggerChance     Float   @default(1.0)    // 0.0–1.0 probability the trigger fires
-  effectType        String  @db.VarChar(50)  // "plot_buff" | "stat_mod" | "energy_restore"
+  effectType        String  @db.VarChar(50)  // "plot_buff" | "condition_grant" | "energy_restore"
   stackBehavior     String  @db.VarChar(20)  @default("refresh")  // "refresh" | "stack" | "ignore"
 
   // effectType = "plot_buff"
   buffEffectType String? @db.VarChar(50)  // growth_rate | yield | decay_resistance
   effectValue    Float?
-  durationHours  Int?
+  durationHours  Int?                     // how long the plot buff lasts before expiring
 
-  // effectType = "stat_mod"
-  statId     Int?
-  statValue  Float?
-  // durationHours shared with plot_buff above
+  // effectType = "condition_grant"
+  // The condition system handles duration, ticks, and stat effects.
+  // stackBehavior governs what happens if the entity already has this condition active.
+  conditionDefId Int?
 
   // effectType = "energy_restore"
   energyAmount Float?
 
-  abilityDef        AbilityDef       @relation(fields: [abilityDefId],        references: [id], onDelete: Cascade)
-  triggerSystemTypeRel ActionSystemType @relation(fields: [triggerSystemType], references: [id], onDelete: Restrict)
-  stat              Stat?            @relation(fields: [statId],               references: [id], onDelete: Restrict)
+  abilityDef           AbilityDef       @relation(fields: [abilityDefId],        references: [id], onDelete: Cascade)
+  triggerSystemTypeRel ActionSystemType @relation(fields: [triggerSystemType],    references: [id], onDelete: Restrict)
+  conditionDef         ConditionDef?    @relation(fields: [conditionDefId],       references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
   @@index([triggerSystemType])
@@ -1301,7 +1306,8 @@ model ConditionDef {
   itemWarnings          ItemWarning[]
   entityConditions      EntityCondition[]
   damageModifiers       ConditionDef_DamageModifier[]
-  behaviorEffects      ConditionBehaviorEffect[]
+  behaviorEffects       ConditionBehaviorEffect[]
+  abilityActionTriggers Ability_ActionTrigger[]
   grantedItems         ConditionDef_GrantedItem[]
   abilityResistances   Ability_ConditionResistance[]
 
@@ -1833,7 +1839,12 @@ model StructureDef_Upgrade {
   maxApplications Int
   constructionPoints Int
 
-  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  // Only set when effectType = "env_override". Targets a specific env condition to counteract
+  // at this structure (e.g. Drought, Cold). App enforces this is non-null for env_override upgrades.
+  targetEnvConditionId Int?
+
+  structureDef     StructureDef  @relation(fields: [structureDefId],        references: [id], onDelete: Cascade)
+  targetEnvCondition EnvCondition? @relation(fields: [targetEnvConditionId], references: [id], onDelete: Restrict)
 
   buildCosts       StructureDef_Upgrade_BuildCost[]
   appliedUpgrades  Structure_AppliedUpgrade[]
@@ -4242,12 +4253,39 @@ model PlantTrait {
 
 // Lookup table of plot environment types. Seeded globally; never altered via app.
 // e.g. Garden Bed, Crop Field, Orchard, Mushroom Substrate, Bog Bed, Aquatic Bed, Trellis, Rocky Bed, Shaded Bed
+// Guild-defined plot environment type. Admins create these per server.
+// Each plot type can declare env conditions that are always active for plants in it,
+// stacking with the location's real env conditions in the growth formula.
 model PlotType {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(100)
+  id          Int     @id @default(autoincrement())
+  guildId     String  @default("global") @db.VarChar(50)
+  name        String  @db.VarChar(100)
+  description String? @db.VarChar(500)
+
+  // Maximum soilQuality this plot type can reach via composting. Prevents indefinite improvement.
+  // e.g. 2.0 = plots in this type can reach up to double base growth/yield from soil alone.
+  soilQualityCap Float @default(2.0)
 
   plantDefPlotTypes PlantDef_PlotType[]
   farmingConfigs    StructureDef_FarmingConfig[]
+  envConditions     PlotType_EnvCondition[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+// Env conditions that are always active for plants growing in this plot type.
+// These stack additively with the location's actual env conditions.
+// Use this to model controlled environments: a hydroponics bay always has Cultivated + Watered;
+// a mushroom cave always has Damp; an open field has nothing (growth depends on real location env).
+model PlotType_EnvCondition {
+  plotTypeId     Int
+  envConditionId Int
+
+  plotType     PlotType     @relation(fields: [plotTypeId],     references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+
+  @@id([plotTypeId, envConditionId])
 }
 
 // Definition of a growable plant. Base plants are seeded globally.
@@ -4269,7 +4307,6 @@ model PlantDef {
   harvestDropTableId Int      // FK → DropTable; used for harvest_crop and wild foraging
   uprootDropTableId  Int      // FK → DropTable; used for uproot_crop; higher/different yield
   propagationItemId  Int?     // FK → Item; the seed/spore/cutting consumed on planting; null if not yet assigned
-  requiresCultivated Boolean  @default(false)  // if true, plant will not grow without Cultivated EnvCondition
   mutationChance     Float    @default(0.7)    // controls mutations at cross-breeding; floor = guaranteed, decimal = chance of +1
 
   rootPlantDef   PlantDef?  @relation("PlantDefLineage", fields: [rootPlantDefId], references: [id], onDelete: Restrict)
@@ -4279,13 +4316,13 @@ model PlantDef {
   uprootDropTable   DropTable @relation("PlantDefUprootDrop",  fields: [uprootDropTableId],  references: [id], onDelete: Restrict)
   propagationItem   Item?     @relation("PlantDefPropagationItem", fields: [propagationItemId], references: [id], onDelete: SetNull)
 
-  seedItems      Item[]               @relation("ItemPlantDef")           // items whose Item.plantDefId points here
-  plotTypes      PlantDef_PlotType[]
-  biomes         PlantDef_Biome[]
-  envConditions  PlantDef_EnvCondition[]
-  seasons        PlantDef_Season[]
-  traits         PlantDef_Trait[]
-  plotCrops      PlotCrop[]
+  seedItems             Item[]               @relation("ItemPlantDef")  // items whose Item.plantDefId points here
+  plotTypes             PlantDef_PlotType[]
+  biomes                PlantDef_Biome[]
+  requiredEnvConditions PlantDef_RequiredEnvCondition[]
+  seasons               PlantDef_Season[]
+  traits                PlantDef_Trait[]
+  plotCrops             PlotCrop[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -4320,13 +4357,14 @@ model PlantDef_Biome {
   @@id([plantDefId, biomeId])
 }
 
-// Env condition growth modifiers for a plant.
-// No row for a condition = neutral (100). Absence ≠ dormancy.
-// All active env condition modifiers multiply together; any 0 stops growth.
-model PlantDef_EnvCondition {
-  plantDefId          Int
-  envConditionId      Int
-  growthRateModifier  Int @default(100)  // percentage; >100 = improves; <100 = worsens; 0 = stunted
+// Env conditions required for a plant to be planted AND to grow each tick.
+// ALL listed conditions must be present in the combined active set
+// (location env conditions + PlotType_EnvCondition rows) for planting to be allowed
+// and for growth ticks to advance. If conditions are lost after planting, growth pauses.
+// No rows = no env condition restriction.
+model PlantDef_RequiredEnvCondition {
+  plantDefId     Int
+  envConditionId Int
 
   plantDef     PlantDef     @relation(fields: [plantDefId],     references: [id], onDelete: Cascade)
   envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
@@ -4335,12 +4373,14 @@ model PlantDef_EnvCondition {
 }
 
 // Per-season growth rates for a plant.
-// No row for a season = dormant (0) — growth does not advance.
-// Year-round plants require 4 explicit rows at 100.
+// No row = plant does not grow in that season (dormant — tick skipped).
+// 1.0 = full base growth rate; 0.5 = half speed; 0.0 = effectively dormant.
+// 1.0 is the intended maximum — values above 1.0 are not meaningful.
+// Year-round plants require an explicit row per season at 1.0.
 model PlantDef_Season {
-  plantDefId          Int
-  seasonId            Int
-  growthRateModifier  Int @default(100)  // percentage; 100 = base; 0 = dormant
+  plantDefId         Int
+  seasonId           Int
+  growthRateModifier Float @default(1.0)  // 0.0–1.0 multiplier on growth rate; no row = dormant
 
   plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
   season   Season   @relation(fields: [seasonId],   references: [id], onDelete: Restrict)

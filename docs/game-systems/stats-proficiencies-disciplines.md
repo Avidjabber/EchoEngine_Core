@@ -41,10 +41,14 @@ Stat point progression is tracked via the same tables as disciplines:
   DisciplineDef (isStatProgression = true)
     baseXp      — flat XP required to earn each stat point (universal, not per-guild)
                   earning your 15th point costs the same as your 1st — no scaling curve
+    dailyXpCap  — maximum stat-progression XP an entity may earn per day; keeps casual
+                  and power users roughly in step for stat points while letting dedicated
+                  players earn more discipline XP freely. Discipline rows have no daily cap.
 
   Entity_Discipline (for the stat progression row)
     currentXp   — XP accumulated toward the next stat point; resets on each point earned
-    level       — total stat points ever earned by this entity
+    level       — total stat points ever earned by this entity (not a discipline "level" —
+                  the field name is shared; meaning depends on isStatProgression flag)
 
   EntityStats
     skillPoints — unallocated stat points waiting to be spent
@@ -52,17 +56,26 @@ Stat point progression is tracked via the same tables as disciplines:
 The app excludes the isStatProgression row from discipline listings and applies
 the flat threshold instead of the level^1.5 curve used by real disciplines.
 
-Stat points are spent to increase proficiency bonuses (Entity_Proficiency.bonus)
-or to purchase skill tree nodes (SkillTreeNode.statPointCost > 0).
-
 SPENDING & REFUNDS
 ───────────────────
   EntityStats.skillPoints holds the current unallocated count.
-  On purchase: statPointCost is immediately deducted in the same DB write.
-  On node removal (respec): statPointCost is immediately refunded.
+  Points may be spent in three ways — there is no separate pool for each:
+
+  1. Raw stat increase: spend 1 point to increase any base stat (Strength, Dexterity,
+     Constitution, Intelligence, Wisdom, Charisma) by 1. No upper limit beyond any
+     species-level or admin-defined cap already in place.
+     App writes: EntityStats.<stat> += 1, skillPoints -= 1
+
+  2. Proficiency bonus: spend points to increase Entity_Proficiency.bonus on any
+     proficiency. No enforced cap on bonus value.
+     App writes: Entity_Proficiency.bonus += amount, skillPoints -= amount
+
+  3. Skill tree node: spend the node's statPointCost to purchase an unlocked node.
+     App writes: Entity_SkillTreeNode row created, skillPoints -= statPointCost
+
+  On node removal (respec): statPointCost is immediately refunded to skillPoints.
   A spend is rejected if skillPoints < cost at the time of the request.
-  Points may be spent freely between proficiency bonuses and skill tree nodes —
-  there is no separate pool for each.
+  Stat increases and proficiency bonus purchases are not refundable.
 
 See ability-system.md for the full ability effect reference.
 
@@ -130,12 +143,17 @@ Quick reference:
   Combat   │ Fighting effectiveness and battle experience
   Scouting │ Patrol, territory awareness, threat detection
   Social   │ Leadership, diplomacy, faction influence
-  Training │ Mentoring and accelerating other entities' growth
 
 XP formula: floor(baseXp × level^1.5)   where baseXp = 100 (default)
+Discipline XP has no daily cap. Only the stat progression row has a dailyXpCap.
 
 Every entity starts with a row for each discipline at level 0, currentXp 0,
 created automatically at entity creation.
+
+DISCIPLINE LEVEL CAP
+─────────────────────
+GuildSettings.disciplineLevelCap (Int?) sets the max discipline level for all
+disciplines in the guild. null = no cap. See discipline-system.md for full details.
 
 
 ─────────────────────────────────────────────
@@ -145,6 +163,7 @@ created automatically at entity creation.
   Stats ──────► Proficiency rolls (stat modifier feeds into 1d20 check)
      │
      └──────────► Stat points (tracked via Entity_Discipline on the isStatProgression row)
+                    ├─► spend 1:1 on raw stat increases (EntityStats.<stat> += 1)
                     ├─► spend on proficiency bonuses (Entity_Proficiency.bonus)
                     └─► spend on skill tree nodes (SkillTreeNode.statPointCost) → grants Abilities
 

@@ -105,8 +105,11 @@ stored on ActionInstance_Entity.clanRepEarned.
 
 Each guild has a GuildSettings row controlling bot-wide configuration:
 
-  defaultDailyEnergy   — energy replenished per entity per daily tick
-  currentSeasonId      — the active season for this guild
+  defaultDailyEnergy    — energy replenished per entity per daily tick
+  currentSeasonId       — the active season for this guild
+  disciplineLevelCap    — Int?; max discipline level for all entities in the guild; null = no cap
+                          Stat points are not capped — only discipline progression levels.
+  defaultProficiencyBonus — flat bonus added to proficiency rolls when an entity is proficient
   (other settings TBD as system is built)
 
 Guild settings are not per-faction — they apply across all factions in the guild.

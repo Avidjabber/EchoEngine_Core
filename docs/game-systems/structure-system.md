@@ -145,18 +145,22 @@ StructureDef_Upgrade defines a discrete, independently applicable upgrade for
 a specific StructureDef. Upgrades are modular — there is no required linear
 path. A guild may define as many or as few upgrade options as they like, or none.
 
-  Field            │ Purpose
-  ─────────────────┼────────────────────────────────────────────────────────
-  structureDefId   │ FK → StructureDef
-  name             │ Internal key e.g. "irrigation", "rat_proofing"
-  displayName      │ User-facing label
-  description      │ Plain-language description of what this upgrade does.
-  effectType       │ Which property this upgrade modifies. Must be valid for the
-                   │ parent StructureDef's StructureType. See section 3.
-  effectValue        │ Float. The delta applied per application (additive).
-  maxApplications    │ Int. Max times this upgrade may be applied to one structure.
-                     │ 1 = one-time only; > 1 = stackable up to this limit.
-  constructionPoints │ Int. Progress points required to apply this upgrade.
+  Field                │ Purpose
+  ─────────────────────┼──────────────────────────────────────────────────────
+  structureDefId       │ FK → StructureDef
+  name                 │ Internal key e.g. "irrigation", "rat_proofing"
+  displayName          │ User-facing label
+  description          │ Plain-language description of what this upgrade does.
+  effectType           │ Which property this upgrade modifies. Must be valid for the
+                       │ parent StructureDef's StructureType. See section 3.
+  effectValue          │ Float. The delta applied per application (additive).
+  maxApplications      │ Int. Max times this upgrade may be applied to one structure.
+                       │ 1 = one-time only; > 1 = stackable up to this limit.
+  constructionPoints   │ Int. Progress points required to apply this upgrade.
+  targetEnvConditionId │ FK → EnvCondition. Required when effectType = env_override;
+                       │ null for all other effect types. Specifies which env condition
+                       │ this upgrade counteracts (e.g. Drought, Cold, Toxic).
+                       │ App enforces this is set for every env_override upgrade.
 
 StructureDef_Upgrade_BuildCost defines items required to apply the upgrade:
 
@@ -174,7 +178,8 @@ EXAMPLE — Guild-defined upgrades for a "Bramble Garden" (type: farming):
   "extra_plots"      effectType: plot_count,      effectValue: 3,    maxApplications: 6
   "irrigation"       effectType: growth_rate,     effectValue: 0.15, maxApplications: 1
   "greenhouse_cover" effectType: season_override, effectValue: 0.5,  maxApplications: 2
-  "windbreak"        effectType: env_override,    effectValue: 0.5,  maxApplications: 1
+  "drought_shield"   effectType: env_override,    effectValue: 0.5,  maxApplications: 2,  targetEnvConditionId → Drought
+  "frost_cover"      effectType: env_override,    effectValue: 1.0,  maxApplications: 1,  targetEnvConditionId → Cold
 
 SEASON AND ENV OVERRIDE EFFECTS
 ──────────────────────────────────
@@ -187,14 +192,30 @@ SEASON AND ENV OVERRIDE EFFECTS
   effectiveSeasonMod (per crop tick) =
     seasonMod + (1.0 − seasonMod) × structure_season_override
 
-  effectiveEnvMod (per active env condition) =
-    envMod + (1.0 − envMod) × structure_env_override
+    seasonMod is the PlantDef_Season.growthRateModifier for the current season (0.0–1.0).
+    A greenhouse (env_override = 1.0) means a dormant season becomes full speed.
+    A season at 0.5 + 0.5 override → 0.75 effective (half way to neutral).
+
+  effective_plant_growth_mod (per crop tick) =
+    PRODUCT over all active env conditions that have a plant_growth modifier:
+      effectiveCondMod(c) = condPlantGrowthMod(c) + (1.0 − condPlantGrowthMod(c))
+                            × conditionOverride(c)
+      where conditionOverride(c) = MIN(1.0, SUM of effectValues of all env_override
+            upgrades applied to this structure with targetEnvConditionId = c)
+
+    Each env condition is overridden independently. A Drought Shield upgrade only
+    counteracts Drought's plant_growth reduction — Cold, Toxic, etc. are unaffected.
+    env_override does not affect per-plant required env conditions — only the
+    plant_growth modifier that each location/biome condition contributes.
+    Override pulls each condition's modifier toward 1.0; cannot boost above neutral.
 
   Examples:
-    season dormant (0.0) + 0.5 override → 0.5 effective (half speed, not stopped)
-    season dormant (0.0) + 1.0 override → 1.0 effective (full greenhouse, season ignored)
-    env stunted  (0.0) + 0.5 override → 0.5 effective
-    env boosted  (1.5) + any override  → unchanged (override only pulls toward 1.0, not above)
+    season dormant (0.0) + 0.5 season_override → 0.5 effective (half speed, not stopped)
+    season dormant (0.0) + 1.0 season_override → 1.0 effective (full greenhouse, season ignored)
+    Drought reduces plant_growth to 0.4; Drought env_override 0.5 → 0.7 effective for Drought only
+    Drought reduces plant_growth to 0.4; Drought env_override 1.0 → 1.0 effective (fully counteracted)
+    Cold also active at 0.6; no Cold env_override → 0.6 still applies; combined = 0.7 × 0.6 = 0.42
+    Cultivated boosts plant_growth to 1.5; any env_override on Cultivated → unchanged (only pulls toward 1.0)
 
 
 ─────────────────────────────────────────────

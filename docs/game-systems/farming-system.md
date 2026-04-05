@@ -111,8 +111,6 @@ complete definitions that carry their own drop tables and modifier rows.
                                  Base plants reference a seeded Item (e.g. yarrow_seed).
                                  Ephemeral variants reference their own ephemeral seed Item,
                                  which carries Item.plantDefId → this PlantDef.
-  requiresCultivated   Boolean   If true, plant will not grow without the Cultivated
-                                 EnvCondition active at its location.
   mutationChance       Float     Controls how many mutations occur during cross-breeding.
                                  The integer part = guaranteed mutations.
                                  The decimal part = chance of one additional mutation.
@@ -155,15 +153,17 @@ instantiate as a new PlotCrop. No other lookup is needed.
 PlantDef_PlotType
 ──────────────────────
 
-Which plot types a plant can grow in, and at what rate. Ephemeral PlantDefs carry
-their own rows with values already reflecting any mutations.
+Restricts a plant to specific guild-defined plot types and defines a growth rate
+modifier for each. Ephemeral PlantDefs carry their own rows.
 
   plantDefId          Int    FK → PlantDef
   plotTypeId          Int    FK → PlotType
   growthRateModifier  Int    Percentage. 100 = no modifier. 150 = 50% faster.
 
-RULE: No rows = can grow in any plot type at 100.
-RULE: If rows exist, plant can only be placed in matching plot types.
+RULE: No rows = plant can be placed in any plot type. Growth is determined entirely
+      by env condition matching between the plant and the plot type + location.
+RULE: If rows exist, plant may only be placed in matching plot types. The
+      growthRateModifier applies as a divisor in the growth formula.
 
 ──────────────────────
 PlantDef_Biome
@@ -188,17 +188,33 @@ RULE: findChance is only read from the base (rootPlantDefId = null) PlantDef.
       Ephemeral variants do not appear in the wild.
 
 ──────────────────────
-PlantDef_EnvCondition
+PlantDef_RequiredEnvCondition
 ──────────────────────
 
-Env condition growth modifiers. Ephemeral PlantDefs carry their own rows.
+Env conditions required for a plant to be planted AND to continue growing each tick.
+ALL listed conditions must be present in the combined active set (location env
+conditions + PlotType_EnvCondition rows for the plot's type).
 
-  plantDefId          Int    FK → PlantDef
-  envConditionId      Int    FK → EnvCondition
-  growthRateModifier  Int    Percentage. >100 = improves. <100 = worsens. 0 = stunted.
+  plantDefId     Int    FK → PlantDef
+  envConditionId Int    FK → EnvCondition
 
-RULE: No row for a condition = neutral (100). Absence ≠ dormancy.
-RULE: All active env condition modifiers multiply together. Any 0 stops growth.
+No rows = no restriction. Plant grows anywhere using only the other formula factors
+(season, biome, plot type compatibility, soil quality, traits, upgrades, buffs).
+
+If conditions are satisfied at planting but later lost (e.g. a drought removes Wet),
+growth pauses until the required conditions are restored. The PlotCrop is not
+destroyed — it simply does not advance.
+
+Examples:
+  Rice           requires: Wet, Cultivated
+  Bog Orchid     requires: Waterlogged
+  Toxic Mushroom requires: Toxic, Damp
+  Cave Lichen    requires: Dark
+  Yarrow         (no rows — grows in any conditions)
+
+RULE: The check uses the same combined active set as the rest of the growth formula.
+      A guild-defined "Rice Paddy" plot type with Wet + Cultivated satisfies Rice even
+      if the location itself is dry.
 
 ──────────────────────
 PlantDef_Season
@@ -206,12 +222,14 @@ PlantDef_Season
 
 Per-season growth rates. Ephemeral PlantDefs carry their own rows.
 
-  plantDefId          Int    FK → PlantDef
-  seasonId            Int    FK → Season
-  growthRateModifier  Int    Percentage. 100 = base. 0 = dormant.
+  plantDefId         Int    FK → PlantDef
+  seasonId           Int    FK → Season
+  growthRateModifier Float  0.0–1.0 multiplier on growth rate for this season.
+                            1.0 = full base speed. 0.5 = half speed. 0.0 = effectively dormant.
+                            1.0 is the intended maximum.
 
-RULE: No row for a season = dormant (0). Growth does not advance.
-RULE: Year-round plants require 4 explicit rows at 100.
+RULE: No row for a season = dormant. Tick is skipped entirely — growth does not advance.
+RULE: Year-round plants require an explicit row per season at 1.0.
 
 ──────────────────────
 PlantTrait
@@ -257,21 +275,38 @@ RULE: minValue and maxValue are always copied verbatim from the root PlantDef
 PlotType
 ──────────────────────
 
-Lookup table defining the kinds of growing environments a Plot can be.
-Static seed table — values never altered via the app.
+Guild-defined plot environment type. Server admins create and name these freely —
+there are no globally seeded values. Examples: "Open Farmland", "Hydroponics Bay",
+"Mushroom Cave", "Tidal Bed", "Shaded Grove".
 
-  name   Display name.
+  guildId        String   Owning guild.
+  name           String   Display name. Unique per guild.
+  description    String?  Optional flavour text.
+  soilQualityCap Float    Maximum soilQuality achievable in this plot type via composting.
+                          Default 2.0. Prevents indefinite improvement — a hydroponics bay
+                          might allow 3.0; rocky terrain might cap at 1.5.
 
-Seeded values (to be finalized at seed time):
-  Garden Bed          Standard herbs, flowers, small cultivated plants.
-  Crop Field          Grains, root vegetables, large-scale crops.
-  Orchard             Trees and large perennial fruit-bearing plants.
-  Mushroom Substrate  Fungi; requires decomposing matter as growing medium.
-  Bog Bed             Marsh and wetland plants; waterlogged soil.
-  Aquatic Bed         Water-rooted plants; shallow standing water required.
-  Trellis             Climbing and vining plants.
-  Rocky Bed           Dry, nutrient-poor, rocky soil plants.
-  Shaded Bed          Deep canopy / forest floor; low-light requirement.
+──────────────────────
+PlotType_EnvCondition
+──────────────────────
+
+Env conditions that are always active for plants growing in this plot type,
+regardless of the actual location environment. These stack additively with
+whatever env conditions the location itself has active.
+
+  plotTypeId     Int   FK → PlotType
+  envConditionId Int   FK → EnvCondition
+
+Examples:
+  "Hydroponics Bay"  → Cultivated, Watered     (always growing-season conditions)
+  "Mushroom Cave"    → Damp, Dark               (fungi-friendly environment)
+  "Open Farmland"    → (no rows — growth driven purely by location environment)
+  "Toxic Vat"        → Toxic, Damp              (only toxic-tolerant plants thrive)
+
+RULE: If a condition is active from both the location and the plot type, the stacks
+      combine — a plant in a Hydroponics Bay at a Farmland biome has two stacks of
+      Cultivated (one from the biome's inherent condition, one from the plot type).
+      Guild admins should design plot types knowing this additive behaviour.
 
 ──────────────────────
 Plot
@@ -294,15 +329,17 @@ Plot → Structure → StructureDef → StructureDef_FarmingConfig respectively.
 Soil quality interaction (app-maintained on daily tick):
   - Filth env condition active   → soilQuality degrades slowly
   - Toxic env condition active   → soilQuality degrades faster
-  - Compost applied (crafting)   → soilQuality increases by a fixed amount
+  - Compost applied (crafting)   → soilQuality increases by a fixed amount,
+                                   capped at PlotType.soilQualityCap
 
 ──────────────────────
 Plot_Buff
 ──────────────────────
 
-Active timed buffs on a plot, written when a skilled farmer performs a tending
-action and has a farming ability that triggers a buff. Any entity can tend a plot
-and earn XP; only entities with the relevant ability write a Plot_Buff.
+Active timed buffs — and debuffs — on a plot. Positive values come from skilled
+farmer tending actions via Ability_ActionTrigger. Negative values are written by
+the event system when blights, droughts, infestations, or other negative events
+target a plot. Both use the same table — effectValue may be positive or negative.
 
   plotId          Int      FK → Plot
   sourceEntityId  Int      FK → Entity. Who applied the buff.
@@ -314,8 +351,11 @@ and earn XP; only entities with the relevant ability write a Plot_Buff.
 PK is (plotId, sourceEntityId, effectType) — one active buff per effect type per
 entity per plot. This allows multiple entities to stack buffs of the same type
 independently while preventing the same entity from applying the same buff twice.
-stackBehavior on Ability_ActionTrigger governs whether duplicate rows are refreshed,
-stacked, or ignored.
+stackBehavior on Ability_ActionTrigger (for ability-sourced buffs) and on the
+event system (for event-sourced debuffs) governs whether duplicate rows are
+refreshed, stacked, or ignored. A blight event may write a negative growth_rate
+buff that partially or fully cancels an ability-sourced growth_rate buff from the
+same or different source entity — they resolve independently by (plotId, sourceEntityId, effectType).
 
 Active Plot_Buff rows with effectType = growth_rate contribute to the growth formula:
   structure_growth_modifier already covers structure-level upgrades.
@@ -345,8 +385,24 @@ A live instance of a plant growing at a plot.
                               harvestCount >= PlantDef.maxHarvests, harvest_crop is
                               blocked — only uproot_crop is available.
                               Each harvest resets currentStage to 0 (full regrow).
-                              App applies a fixed yield reduction per harvest based on
-                              harvestCount — not schema-defined, handled in app logic.
+
+HARVEST YIELD DECAY FORMULA
+─────────────────────────────
+  Each successive harvest yields proportionally less than the first.
+  The yield multiplier at any harvest is:
+
+    yieldMultiplier = (maxHarvests − harvestCount) / maxHarvests
+
+  where harvestCount is the value BEFORE this harvest (i.e. 0 on the first harvest).
+
+  Examples:
+    maxHarvests = 3: first 100%, second 66%, third 33%
+    maxHarvests = 4: first 100%, second 75%, third 50%, fourth 25%
+    maxHarvests = 1: always 100% (single harvest before exhaustion)
+
+  Applied to all quantity rolls from PlantDef.harvestDropTableId at resolution time.
+  The uproot drop table (uprootDropTableId) is not subject to this decay — uprooting
+  always yields the full defined output regardless of harvestCount.
   carePoints        Int       Accumulated tending care points since planting. Default 0.
                               Incremented by tending actions. Used at cross-breeding time
                               to compute carePercentage for mutation direction bias.
@@ -355,18 +411,21 @@ Growth rate formula (app-side):
   All modifier rows are read from PlotCrop.plantDefId — the resolved PlantDef,
   base or ephemeral. No stacking of overrides needed.
 
-  Check in order — if any modifier is 0, skip the tick entirely:
-    1. PlantDef_Season row for current season (0 if no row)
-    2. Product of all active PlantDef_EnvCondition modifiers
-    3. PlantDef_PlotType modifier for this Plot's plotTypeId
+  Active env conditions for a plot = location's actual conditions + PlotType_EnvCondition
+  rows for the plot's type. Both sets are checked together as one combined set.
+
+  Check in order — if any check fails, skip the tick entirely:
+    1. PlantDef_Season row for current season (no row = dormant, skip tick)
+    2. All PlantDef_RequiredEnvCondition rows are present in the combined active set
+       (any missing required condition = growth paused, skip tick)
+    3. PlantDef_PlotType modifier for this Plot's plotTypeId = 0 (skip tick)
 
   Otherwise:
   effectiveDaysPerStage =
       PlantDef.growthCycleDays
-      ÷ plant_growth_effectiveMod
+      ÷ effective_plant_growth_mod         (per-condition plant_growth from location/biome env conditions; each targeted independently by env_override upgrades)
       ÷ biome_growthRateModifier / 100     (from PlantDef_Biome; 100 if no row)
-      ÷ season_growthRateModifier / 100    (from PlantDef_Season; 0 if no row)
-      ÷ product(env condition modifiers) / 100
+      ÷ season_growthRateModifier          (from PlantDef_Season; no row = tick skipped)
       ÷ plotType_growthRateModifier / 100  (from PlantDef_PlotType; 100 if no row)
       ÷ Plot.soilQuality
       ÷ growth_rate trait value            (from PlantDef_Trait; 1.0 if no row)
@@ -392,7 +451,7 @@ Cross-breeding (one entity, two parent crops):
   Roll against PlantDef.mutationChance (see PlantDef field definition for formula):
     Mutations → for each mutation that fires, one numeric value is randomly
               selected from the plant's full set of values (traits, season
-              modifiers, biome modifiers, env condition modifiers, plot type
+              modifiers, biome modifiers, plot type
               modifiers). That value is shifted by a small random amount.
               Direction (positive or negative) is driven by the average care percentage
               of the two parent crops at the time of cross-breeding:
@@ -490,40 +549,49 @@ Comparing variants:
 ─────────────────────────────────────────────
 
 All modifier rows are read from the crop's PlantDef directly — base or ephemeral.
-No overrides, no stacking of variant data. If any modifier is 0, tick is skipped.
+Tick is skipped entirely if: season is dormant (no PlantDef_Season row), any required
+env condition is missing from the combined active set, or PlantDef_PlotType modifier = 0.
 
-  Season and env modifiers are adjusted by structure overrides before use:
-    effectiveSeasonMod = (seasonMod/100) + (1.0 − seasonMod/100) × structure_season_override
-    effectiveEnvMod    = (envMod/100)    + (1.0 − envMod/100)    × structure_env_override
-    where structure_season_override = MIN(1.0, SUM of season_override upgrade effectValues)
-          structure_env_override    = MIN(1.0, SUM of env_override upgrade effectValues)
-    Override values of 0 (no upgrades) leave modifiers unchanged.
+  Two modifiers are adjusted by structure upgrades before use:
+
+    effectiveSeasonMod =
+      seasonMod + (1.0 − seasonMod) × structure_season_override
+      where structure_season_override = MIN(1.0, SUM of season_override upgrade effectValues)
+      No PlantDef_Season row = tick skipped before the formula is reached.
+
+    effective_plant_growth_mod =
+      PRODUCT over all active env conditions with a plant_growth modifier:
+        effectiveCondMod(c) = condPlantGrowthMod(c)
+                              + (1.0 − condPlantGrowthMod(c)) × conditionOverride(c)
+        conditionOverride(c) = MIN(1.0, SUM of effectValues of env_override upgrades
+                               applied to this structure targeting env condition c)
+      Each condition is overridden independently. A Drought Shield only counteracts
+      Drought — Cold, Toxic, etc. are unaffected unless their own upgrade exists.
+      Cannot boost any condition's modifier above 1.0.
 
   effectiveDaysPerStage =
       PlantDef.growthCycleDays
-      ÷ plant_growth_effectiveMod                    (env condition stacking system)
-      ÷ biome_growthRateModifier / 100               (PlantDef_Biome; 100 if no row)
-      ÷ effectiveSeasonMod                           (PlantDef_Season adjusted by season_override; 0 if no row and no override)
-      ÷ product(effectiveEnvMod per condition)       (PlantDef_EnvCondition adjusted by env_override)
-      ÷ plotType_growthRateModifier / 100            (PlantDef_PlotType; 100 if no row)
+      ÷ effective_plant_growth_mod      (per-condition plant_growth from location/biome, each adjusted by its targeted env_override)
+      ÷ biome_growthRateModifier / 100  (PlantDef_Biome; 100 if no row)
+      ÷ effectiveSeasonMod              (PlantDef_Season 0.0–1.0; adjusted by season_override)
+      ÷ plotType_growthRateModifier / 100  (PlantDef_PlotType; 100 if no row)
       ÷ Plot.soilQuality
-      ÷ growth_rate trait value                      (PlantDef_Trait; 1.0 if no row)
-      ÷ structure_growth_modifier                    (1.0 + SUM of growth_rate upgrade effectValues;
-                                                      1.0 if no upgrades applied)
-      ÷ plot_buff_growth_modifier                    (1.0 + SUM of active Plot_Buff effectValues
-                                                      where effectType = growth_rate; 1.0 if none)
+      ÷ growth_rate trait value         (PlantDef_Trait; 1.0 if no row)
+      ÷ structure_growth_modifier       (1.0 + SUM of growth_rate upgrade effectValues; 1.0 if none)
+      ÷ plot_buff_growth_modifier       (1.0 + SUM of active Plot_Buff effectValues
+                                         where effectType = growth_rate; 1.0 if none)
 
 Example — prime conditions (Spring, native biome, composted plot, fast variant):
   growthCycleDays = 3, plant_growth effectiveMod = 2.5
-  biome = 150, season = 150, env product = 1.0, plotType = 120
+  biome = 150, season = 1.0, plotType = 120
   soilQuality = 1.2, growth_rate = 1.1
-  → effectiveDaysPerStage = 3 / 2.5 / 1.5 / 1.5 / 1.0 / 1.2 / 1.2 / 1.1 ≈ 0.34 days
+  → effectiveDaysPerStage = 3 / 2.5 / 1.5 / 1.0 / 1.2 / 1.2 / 1.1 ≈ 0.45 days
 
-Example — off-season, non-native, base plant:
+Example — slow season, non-native, base plant:
   growthCycleDays = 3, plant_growth effectiveMod = 1.3
-  biome = 100, season = 50, env product = 1.0, plotType = 100
+  biome = 100, season = 0.5, plotType = 100
   soilQuality = 1.0, growth_rate = 1.0
-  → effectiveDaysPerStage = 3 / 1.3 / 1.0 / 0.5 / 1.0 / 1.0 / 1.0 / 1.0 ≈ 4.6 days
+  → effectiveDaysPerStage = 3 / 1.3 / 1.0 / 0.5 / 1.0 / 1.0 / 1.0 ≈ 4.6 days
 
 
 ─────────────────────────────────────────────
@@ -566,8 +634,8 @@ All are guild-extensible. Seeded as global defaults.
 
   harvest_crop         systemType = "farming_harvest"
     Entity harvests a mature PlotCrop (currentStage = growthStages).
-    Resolves PlantDef.harvestDropTableId with app-side yield reduction applied
-    based on PlotCrop.harvestCount (each harvest yields less than the last).
+    Resolves PlantDef.harvestDropTableId with yield multiplier applied:
+      yieldMultiplier = (maxHarvests − harvestCount) / maxHarvests
     PlotCrop remains; currentStage resets to 0; harvestCount increments by 1.
     Blocked when harvestCount >= PlantDef.maxHarvests — uproot_crop only.
     Solo or small group.

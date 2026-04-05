@@ -23,7 +23,7 @@ abilities are the rewards that progress unlocks.
 
 
 ─────────────────────────────────────────────
-2. THE SEVEN DISCIPLINES
+2. THE SIX DISCIPLINES
 ─────────────────────────────────────────────
 
   Name     | Description
@@ -34,23 +34,28 @@ abilities are the rewards that progress unlocks.
   Combat   | Fighting effectiveness and battle experience
   Scouting | Patrol, territory awareness, and threat detection
   Social   | Leadership, diplomacy, and faction influence
-  Training | Mentoring other entities and accelerating their growth
 
 NOTE: DisciplineDef also contains one stat progression row (isStatProgression = true).
 That row is not a discipline — it tracks EXP toward stat points using a flat threshold
 instead of the level curve. It is excluded from discipline listings in the app.
-It also carries a dailyXpCap (100 XP/day) — once an entity hits that cap, further
-actions that day do not grant stat XP, though they still yield all other rewards
-(items, clan rep, discipline XP, event triggers).
+It carries a dailyXpCap — once an entity hits that cap, further actions that day do
+not grant stat XP, though they still yield all other rewards (items, clan rep,
+discipline XP, event triggers). Discipline XP itself has no daily cap.
 See stats-proficiencies-disciplines.md section 2 for full details.
+
+DISCIPLINE LEVEL CAP
+─────────────────────
+GuildSettings.disciplineLevelCap (Int?) defines the maximum discipline level any
+entity in the guild can reach. null = no cap. This is a guild-wide setting — all
+disciplines share the same ceiling. Stat points are not subject to any cap.
 
 
 ─────────────────────────────────────────────
 3. PROGRESSION
 ─────────────────────────────────────────────
 
-Every entity starts with one Entity_Discipline row per discipline (7 rows) plus one
-row for the stat progression entry — 8 rows total, all at level 0, currentXp 0.
+Every entity starts with one Entity_Discipline row per discipline (6 rows) plus one
+row for the stat progression entry — 7 rows total, all at level 0, currentXp 0.
 These rows are created automatically at entity creation (app layer responsibility).
 
 Schema fields per entity (Entity_Discipline):
@@ -179,6 +184,13 @@ discipline will have entirely separate tree layouts, level thresholds, and costs
 Global/seeded tree templates do not exist — each guild builds its own.
 Members can view their character's current discipline levels and the full
 skill tree for any discipline via Discord commands.
+
+NODE ORDERING
+──────────────
+Nodes have no explicit sort order field. Display ordering is by levelRequired —
+lower-level nodes appear first. Within the same levelRequired, prerequisite
+structure determines layout. The bot uses a canvas-rendered tree diagram,
+positioning nodes by their level tier and prerequisite edges.
 
 STAT POINTS & SPENDING
 ───────────────────────

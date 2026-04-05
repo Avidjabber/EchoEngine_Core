@@ -198,9 +198,11 @@ different effects on the same action.
                              Higher-tier SkillTreeNodes grant higher-chance variants of the
                              same conceptual ability.
   effectType         String  What kind of effect to apply:
-                               "plot_buff"      — writes a Plot_Buff on the target plot(s)
-                               "stat_mod"       — temporary stat modifier on a target entity
-                               "energy_restore" — restores energy to a target entity
+                               "plot_buff"       — writes a Plot_Buff on the target plot(s)
+                               "condition_grant" — applies a ConditionDef to a target entity;
+                                                   the condition system handles duration, ticks,
+                                                   and all stat/behaviour effects
+                               "energy_restore"  — restores energy to a target entity
                              Extensible — new effectTypes added as systems require them.
   stackBehavior      String  How multiple applications interact on the same target:
                                "refresh" — updates/extends an existing effect (default)
@@ -214,10 +216,12 @@ different effects on the same action.
     effectValue     Float?   Delta applied to the plot buff.
     durationHours   Int?     How long the buff lasts before expiring.
 
-  effectType = "stat_mod":
-    statId          Int?     FK → Stat. Which stat is temporarily modified.
-    statValue       Float?   Positive = bonus, negative = penalty.
-    durationHours   Int?
+  effectType = "condition_grant":
+    conditionDefId  Int?     FK → ConditionDef. The condition applied to the target entity.
+                             Duration, ticks, stat effects, and all other behaviour are
+                             defined on the ConditionDef — no extra fields needed here.
+                             stackBehavior governs what happens if the condition is already
+                             active on the target: refresh, stack, or ignore.
 
   effectType = "energy_restore":
     energyAmount    Float?   Amount restored. Capped at entity's max energy.
@@ -271,7 +275,7 @@ Null biomeId or weatherStateId means the effect applies in all contexts.
   Ability_CombatBehavior      — combat behavior intercepts
   Ability_ConditionResistance — condition resistance/immunity
   Ability_DamageModifier      — damage type modifiers
-  Ability_ActionTrigger       — action-triggered effects: plot buffs, stat mods, energy restore
+  Ability_ActionTrigger       — action-triggered effects: plot buffs, condition grants, energy restore
 
 
 ─────────────────────────────────────────────
