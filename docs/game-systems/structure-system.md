@@ -88,9 +88,9 @@ their own StructureDefs.
 
 VALID EFFECT TYPES PER CATEGORY
 ─────────────────────────────────
-  storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating
-  farming:  plot_count | growth_rate | season_override | env_override | soil_quality
-  housing:  (TBD — defined when the housing system is built out)
+  storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating | damage_resistance
+  farming:  plot_count | growth_rate | season_override | env_override | soil_quality | damage_resistance
+  housing:  damage_resistance (additional types TBD when the housing system is built out)
 
 
 ─────────────────────────────────────────────
@@ -110,6 +110,10 @@ StructureType and defines everything about how that structure is built and upgra
   constructionPoints │ Progress points required for the initial build. Each
                      │ structure_contribute action contributes ActionSystemType
                      │ .progressPoints toward this total.
+  baseDurability     │ Int. Maximum durability for structures built from this def.
+                     │ All structures start at this value when construction completes.
+                     │ Effective max = baseDurability + SUM of any durability upgrade
+                     │ effects applied (reserved for future use).
 
 Base values for type-specific properties are defined on extension config rows
 (see section 4a). These represent the structure's state before any upgrades apply.
@@ -288,13 +292,41 @@ SEASON AND ENV OVERRIDE EFFECTS
 
 Structure tracks a single built (or in-progress) installation within a camp.
 
-  Field          │ Purpose
-  ───────────────┼──────────────────────────────────────────────────────────
-  id             │
-  campId         │ FK → Camp
-  structureDefId │ FK → StructureDef
-  status         │ active | under_construction | destroyed
-  name           │ Optional custom label for this specific structure.
+  Field              │ Purpose
+  ───────────────────┼──────────────────────────────────────────────────────
+  id                 │
+  campId             │ FK → Camp
+  structureDefId     │ FK → StructureDef
+  status             │ active | under_construction | broken | destroyed
+  currentDurability  │ Int. Set to StructureDef.baseDurability when initial
+                     │ construction completes. Decremented by damage events.
+                     │ Reaching 0 transitions status to broken automatically.
+  name               │ Optional custom label for this specific structure.
+
+DURABILITY AND DAMAGE
+──────────────────────
+  Damage events (e.g. storms) reduce currentDurability by an amount set on the
+  event effect. effective damage taken = baseDamage × (1.0 − MIN(0.9, SUM of all
+  damage_resistance effectValues applied to this structure)). The 0.9 cap ensures
+  structures can never be made fully immune — at least 10% of any event's damage
+  always gets through.
+
+  When currentDurability reaches 0, Structure.status is set to broken immediately.
+  Broken structures are not demolished — they remain in the camp and count against
+  Camp_StructureLimit until cleared or rebuilt.
+
+BROKEN STATE BEHAVIOUR
+────────────────────────
+  Broken storage structures remain linked to their Storage instance but all
+  protections are suspended: weightCapacity, fluidCapacity, expirationModifier,
+  securityRating, and acceptedType restrictions are all ignored. Items are
+  accessible but unprotected — no capacity enforcement, no rot reduction,
+  no theft resistance, and no type filtering.
+
+  Broken farming structures have all of their Plot rows cleared immediately on
+  transition: any active crops are removed and the plots are locked (cannot be
+  planted) until the structure is repaired or rebuilt. Plot rows are not deleted —
+  they remain so the plot count is preserved for when the structure is restored.
 
 Structure_AppliedUpgrade records each upgrade application. One row is created
 per application when the upgrade's Construction completes.
@@ -349,27 +381,77 @@ Every structure begins as a Construction project before becoming active. Upgrade
 also go through Construction. A Construction record exists for the duration of
 the build and closes on completion.
 
-  Field                │ Purpose
-  ─────────────────────┼──────────────────────────────────────────────────
-  id                   │
-  structureId          │ FK → Structure
-  upgradeId            │ FK → StructureDef_Upgrade. null = initial build;
-                       │ non-null = applying a specific upgrade.
-  pointsRequired       │ Total progress points to complete. Set from
-                       │ StructureDef.constructionPoints on initiation.
-  pointsRemaining      │ Decrements by ActionSystemType.progressPoints per
-                       │ contribution. 0 = complete.
-  initiatedByEntityId  │ FK → Entity. Must be the faction leader.
-  startedAt            │ DateTime
-  completedAt          │ DateTime. Set on completion; null while in progress.
+  Field                  │ Purpose
+  ───────────────────────┼────────────────────────────────────────────────
+  id                     │
+  structureId            │ FK → Structure
+  constructionType       │ build | upgrade | repair | rebuild
+  upgradeId              │ FK → StructureDef_Upgrade. Only set when
+                         │ constructionType = upgrade; null otherwise.
+  repairCostProportion   │ Float?. Only set when constructionType = repair.
+                         │ Captures the damage fraction at initiation time:
+                         │ (maxDurability − currentDurability) / maxDurability.
+                         │ Stored so mid-repair damage events don't change what
+                         │ was already charged.
+  pointsRequired         │ Total progress points to complete. Set from
+                         │ StructureDef.constructionPoints on initiation.
+  pointsRemaining        │ Decrements by ActionSystemType.progressPoints per
+                         │ contribution. 0 = complete.
+  initiatedByEntityId    │ FK → Entity. Must be the faction leader.
+  startedAt              │ DateTime
+  completedAt            │ DateTime. Set on completion; null while in progress.
 
-Item costs (StructureDef_BuildCost or StructureDef_Upgrade_BuildCost) are consumed
-from faction storage when the Construction is initiated.
+ITEM REQUIREMENTS
+──────────────────
+  Construction_ItemRequirement tracks the materials needed for an active construction
+  and how many have been contributed so far.
 
-On completion (hoursRemaining = 0):
-  - Initial build → Structure.status set to active
-  - Upgrade       → Structure_AppliedUpgrade row created; effect applies immediately
-                    For plot_count upgrades: new Plot rows created for the structure
+    constructionId      FK → Construction
+    itemId              FK → Item
+    quantityRequired    Int — total amount needed
+    quantityContributed Int — how much has been brought so far; starts at 0
+
+  Rows are created at initiation time based on the construction type:
+    - build:   one row per StructureDef_BuildCost entry, full quantity.
+    - upgrade: one row per StructureDef_Upgrade_BuildCost entry for the upgrade.
+    - repair:  one row per StructureDef_BuildCost entry, quantity = original × repairCostProportion
+               rounded up.
+    - rebuild: one row per item across StructureDef_BuildCost (full) + all
+               StructureDef_Upgrade_BuildCost entries for every upgrade in
+               Structure_AppliedUpgrade at initiation. Items of the same type
+               are summed into a single row.
+
+  Any faction member may contribute items. The bot tracks only that the items
+  have been deposited — not who brought them.
+
+  Construction cannot complete until both conditions are met:
+    - All Construction_ItemRequirement rows have quantityContributed >= quantityRequired
+    - pointsRemaining = 0
+
+  On completion, all Construction_ItemRequirement rows for that construction are deleted.
+
+On completion:
+  - build    → Structure.status set to active; currentDurability set to baseDurability.
+  - upgrade  → Structure_AppliedUpgrade row created; effects apply immediately.
+               For plot_count upgrades: new Plot rows created for the structure.
+  - repair   → Structure.currentDurability restored to baseDurability (full).
+               Structure.status set to active. Upgrades are unchanged.
+               Locked plots on farming structures are unlocked.
+  - rebuild  → All existing Structure_AppliedUpgrade rows are deleted.
+               New Structure_AppliedUpgrade rows are created for every upgrade that
+               was recorded at initiation, effectively restoring the full prior state.
+               Structure.currentDurability set to baseDurability.
+               Structure.status set to active.
+               Locked plots on farming structures are unlocked; plot count is
+               restored to match the rebuilt upgrade set.
+
+CLEARING A BROKEN STRUCTURE
+─────────────────────────────
+  A broken structure may be cleared by the faction leader without initiating
+  Construction. Clearing sets status to destroyed and removes it from the camp
+  (it no longer counts against Camp_StructureLimit). No resources are returned.
+  Structure_AppliedUpgrade rows are deleted on clear. A new structure of the
+  same or different def may then be built up to the camp's limit.
 
 CONTRIBUTING TO CONSTRUCTION
 ──────────────────────────────
@@ -457,8 +539,9 @@ selects one and the action resolves immediately with no further tracking needed.
   StructureDef_Upgrade_Effect    — individual effects of an upgrade (one row per effect; upgrades may have many)
   StructureDef_Upgrade_BuildCost — items required to apply an upgrade
   StructureDef_Upgrade_Relation  — REQUIRES / BLOCKS / UPGRADES rules between upgrades on the same def
-  Structure                      — a single installation within a camp
+  Structure                      — a single installation within a camp; carries currentDurability and status
   Structure_AppliedUpgrade       — record of each upgrade application on a structure
   Structure_Storage              — join: links a storage-type Structure to a Storage; carries capacity/rot/type rules
   Structure_Storage_ItemType     — item types accepted by a structure storage
-  Construction                   — active or completed build/upgrade project
+  Construction                   — active or completed build / upgrade / repair / rebuild project
+  Construction_ItemRequirement   — items needed and contributed for an active construction; deleted on completion

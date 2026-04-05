@@ -1773,13 +1773,14 @@ model StructureType {
 // name: internal snake_case key (e.g. "mossy_storage_den")
 // constructionPoints: progress points required for the initial build (see ActionSystemType.progressPoints for structure_contribute)
 model StructureDef {
-  id              Int     @id @default(autoincrement())
-  guildId         String  @db.VarChar(50)
-  structureTypeId Int
-  name            String  @db.VarChar(200)
-  displayName     String  @db.VarChar(200)
-  description     String? @db.VarChar(1000)
+  id                 Int     @id @default(autoincrement())
+  guildId            String  @db.VarChar(50)
+  structureTypeId    Int
+  name               String  @db.VarChar(200)
+  displayName        String  @db.VarChar(200)
+  description        String? @db.VarChar(1000)
   constructionPoints Int
+  baseDurability     Int
 
   structureType StructureType @relation(fields: [structureTypeId], references: [id], onDelete: Restrict)
 
@@ -1907,12 +1908,17 @@ model StructureDef_Upgrade_BuildCost {
 // A single built (or in-progress) installation within a camp.
 // status: active | under_construction | destroyed
 // name: optional custom label for this specific structure instance.
+// status: active | under_construction | broken | destroyed
+// broken — durability reached 0; storage protections suspended, farm plots locked.
+//          Counts against Camp_StructureLimit until cleared or rebuilt.
+// destroyed — cleared by faction leader; no longer counts against limit.
 model Structure {
-  id             Int     @id @default(autoincrement())
-  campId         Int
-  structureDefId Int
-  status         String  @db.VarChar(50)
-  name           String? @db.VarChar(200)
+  id                 Int     @id @default(autoincrement())
+  campId             Int
+  structureDefId     Int
+  status             String  @db.VarChar(50)
+  currentDurability  Int
+  name               String? @db.VarChar(200)
 
   camp         Camp         @relation(fields: [campId],         references: [id], onDelete: Cascade)
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Restrict)
@@ -1945,22 +1951,48 @@ model Structure_AppliedUpgrade {
 // Item costs are consumed from faction storage when the Construction is initiated.
 // On completion: initial build → Structure.status = active; upgrade → Structure_AppliedUpgrade row created.
 // For plot_count upgrades: new Plot rows are also created on completion.
+// constructionType: build | upgrade | repair | rebuild
+// upgradeId: only set when constructionType = "upgrade".
+// repairCostProportion: only set when constructionType = "repair". Captures the damage
+//   fraction at initiation: (maxDurability - currentDurability) / maxDurability.
+//   Stored so mid-repair damage events don't change what was already charged.
 model Construction {
-  id                  Int       @id @default(autoincrement())
-  structureId         Int
-  upgradeId           Int?
-  pointsRequired      Int
-  pointsRemaining     Int
-  initiatedByEntityId Int
-  startedAt           DateTime  @default(now()) @db.Timestamptz
-  completedAt         DateTime? @db.Timestamptz
+  id                    Int       @id @default(autoincrement())
+  structureId           Int
+  constructionType      String    @db.VarChar(20) @default("build")
+  upgradeId             Int?
+  repairCostProportion  Float?
+  pointsRequired        Int
+  pointsRemaining       Int
+  initiatedByEntityId   Int
+  startedAt             DateTime  @default(now()) @db.Timestamptz
+  completedAt           DateTime? @db.Timestamptz
 
-  structure         Structure            @relation(fields: [structureId],         references: [id], onDelete: Cascade)
-  upgrade           StructureDef_Upgrade? @relation(fields: [upgradeId],          references: [id], onDelete: Restrict)
-  initiatedByEntity Entity               @relation(fields: [initiatedByEntityId], references: [id], onDelete: Restrict)
+  structure         Structure             @relation(fields: [structureId],         references: [id], onDelete: Cascade)
+  upgrade           StructureDef_Upgrade? @relation(fields: [upgradeId],           references: [id], onDelete: Restrict)
+  initiatedByEntity Entity                @relation(fields: [initiatedByEntityId], references: [id], onDelete: Restrict)
+
+  itemRequirements  Construction_ItemRequirement[]
 
   @@index([structureId])
   @@index([initiatedByEntityId])
+}
+
+// Tracks required materials and contribution progress for an active construction.
+// Rows are created at initiation with quantityContributed = 0 and deleted on completion.
+// Construction cannot complete until all rows have quantityContributed >= quantityRequired
+// AND pointsRemaining = 0.
+model Construction_ItemRequirement {
+  constructionId      Int
+  itemId              Int
+  quantityRequired    Int
+  quantityContributed Int @default(0)
+
+  construction Construction @relation(fields: [constructionId], references: [id], onDelete: Cascade)
+  item         Item         @relation(fields: [itemId],         references: [id], onDelete: Restrict)
+
+  @@id([constructionId, itemId])
+  @@index([itemId])
 }
 
 // Seed table for world-effect modifier categories used by EnvCondition_Modifier.
@@ -2288,8 +2320,9 @@ model Item {
   plantDef                      PlantDef?                      @relation("ItemPlantDef",         fields: [plantDefId], references: [id], onDelete: SetNull)
   propagationForPlantDefs       PlantDef[]                     @relation("PlantDefPropagationItem")
 
-  structureBuildCosts           StructureDef_BuildCost[]
-  structureUpgradeBuildCosts    StructureDef_Upgrade_BuildCost[]
+  structureBuildCosts               StructureDef_BuildCost[]
+  structureUpgradeBuildCosts        StructureDef_Upgrade_BuildCost[]
+  constructionItemRequirements      Construction_ItemRequirement[]
   treatmentLogs          EntityTreatmentLog[]
   abilityGrantedActions  Ability_GrantedAction[]
   requiredByProfiles     ItemEquipmentProfile_RequiredItem[] @relation("ProfileRequiredItem")
