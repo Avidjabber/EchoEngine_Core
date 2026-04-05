@@ -44,8 +44,8 @@ Farming structures have an additional contribution per active plot:
 
 ENTITIES (housing)
 ───────────────────
-When housing occupancy is implemented, entities contribute daily filth to their
-assigned housing structure using the same formula:
+Each entity assigned to a housing structure (via Entity_Housing) contributes daily
+filth to that structure using:
 
   dailyFilthGenerated = Species.<bracket>FilthPerDay × (rand(0.70, 1.30) + rotItemCount × 0.03)
 
@@ -57,10 +57,10 @@ assigned housing structure using the same formula:
 
   rotItemCount here is the number of rotting items in the entity's personal inventory.
 
-  If the housing structure is overcrowded (occupants > StructureDef.capacity),
-  each entity's contribution is multiplied by 1.5.
-
-  Housing occupancy tracking is not yet implemented. This section applies once it is.
+  If the housing structure is overcrowded (occupants > StructureDef_HousingConfig.comfortableCapacity),
+  each overcrowded entity's contribution is multiplied by (1.0 + overcrowdingFilthBonus).
+  Default overcrowdingFilthBonus is 0.5, giving a 1.5× multiplier. Strict structures
+  (maxCapacity = null) can never be overcrowded and this multiplier never applies.
 
 
 ─────────────────────────────────────────────
@@ -179,10 +179,19 @@ storage still attracts rats.
     filthLevel             Int    @default(0)
 
   Species
-    childFilthPerDay       Float  — already present; daily housing contribution for child bracket
-    teenFilthPerDay        Float  — already present; teen bracket
-    adultFilthPerDay       Float  — already present; adult bracket
-    elderFilthPerDay       Float  — already present; elder bracket
+    childFilthPerDay       Float  — daily housing filth contribution for child bracket
+    teenFilthPerDay        Float  — teen bracket
+    adultFilthPerDay       Float  — adult bracket
+    elderFilthPerDay       Float  — elder bracket
+
+  StructureDef_HousingConfig
+    comfortableCapacity    Int    — occupant threshold; exceeding this triggers overcrowding multiplier
+    maxCapacity            Int?   — null = strict (hard cap); non-null = soft cap (overcrowding allowed)
+    overcrowdingFilthBonus Float  — multiplier bonus on each overcrowded entity's daily contribution (default 0.5)
+
+  Entity_Housing
+    entityId               Int @id — the entity being housed
+    structureId            Int     — the housing structure they are assigned to
 
   Camp
     filthLevel             REMOVED — use runtime aggregate instead

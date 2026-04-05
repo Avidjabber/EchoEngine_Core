@@ -83,14 +83,14 @@ their own StructureDefs.
   ──────────┼──────────────────────────────────────────────────────────────
   storage   │ Holds items. Connects to the Storage system.
   farming   │ Contains plots for growing crops. Connects to the Farming system.
-  housing   │ Provides living quarters for entities. Connects to the Housing system.
-            │ Housing properties TBD when the housing system is designed.
+  housing   │ Provides living quarters for entities. Config defined in
+            │ StructureDef_HousingConfig. Entities are assigned via Entity_Housing.
 
 VALID EFFECT TYPES PER CATEGORY
 ─────────────────────────────────
   storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating | damage_resistance | filth_reduction
   farming:  plot_count | growth_rate | season_override | env_override | soil_quality | damage_resistance | filth_reduction
-  housing:  damage_resistance | filth_reduction (additional types TBD when the housing system is built out)
+  housing:  comfortable_capacity | max_capacity | damage_resistance | filth_reduction
 
 
 ─────────────────────────────────────────────
@@ -199,6 +199,23 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
     defaultSoilQuality   Float. soilQuality assigned to each plot when created.
                          Guild-defined — e.g. 1.0 for a basic garden, 1.2 for a
                          pre-composted bed. Applies to plots added by upgrades too.
+
+  StructureDef_HousingConfig  (for structureTypeId = housing)
+    structureDefId            FK → StructureDef
+    comfortableCapacity       Int. Number of residents that can live here without penalty.
+    maxCapacity               Int?. null = strict (hard cap at comfortableCapacity; assignment
+                              is blocked when full). non-null = soft cap (residents may exceed
+                              comfortableCapacity up to this limit, but each entity over the
+                              comfortable threshold has their daily filth contribution multiplied
+                              by (1.0 + overcrowdingFilthBonus).
+    overcrowdingFilthBonus    Float. Multiplier bonus applied to each overcrowded entity's daily
+                              filth contribution. Default 0.5 (= 1.5× total). Ignored when
+                              maxCapacity is null (strict structures never overcrowd).
+
+  Entity_Housing tracks which structure each entity is assigned to live in:
+    entityId     FK → Entity (@id — one housing assignment per entity)
+    structureId  FK → Structure (must be a housing-type structure; enforced at app layer)
+    assignedAt   DateTime
 
 
 ─────────────────────────────────────────────
@@ -583,9 +600,11 @@ selects one and the action resolves immediately with no further tracking needed.
   1. StructureType list — RESOLVED. Seeded types are: storage, farming, housing.
      No "other" type. Additional types may be added when new engine systems are built.
 
-  2. Housing base config — DEFERRED. To be designed when the housing system is
-     built out. The housing StructureType will be seeded but its config table and
-     effect types are TBD.
+  2. Housing base config — RESOLVED. See StructureDef_HousingConfig in section 4a.
+     Strict vs. soft capacity controlled by maxCapacity nullability. Overcrowding
+     applies a multiplier bonus (default 0.5) to each overcrowded entity's daily
+     filth contribution. Valid upgrade effectTypes: comfortable_capacity, max_capacity,
+     damage_resistance, filth_reduction.
 
   3. Storage table definition — RESOLVED. See item-definitions.md section 7.
      Storage is a pure item container. Capacity, rot modifier, and type
@@ -612,6 +631,8 @@ selects one and the action resolves immediately with no further tracking needed.
   StructureDef_BuildCost         — items required for initial build
   StructureDef_StorageConfig     — base capacity and rot values for storage-type defs
   StructureDef_FarmingConfig     — base plot count and soil quality for farming-type defs
+  StructureDef_HousingConfig     — comfortable/max capacity and overcrowding filth bonus for housing-type defs
+  Entity_Housing                 — assigns an entity to a housing structure (one per entity)
   StructureDef_Upgrade           — guild-defined modular upgrade for a StructureDef
   StructureDef_Upgrade_Effect    — individual effects of an upgrade (one row per effect; upgrades may have many)
   StructureDef_Upgrade_BuildCost — items required to apply an upgrade

@@ -715,6 +715,7 @@ model Entity {
   behaviorCounters EntityBehaviorCounter[]
 
   entityStorage          Entity_Storage[]
+  housing                Entity_Housing?
   constructionsInitiated Construction[]
   plotBuffs              Plot_Buff[]
 
@@ -1978,6 +1979,7 @@ model StructureDef {
   relatedTo        StructureDef_Relation[] @relation("StructureDefRelationTarget")
   storageConfig    StructureDef_StorageConfig?
   farmingConfig    StructureDef_FarmingConfig?
+  housingConfig    StructureDef_HousingConfig?
   upgrades         StructureDef_Upgrade[]
   structures       Structure[]
 
@@ -2042,6 +2044,23 @@ model StructureDef_StorageConfig {
   baseCapacitySolids  Int
   baseCapacityLiquids Int
   baseRotModifier     Float @default(1.0)
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+}
+
+// Base config for housing-type StructureDefs.
+// comfortableCapacity:    number of residents that can live here without penalty.
+// maxCapacity:            null = strict (hard cap at comfortableCapacity; no overflow allowed).
+//                         non-null = soft cap (residents may exceed comfortable up to this limit,
+//                         with an overcrowding filth penalty applied to each entity's daily contribution).
+// overcrowdingFilthBonus: multiplier bonus added to each overcrowded entity's daily filth contribution
+//                         when occupants exceed comfortableCapacity. 0.5 = +50% (total 1.5×).
+//                         Ignored when maxCapacity is null (strict structures never overcrowd).
+model StructureDef_HousingConfig {
+  structureDefId         Int   @id
+  comfortableCapacity    Int
+  maxCapacity            Int?  // null = strict; non-null = soft overcrowding limit
+  overcrowdingFilthBonus Float @default(0.5)
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
 }
@@ -2158,6 +2177,7 @@ model Structure {
   structureStorage Structure_Storage?
   constructions    Construction[]
   plots            Plot[]
+  residents        Entity_Housing[]
 
   @@index([campId])
   @@index([structureDefId])
@@ -2428,6 +2448,20 @@ model Entity_Storage {
 
   entity  Entity  @relation(fields: [entityId],  references: [id], onDelete: Cascade)
   storage Storage @relation(fields: [storageId], references: [id], onDelete: Cascade)
+}
+
+// Assigns an entity to a housing structure. One row per entity — an entity can only have one home.
+// The structure must be of type "housing" (enforced at app layer).
+// App layer enforces StructureDef_HousingConfig capacity limits on assignment.
+model Entity_Housing {
+  entityId    Int      @id
+  structureId Int
+  assignedAt  DateTime @default(now()) @db.Timestamptz
+
+  entity    Entity    @relation(fields: [entityId],    references: [id], onDelete: Cascade)
+  structure Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+
+  @@index([structureId])
 }
 
 // Camp structure inventory. Owned by a storage-type Structure.
