@@ -88,22 +88,28 @@ their own StructureDefs.
 
 VALID EFFECT TYPES PER CATEGORY
 ─────────────────────────────────
-  storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating | damage_resistance
-  farming:  plot_count | growth_rate | season_override | env_override | soil_quality | damage_resistance
-  housing:  damage_resistance (additional types TBD when the housing system is built out)
+  storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating | damage_resistance | filth_reduction
+  farming:  plot_count | growth_rate | season_override | env_override | soil_quality | damage_resistance | filth_reduction
+  housing:  damage_resistance | filth_reduction (additional types TBD when the housing system is built out)
 
 
 ─────────────────────────────────────────────
 4. STRUCTURE DEFINITIONS (GUILD-DEFINED)
 ─────────────────────────────────────────────
 
-StructureDef is the guild's specific named structure. It references a seeded
-StructureType and defines everything about how that structure is built and upgraded.
+StructureDef is the guild's specific named structure. It references one or more
+seeded StructureTypes and defines everything about how that structure is built
+and upgraded.
+
+Types are assigned via the StructureDef_StructureType bridge table (see below).
+Most defs have a single type. Multi-type defs (e.g. a hospital that is both
+housing and medical) are supported — the def's valid upgrade effectTypes are
+the union of all its assigned types' valid effectTypes, and all relevant
+type-specific config tables must be populated.
 
   Field              │ Purpose
   ───────────────────┼────────────────────────────────────────────────────────
   guildId            │ Owning guild.
-  structureTypeId    │ FK → StructureType. Determines mechanical behaviour.
   name               │ Internal key e.g. "mossy_storage_den"
   displayName        │ User-facing label.
   description        │ Optional flavour text.
@@ -114,6 +120,16 @@ StructureType and defines everything about how that structure is built and upgra
                      │ All structures start at this value when construction completes.
                      │ Effective max = baseDurability + SUM of any durability upgrade
                      │ effects applied (reserved for future use).
+
+StructureDef_StructureType assigns one or more types to a def:
+
+  structureDefId  │ FK → StructureDef
+  structureTypeId │ FK → StructureType
+  @@id([structureDefId, structureTypeId])
+
+  Every def must have at least one type row. Most have exactly one.
+  For multi-type defs, all relevant type-specific config tables (4a) must
+  have a corresponding row for that def.
 
 Base values for type-specific properties are defined on extension config rows
 (see section 4a). These represent the structure's state before any upgrades apply.
@@ -587,9 +603,10 @@ selects one and the action resolves immediately with no further tracking needed.
 ─────────────────────────────────────────────
 
   StructureType                  — seeded category: storage | farming | housing
-  Camp                           — faction + location pairing; zero or more per faction; carries filthLevel
+  Camp                           — faction + location pairing; zero or more per faction; filthLevel removed (runtime aggregate)
   Camp_StructureLimit            — per-camp cap on how many structures of each type may be built
-  StructureDef                   — guild-defined named structure; references a StructureType
+  StructureDef                   — guild-defined named structure; types assigned via StructureDef_StructureType
+  StructureDef_StructureType     — assigns one or more StructureTypes to a def; most defs have exactly one
   StructureDef_CampRequirement   — structure types that must be active in a camp before this def can be built
   StructureDef_Relation          — REQUIRES / BLOCKS / UPGRADES rules between specific defs within a guild
   StructureDef_BuildCost         — items required for initial build

@@ -880,11 +880,13 @@ model DisciplineDef {
   // null = no daily cap (all discipline rows). Only meaningful on the stat progression row.
   dailyXpCap Int?
 
-  entityDisciplines    Entity_Discipline[]
-  skillTreeNodes       SkillTreeNode[]
-  actionRewards        ActionType_DisciplineReward[]
-  actionInstanceXp     ActionInstance_Entity_DisciplineXp[]
-  recipeRewards        Recipe_DisciplineReward[]
+  entityDisciplines             Entity_Discipline[]
+  skillTreeNodes                SkillTreeNode[]
+  skillTreeNodeRequirements     SkillTreeNode_DisciplineRequirement[]
+  actionRewards                 ActionType_DisciplineReward[]
+  actionInstanceXp              ActionInstance_Entity_DisciplineXp[]
+  recipeRewards                 Recipe_DisciplineReward[]
+  abilityActionTriggerXpGrants  Ability_ActionTrigger[]
 }
 
 // Per-entity discipline progression. A row is created for every discipline at entity creation.
@@ -926,11 +928,28 @@ model SkillTreeNode {
   relations  SkillTreeNode_Relation[] @relation("NodeRelations")
   relatedTo  SkillTreeNode_Relation[] @relation("RelationTarget")
 
-  entityProgress Entity_SkillTreeNode[]
+  disciplineRequirements SkillTreeNode_DisciplineRequirement[]
+  entityProgress         Entity_SkillTreeNode[]
 
   @@index([guildId])
   @@index([disciplineDefId])
   @@index([abilityDefId])
+}
+
+// Cross-discipline prerequisites for a skill tree node.
+// A node may require the entity to meet a minimum level in one or more OTHER disciplines
+// in addition to its own levelRequired. All rows must be satisfied before the node unlocks.
+// Example: a "Combat Medic" Healing node with levelRequired = 3 also requires Combat level 5.
+model SkillTreeNode_DisciplineRequirement {
+  nodeId          Int
+  disciplineDefId Int
+  levelRequired   Int
+
+  node          SkillTreeNode @relation(fields: [nodeId],          references: [id], onDelete: Cascade)
+  disciplineDef DisciplineDef @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
+
+  @@id([nodeId, disciplineDefId])
+  @@index([disciplineDefId])
 }
 
 // Directed relation edges between skill tree nodes (within a guild's tree).
@@ -973,11 +992,12 @@ model Entity_SkillTreeNode {
 // Guild-extensible ability definitions.
 // Sources: species (inherent at creation), skill tree (earned), items (while equipped), events (granted).
 model AbilityDef {
-  id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
-  codeName    String  @db.VarChar(200)
-  name        String  @db.VarChar(200)
-  description String? @db.VarChar(1000)
+  id           Int     @id @default(autoincrement())
+  guildId      String  @default("global") @db.VarChar(50)
+  codeName     String  @db.VarChar(200)
+  name         String  @db.VarChar(200)
+  description  String? @db.VarChar(1000)
+  maxInstances Int     @default(1)  // max active Entity_Ability rows per entity for this def; grant silently skipped if at cap
 
   statModifiers        Ability_StatModifier[]
   proficiencyModifiers Ability_ProficiencyModifier[]
@@ -987,6 +1007,8 @@ model AbilityDef {
   conditionResistances Ability_ConditionResistance[]
   damageModifiers      Ability_DamageModifier[]
   actionTriggers       Ability_ActionTrigger[]
+  thresholdTriggers    Ability_ThresholdTrigger[]
+  presenceEffects      Ability_PresenceEffect[]
 
   entityAbilities Entity_Ability[]
   speciesDefaults Species_DefaultAbility[]
@@ -1026,8 +1048,12 @@ model Species_DefaultAbility {
   @@index([abilityDefId])
 }
 
-// Flat stat bonus, optionally gated by action context, biome, or weather.
+// Flat stat bonus, optionally gated by action context, biome, weather, or entity state.
 // context: situational key e.g. "dodge", "attack"; null = always applies
+// State gates (all as fraction of max, 0.0–1.0; null = no gate):
+//   hpThresholdMin / hpThresholdMax     — e.g. max 0.3 = "only when HP ≤ 30%"
+//   nutritionThresholdMax               — "only when nutrition ≤ X%"
+//   hydrationThresholdMax               — "only when hydration ≤ X%"
 model Ability_StatModifier {
   id           Int    @id @default(autoincrement())
   abilityDefId Int
@@ -1038,6 +1064,11 @@ model Ability_StatModifier {
   biomeId        Int?
   weatherStateId Int?
 
+  hpThresholdMin        Float?  // only active when HP fraction >= this value
+  hpThresholdMax        Float?  // only active when HP fraction <= this value
+  nutritionThresholdMax Float?  // only active when nutrition fraction <= this value
+  hydrationThresholdMax Float?  // only active when hydration fraction <= this value
+
   abilityDef   AbilityDef    @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
   stat         Stat          @relation(fields: [statId],         references: [id], onDelete: Restrict)
   biome        Biome?        @relation(fields: [biomeId],        references: [id], onDelete: Restrict)
@@ -1047,7 +1078,7 @@ model Ability_StatModifier {
   @@index([statId])
 }
 
-// Flat bonus to a specific proficiency roll, optionally gated by biome or weather.
+// Flat bonus to a specific proficiency roll, optionally gated by biome, weather, or entity state.
 model Ability_ProficiencyModifier {
   id               Int     @id @default(autoincrement())
   abilityDefId     Int
@@ -1058,6 +1089,11 @@ model Ability_ProficiencyModifier {
 
   biomeId        Int?
   weatherStateId Int?
+
+  hpThresholdMin        Float?
+  hpThresholdMax        Float?
+  nutritionThresholdMax Float?
+  hydrationThresholdMax Float?
 
   abilityDef     AbilityDef     @relation(fields: [abilityDefId],     references: [id], onDelete: Cascade)
   proficiencyDef ProficiencyDef @relation(fields: [proficiencyDefId], references: [id], onDelete: Restrict)
@@ -1070,16 +1106,21 @@ model Ability_ProficiencyModifier {
 
 // Rate and yield multipliers, optionally gated by biome or weather.
 // targetType values:
-//   discipline_xp      — XP gain for a discipline         (targetId = disciplineId)
-//   drop_herb          — herb gather rate / quantity
-//   drop_prey          — prey hunt yield
-//   drop_forage        — general forage drop rate / quantity
-//   crafting_yield     — crafted item output quantity
-//   crafting_quality   — crafted item quality tier
-//   recovery_rate      — passive condition progression improvement per day
-//   energy_cost        — energy cost for an action type    (targetId = actionTypeId)
-//   treatment_given    — effectiveness when treating another entity
-//   treatment_received — effectiveness of treatment received
+//   discipline_xp        — XP gain for a discipline         (targetId = disciplineId)
+//   drop_herb            — herb gather rate / quantity
+//   drop_prey            — prey hunt yield
+//   drop_forage          — general forage drop rate / quantity
+//   crafting_yield       — crafted item output quantity
+//   crafting_quality     — crafted item quality tier
+//   recovery_rate        — passive condition progression improvement per day (targetId = conditionTypeId?)
+//   energy_cost          — energy cost for an action type    (targetId = actionTypeId)
+//   treatment_given      — effectiveness when treating another entity
+//   treatment_received   — effectiveness of treatment received
+//   construction_speed   — construction progress per action  (targetId = structureTypeId?)
+//   faction_rep_gain     — rep earned from rep-granting actions (targetId = factionId?)
+//   scouting_range       — patrol and territory detection radius
+//   healing_received     — HP restored from all healing sources (actions, items, abilities)
+//   healing_given        — HP restored when healing other entities
 model Ability_MultiplierEffect {
   id           Int    @id @default(autoincrement())
   abilityDefId Int
@@ -1089,6 +1130,11 @@ model Ability_MultiplierEffect {
 
   biomeId        Int?
   weatherStateId Int?
+
+  hpThresholdMin        Float?
+  hpThresholdMax        Float?
+  nutritionThresholdMax Float?
+  hydrationThresholdMax Float?
 
   abilityDef   AbilityDef    @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
   biome        Biome?        @relation(fields: [biomeId],        references: [id], onDelete: Restrict)
@@ -1100,12 +1146,17 @@ model Ability_MultiplierEffect {
 // Grants access to an item's actions without requiring the item in inventory.
 // Mirrors ConditionDef_GrantedItem — same routing through item action definitions.
 // grantedToSource: false = granted to ability holder; true = granted to sourceEntityId
+// usageContext: "any" = usable in and out of combat; "combat_only" = only during active combat;
+//              "out_of_combat_only" = only when not in combat
+// outOfCombatDailyLimit: max uses per day when used outside combat; null = no hard limit (energy still applies)
 model Ability_GrantedAction {
   id              Int     @id @default(autoincrement())
   abilityDefId    Int
   itemId          Int
   grantedToSource Boolean @default(false)
-  usesPerGrant    Int?    // null = unlimited
+  usesPerGrant    Int?    // null = unlimited total uses while ability is active
+  usageContext    String  @db.VarChar(30) @default("any")  // "any" | "combat_only" | "out_of_combat_only"
+  outOfCombatDailyLimit Int?  // null = limited only by energy out of combat
 
   abilityDef AbilityDef @relation(fields: [abilityDefId], references: [id], onDelete: Cascade)
   item       Item       @relation(fields: [itemId],       references: [id], onDelete: Cascade)
@@ -1128,6 +1179,11 @@ model Ability_CombatBehavior {
   biasWeight           Float?
   restrictActionTypeId Int?
   restrictIsBlock      Boolean @default(false)  // false = may ONLY use; true = may NOT use
+
+  hpThresholdMin        Float?
+  hpThresholdMax        Float?
+  nutritionThresholdMax Float?
+  hydrationThresholdMax Float?
 
   abilityDef     AbilityDef              @relation(fields: [abilityDefId],          references: [id], onDelete: Cascade)
   behaviorType   ConditionBehaviorType   @relation(fields: [behaviorTypeId],         references: [id], onDelete: Restrict)
@@ -1165,6 +1221,11 @@ model Ability_DamageModifier {
   modifier     Float   @default(1.0)
   isImmune     Boolean @default(false)
 
+  hpThresholdMin        Float?
+  hpThresholdMax        Float?
+  nutritionThresholdMax Float?
+  hydrationThresholdMax Float?
+
   abilityDef AbilityDef @relation(fields: [abilityDefId], references: [id], onDelete: Cascade)
   damageType DamageType @relation(fields: [damageTypeId], references: [id], onDelete: Restrict)
 
@@ -1176,9 +1237,11 @@ model Ability_DamageModifier {
 // Unlike passive ability effects, these are event-driven — activate on action resolution.
 // One ability can have multiple rows for different actions or different effects on the same action.
 //
-// effectType = "plot_buff":   buffEffectType / effectValue / durationHours set; statId / statValue / energyAmount null
-// effectType = "stat_mod":    statId / statValue / durationHours set; buffEffectType / effectValue / energyAmount null
-// effectType = "energy_restore": energyAmount set; all other effect fields null
+// effectType = "plot_buff":     buffEffectType / effectValue / durationHours set
+// effectType = "condition_grant": conditionDefId set
+// effectType = "energy_restore":  energyAmount set
+// effectType = "double_output":   no extra fields; duplicates full recipe output; crafting actions only
+// effectType = "xp_grant":        disciplineDefId / xpAmount set; triggerChance applies per action
 model Ability_ActionTrigger {
   id           Int    @id @default(autoincrement())
   abilityDefId Int
@@ -1187,28 +1250,98 @@ model Ability_ActionTrigger {
   targetScope       String  @db.VarChar(50)  // "self" | "action_target" | "action_participants" | "area"
   triggerOn         String  @db.VarChar(20)  // "completion" | "success" | "failure"
   triggerChance     Float   @default(1.0)    // 0.0–1.0 probability the trigger fires
-  effectType        String  @db.VarChar(50)  // "plot_buff" | "condition_grant" | "energy_restore"
+  effectType        String  @db.VarChar(50)  // "plot_buff" | "condition_grant" | "energy_restore" | "double_output" | "xp_grant"
   stackBehavior     String  @db.VarChar(20)  @default("refresh")  // "refresh" | "stack" | "ignore"
 
   // effectType = "plot_buff"
   buffEffectType String? @db.VarChar(50)  // growth_rate | yield | decay_resistance
   effectValue    Float?
-  durationHours  Int?                     // how long the plot buff lasts before expiring
+  durationHours  Int?
 
   // effectType = "condition_grant"
-  // The condition system handles duration, ticks, and stat effects.
-  // stackBehavior governs what happens if the entity already has this condition active.
   conditionDefId Int?
 
   // effectType = "energy_restore"
   energyAmount Float?
 
+  // effectType = "xp_grant"
+  disciplineDefId Int?
+  xpAmount        Int?
+
   abilityDef           AbilityDef       @relation(fields: [abilityDefId],        references: [id], onDelete: Cascade)
   triggerSystemTypeRel ActionSystemType @relation(fields: [triggerSystemType],    references: [id], onDelete: Restrict)
   conditionDef         ConditionDef?    @relation(fields: [conditionDefId],       references: [id], onDelete: Restrict)
+  disciplineDef        DisciplineDef?   @relation(fields: [disciplineDefId],      references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
   @@index([triggerSystemType])
+}
+
+// Grants a condition when a tracked entity value crosses a defined threshold.
+// Checked after any event that modifies the relevant value (damage, healing, eating, drinking).
+// Fires only when the threshold is newly crossed and the condition is not already active.
+// thresholdType: "hp" | "nutrition" | "hydration"  (all as fraction of max, 0.0–1.0)
+// direction:     "below" (default) | "above"
+// stackBehavior: "refresh" | "stack" | "ignore"
+model Ability_ThresholdTrigger {
+  id           Int    @id @default(autoincrement())
+  abilityDefId Int
+
+  thresholdType  String @db.VarChar(20)   // "hp" | "nutrition" | "hydration"
+  thresholdValue Float                    // 0.0–1.0 fraction of max
+  direction      String @db.VarChar(10)  @default("below")  // "below" | "above"
+  conditionDefId Int
+  stackBehavior  String @db.VarChar(20)  @default("ignore")  // "refresh" | "stack" | "ignore"
+
+  abilityDef   AbilityDef   @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
+  conditionDef ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
+
+  @@index([abilityDefId])
+}
+
+// Always-on passive effect that activates based on the entity's housing assignment. Evaluated once per day per target.
+// presenceScope:
+//   "housing_structure"  — the structure the entity is housed in
+//   "housing_plots"      — each active plot in the housing structure
+//   "colocated_entities" — each entity sharing the same housing structure
+//   "colocated_patients" — each entity with an active condition in the same housing structure
+//   "camp_entities"      — each entity in the same camp
+//   "camp_structures"    — each filth-participating structure in the camp
+// triggerChance: per-target daily roll (1.0 = guaranteed; 0.5 = 50% per target)
+// effectType:
+//   "condition_grant" — applies a ConditionDef to target entity (scopes: colocated_entities, colocated_patients, camp_entities)
+//   "multiplier"      — applies a rate/yield multiplier to target entity (same scopes as condition_grant)
+//   "structure_buff"  — modifies a structure property (scopes: housing_structure, camp_structures)
+//   "plot_buff"       — writes a Plot_Buff on target plot (scope: housing_plots)
+// If the target does not exist (no plots, no patients, etc.) the effect does nothing.
+model Ability_PresenceEffect {
+  id           Int    @id @default(autoincrement())
+  abilityDefId Int
+
+  presenceScope String  @db.VarChar(50)   // see comment above
+  triggerChance Float   @default(1.0)     // 0.0–1.0 per-target daily roll
+  effectType    String  @db.VarChar(50)   // "condition_grant" | "multiplier" | "structure_buff" | "plot_buff"
+  stackBehavior String  @db.VarChar(20)  @default("refresh")  // "refresh" | "stack" | "ignore"
+
+  // effectType = "condition_grant"
+  conditionDefId Int?
+
+  // effectType = "multiplier"
+  multiplierTarget String? @db.VarChar(50)  // targetType from Ability_MultiplierEffect vocabulary
+  multiplierValue  Float?
+  multiplierId     Int?                      // narrows target (e.g. disciplineId); null = all
+
+  // effectType = "structure_buff" | "plot_buff"
+  buffEffectType String? @db.VarChar(50)  // growth_rate | rot_modifier | filth_reduction | damage_resistance | etc.
+  effectValue    Float?
+
+  // effectType = "plot_buff" only
+  durationHours Int?
+
+  abilityDef   AbilityDef   @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
+  conditionDef ConditionDef? @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
+
+  @@index([abilityDefId])
 }
 
 // ============================================================
@@ -1258,6 +1391,11 @@ model EntityCondition {
   combatRoundApplied   Int?
   combatRoundExpires   Int?  // null = lasts until combat end (combatInstancedOnly) or indefinite
   resolvedFlatModifier Int?  // snapshotted skill-derived modifier; used by ConditionDef_CombatEffect when flatModifier is null
+
+  // Set at application when ConditionDef.durationMinutes is not null.
+  // expiresAt = appliedAt + durationMinutes. App removes condition when this timestamp is reached.
+  // Null = no time-based expiry on this instance.
+  expiresAt DateTime? @db.Timestamptz
 
   updatedAt DateTime @updatedAt @db.Timestamptz
 
@@ -1313,6 +1451,12 @@ model ConditionDef {
   // Timed field — null for all other types
   maxDays Int?  // number of days until the condition resolves forward via worsen/remove link
 
+  // Duration field — for buffs/debuffs with a real-time expiry (e.g. pre-combat spells, potions).
+  // Applies to any condition type. When set, EntityCondition.expiresAt is computed at application
+  // as now() + durationMinutes. The app removes the condition when expiresAt is reached,
+  // regardless of combat state. null = no time-based expiry.
+  durationMinutes Int?
+
   // Spawn fields — applicable to Timed, Progressive, and Chronic
   spawnThreshold Float?  // 0.0–1.0 fraction of cap/maxDays at which spawn link checks fire; null = no spawning
 
@@ -1339,9 +1483,11 @@ model ConditionDef {
   entityConditions      EntityCondition[]
   damageModifiers       ConditionDef_DamageModifier[]
   behaviorEffects       ConditionBehaviorEffect[]
-  abilityActionTriggers Ability_ActionTrigger[]
-  grantedItems         ConditionDef_GrantedItem[]
-  abilityResistances   Ability_ConditionResistance[]
+  abilityActionTriggers    Ability_ActionTrigger[]
+  abilityThresholdTriggers Ability_ThresholdTrigger[]
+  abilityPresenceEffects   Ability_PresenceEffect[]
+  grantedItems           ConditionDef_GrantedItem[]
+  abilityResistances     Ability_ConditionResistance[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -1744,16 +1890,14 @@ model Faction {
 // ============================================================
 
 // A faction's physical presence at a location. Admin-created; not built via Construction.
-// filthLevel: accumulates daily based on env conditions and entity count; drives filth-trigger events.
-//   Daily gain: baseRate × Π(effectiveMod) where effectiveMod = 1.0 + (EnvCondition_Modifier[filth].value − 1.0) × stackCount
-//   Cap is an app-layer constant × living entity count in the faction.
+// Filth is tracked per-structure (Structure.filthLevel); camp-level filth is a runtime aggregate only.
+// See filth-system.md for generation formula, caps, and event trigger rules.
 model Camp {
   id          Int     @id @default(autoincrement())
   factionId   Int
   locationId  Int
   name        String  @db.VarChar(200)
   description String? @db.VarChar(500)
-  filthLevel  Int     @default(0)
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
@@ -1790,26 +1934,43 @@ model StructureType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
-  structureDefs    StructureDef[]
-  campLimits       Camp_StructureLimit[]
-  campRequirements StructureDef_CampRequirement[]
+  structureDefTypes StructureDef_StructureType[]
+  campLimits        Camp_StructureLimit[]
+  campRequirements  StructureDef_CampRequirement[]
 }
 
-// Guild-defined named structure. References a seeded StructureType.
+// Assigns one or more StructureTypes to a StructureDef.
+// Most defs have exactly one type. Multi-type defs (e.g. a hospital = housing + medical) are supported.
+// For multi-type defs, all relevant type-specific config tables must have a corresponding row.
+model StructureDef_StructureType {
+  structureDefId  Int
+  structureTypeId Int
+
+  structureDef  StructureDef  @relation(fields: [structureDefId],  references: [id], onDelete: Cascade)
+  structureType StructureType @relation(fields: [structureTypeId], references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, structureTypeId])
+  @@index([structureTypeId])
+}
+
+// Guild-defined named structure. Types assigned via StructureDef_StructureType (most defs have one type).
 // name: internal snake_case key (e.g. "mossy_storage_den")
 // constructionPoints: progress points required for the initial build (see ActionSystemType.progressPoints for structure_contribute)
+// Filth fields: dailyFilthAverage = average filth generated per day (null = exempt); filthCap = max filth (null = exempt).
+// filthPerActivePlot: farming structures only — extra filth per active plot added on top of base roll.
 model StructureDef {
   id                 Int     @id @default(autoincrement())
   guildId            String  @db.VarChar(50)
-  structureTypeId    Int
   name               String  @db.VarChar(200)
   displayName        String  @db.VarChar(200)
   description        String? @db.VarChar(1000)
   constructionPoints Int
   baseDurability     Int
+  dailyFilthAverage  Int?
+  filthPerActivePlot Int?
+  filthCap           Int?
 
-  structureType StructureType @relation(fields: [structureTypeId], references: [id], onDelete: Restrict)
-
+  structureTypes   StructureDef_StructureType[]
   buildCosts       StructureDef_BuildCost[]
   campRequirements StructureDef_CampRequirement[]
   relations        StructureDef_Relation[] @relation("StructureDefRelations")
@@ -1820,7 +1981,6 @@ model StructureDef {
   structures       Structure[]
 
   @@index([guildId])
-  @@index([structureTypeId])
 }
 
 // Structure types that must have at least one active (non-broken, non-destroyed)
@@ -1987,6 +2147,7 @@ model Structure {
   structureDefId     Int
   status             String  @db.VarChar(50)
   currentDurability  Int
+  filthLevel         Int     @default(0)
   name               String? @db.VarChar(200)
 
   camp         Camp         @relation(fields: [campId],         references: [id], onDelete: Cascade)

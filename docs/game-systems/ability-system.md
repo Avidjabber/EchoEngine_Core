@@ -21,6 +21,12 @@ and treatment. Abilities are static grants — they are either active or not.
 Abilities are guild-extensible: guildId = "global" for seeded defaults (species
 traits, base skill tree nodes); guilds may define their own.
 
+AbilityDef.maxInstances (default 1) caps how many active Entity_Ability rows an
+entity may have for this def simultaneously, regardless of source. If an entity
+would receive an ability that is already at its cap, the grant is silently skipped.
+Set maxInstances > 1 only for abilities that are explicitly designed to stack —
+most abilities should stay at 1.
+
 
 ─────────────────────────────────────────────
 2. SOURCES
@@ -99,18 +105,23 @@ Multiplier applied to a rate or yield. 1.0 = no change, 1.2 = +20%, 0.8 = −20%
   biomeId        — gate by biome; null = all biomes
   weatherStateId — gate by weather; null = all weather
 
-  targetType         │ targetId means       │ Example
-  ───────────────────┼──────────────────────┼──────────────────────────────
-  discipline_xp      │ disciplineId         │ +20% Farming XP
-  drop_herb          │ —                    │ +30% herb gather yield
-  drop_prey          │ —                    │ +15% prey hunt yield
-  drop_forage        │ —                    │ +10% general forage yield
-  crafting_yield     │ —                    │ +1 output on crafted items
-  crafting_quality   │ —                    │ higher quality tier on craft
-  recovery_rate      │ conditionTypeId?     │ passive condition recovery faster
-  energy_cost        │ actionTypeId         │ −20% energy cost for patrols
-  treatment_given    │ —                    │ +25% effectiveness when treating
-  treatment_received │ —                    │ +25% effectiveness of treatment received
+  targetType           │ targetId means       │ Example
+  ─────────────────────┼──────────────────────┼──────────────────────────────
+  discipline_xp        │ disciplineId         │ +20% Farming XP
+  drop_herb            │ —                    │ +30% herb gather yield
+  drop_prey            │ —                    │ +15% prey hunt yield
+  drop_forage          │ —                    │ +10% general forage yield
+  crafting_yield       │ —                    │ +1 output on crafted items
+  crafting_quality     │ —                    │ higher quality tier on craft
+  recovery_rate        │ conditionTypeId?     │ passive condition recovery faster
+  energy_cost          │ actionTypeId         │ −20% energy cost for patrols
+  treatment_given      │ —                    │ +25% effectiveness when treating
+  treatment_received   │ —                    │ +25% effectiveness of treatment received
+  construction_speed   │ structureTypeId?     │ +20% construction progress per action
+  faction_rep_gain     │ factionId?           │ +15% rep from all rep-granting actions
+  scouting_range       │ —                    │ wider patrol/territory detection radius
+  healing_received     │ —                    │ +40% HP restored from all healing sources
+  healing_given        │ —                    │ +40% HP restored when healing others
 
 ─────────────────────────────────────────────
 4d. Ability_GrantedAction
@@ -120,13 +131,20 @@ Grants access to an item's actions without the item being in inventory.
 Routes through the item system — the item defines the action; the ability
 grants access to it. Mirrors ConditionDef_GrantedItem.
 
-  itemId          — the item whose actions become available
-  grantedToSource — false = granted to ability holder
-                    true  = granted to Entity_Ability.sourceId entity
-  usesPerGrant    — max uses while this ability is active; null = unlimited
+  itemId                — the item whose actions become available
+  grantedToSource       — false = granted to ability holder
+                          true  = granted to Entity_Ability.sourceId entity
+  usesPerGrant          — total uses while this ability is active; null = unlimited
+  usageContext          — when the action is available:
+                            "any"               — usable in and out of combat (default)
+                            "combat_only"       — only during an active combat instance
+                            "out_of_combat_only"— only when not in combat
+  outOfCombatDailyLimit — max uses per day when used outside combat; null = limited
+                          only by energy. Has no effect when usageContext = "combat_only".
 
-Examples: Combat level 5 unlocks "Precision Strike" (via item action).
-          Night Vision grants "Scout in Darkness" action.
+Examples: Combat level 5 unlocks "Precision Strike" (combat_only).
+          Night Vision grants "Scout in Darkness" action (any).
+          Healing spell grants "Mend" (any, outOfCombatDailyLimit = 2).
 
 ─────────────────────────────────────────────
 4e. Ability_CombatBehavior
@@ -203,6 +221,10 @@ different effects on the same action.
                                                    the condition system handles duration, ticks,
                                                    and all stat/behaviour effects
                                "energy_restore"  — restores energy to a target entity
+                               "double_output"   — duplicates the full recipe output at no
+                                                   extra cost; only valid for crafting actions
+                               "xp_grant"        — awards bonus discipline XP to the performing
+                                                   entity; triggerChance applies per action
                              Extensible — new effectTypes added as systems require them.
   stackBehavior      String  How multiple applications interact on the same target:
                                "refresh" — updates/extends an existing effect (default)
@@ -226,6 +248,15 @@ different effects on the same action.
   effectType = "energy_restore":
     energyAmount    Float?   Amount restored. Capped at entity's max energy.
 
+  effectType = "double_output":
+    No extra fields. The entire recipe output is duplicated once on trigger.
+    triggerChance governs the probability per craft. Only valid when
+    triggerSystemType is a crafting action.
+
+  effectType = "xp_grant":
+    disciplineDefId Int?     FK → DisciplineDef. Which discipline receives the XP.
+    xpAmount        Int?     Flat XP awarded when the trigger fires.
+
 EXAMPLE — Farming skill tree, two tiers of the same watering buff:
   "Green Thumb I"  (Farming level 3, SkillTreeNode):
     triggerSystemType = "farming_water"
@@ -243,18 +274,185 @@ EXAMPLE — Farming skill tree, two tiers of the same watering buff:
 
 
 ─────────────────────────────────────────────
-5. CONTEXT GATES (biomeId / weatherStateId)
+4i. Ability_ThresholdTrigger
+─────────────────────────────────────────────
+
+Fires a condition grant when a tracked entity value crosses a defined threshold.
+Checked after any event that changes the relevant value (damage taken, healing,
+eating, drinking). If the threshold is newly crossed and the condition is not
+already active on the entity, the trigger fires.
+
+  thresholdType  String  Which value to watch:
+                           "hp"         — current HP as a fraction of max HP
+                           "nutrition"  — current nutrition as a fraction of max
+                           "hydration"  — current hydration as a fraction of max
+
+  thresholdValue Float   The crossing point (0.0–1.0).
+                           e.g. 0.3 = triggers when the value reaches 30% or below
+
+  direction      String  Which direction of crossing fires the trigger:
+                           "below" — fires when value drops to or below thresholdValue (default)
+                           "above" — fires when value rises to or above thresholdValue
+
+  conditionDefId Int     FK → ConditionDef. The condition granted when the trigger fires.
+                         The condition can be combat-scoped (combatInstancedOnly = true)
+                         or permanent — whatever is defined on the ConditionDef.
+                         All stat changes, damage modifiers, and other effects are
+                         defined on the ConditionDef; nothing is stored here.
+
+  stackBehavior  String  "refresh" | "stack" | "ignore" — what happens if the condition
+                         is already active on the entity when the trigger fires.
+
+EXAMPLE — "Berserker Rage" (Combat skill tree node):
+  thresholdType  = "hp"
+  thresholdValue = 0.3
+  direction      = "below"
+  conditionDefId = <BerserkerRage condition>   (combatInstancedOnly = true, grants
+                                                 +4 attack damage until combat ends)
+  stackBehavior  = "ignore"   (don't reapply if already raging)
+
+EXAMPLE — "Drought Adaptation" (species trait):
+  thresholdType  = "hydration"
+  thresholdValue = 0.2
+  direction      = "below"
+  conditionDefId = <DroughtAdaptation condition>   (permanent, grants CON +2 and
+                                                     reduced hydration drain while active)
+  stackBehavior  = "ignore"
+
+
+─────────────────────────────────────────────
+4j. Ability_PresenceEffect
+─────────────────────────────────────────────
+
+Always-on passive effects that activate based on the entity's housing assignment.
+Unlike Ability_ActionTrigger (which fires on action completion), presence effects
+are evaluated once per day for each valid target in scope.
+
+  presenceScope  String  Who or what is targeted:
+                           "housing_structure"  — the structure the entity is housed in
+                           "housing_plots"      — each active plot in the housing structure
+                           "colocated_entities" — each entity sharing the same housing structure
+                           "colocated_patients" — each entity with an active condition in the
+                                                  same housing structure
+                           "camp_entities"      — each entity in the same camp
+                           "camp_structures"    — each filth-participating structure in the camp
+
+  triggerChance  Float   0.0–1.0. Per-target daily roll. Each target in scope is
+                         evaluated independently — 0.5 means each entity, plot, or
+                         structure has a 50% chance of receiving the effect that day.
+                         1.0 = guaranteed for every target in scope.
+
+  effectType     String  What kind of effect to apply:
+                           "condition_grant" — applies a ConditionDef to the target entity.
+                                              Valid scopes: colocated_entities,
+                                              colocated_patients, camp_entities.
+                           "multiplier"      — applies a rate/yield multiplier to the target
+                                              entity, using the same targetType vocabulary as
+                                              Ability_MultiplierEffect (recovery_rate,
+                                              treatment_received, discipline_xp, etc.).
+                                              Valid scopes: colocated_entities,
+                                              colocated_patients, camp_entities.
+                           "structure_buff"  — modifies a property of the target structure
+                                              (growth_rate, rot_modifier, filth_reduction,
+                                              damage_resistance, etc.).
+                                              Valid scopes: housing_structure, camp_structures.
+                           "plot_buff"       — writes a Plot_Buff on the target plot.
+                                              Valid scopes: housing_plots.
+
+  stackBehavior  String  How multiple applications interact on the same target:
+                           "refresh" — updates/extends an existing effect (default)
+                           "stack"   — applies additively on top of existing effect
+                           "ignore"  — does not apply if the effect is already present
+
+  Effect-specific fields (null when not applicable):
+
+  effectType = "condition_grant":
+    conditionDefId   Int?    FK → ConditionDef. The condition applied to the target entity.
+                             All duration, ticks, and stat effects are defined on ConditionDef.
+
+  effectType = "multiplier":
+    multiplierTarget String? targetType from Ability_MultiplierEffect vocabulary
+                             (recovery_rate, treatment_received, discipline_xp, etc.)
+    multiplierValue  Float?  The scaling factor. 1.2 = +20%, 0.8 = −20%.
+    targetId         Int?    Narrows the target (e.g. a specific disciplineId); null = all.
+
+  effectType = "structure_buff":
+    buffEffectType   String? The structure property to modify (growth_rate, rot_modifier,
+                             filth_reduction, damage_resistance, soil_quality, etc.)
+    effectValue      Float?  Delta applied to the property.
+
+  effectType = "plot_buff":
+    buffEffectType   String? growth_rate | yield | decay_resistance
+    effectValue      Float?  Delta applied to the plot buff.
+    durationHours    Int?    How long the buff lasts before expiring.
+
+  If the target does not exist (no plots in the structure, no patients present,
+  no structures in camp, etc.) the effect does nothing — no error, no activation.
+
+EXAMPLE — Combat skill tree, "Inspiring Presence":
+  presenceScope  = "colocated_entities"
+  triggerChance  = 0.25
+  effectType     = "condition_grant"
+  conditionDefId = <combat_focus condition>   (grants hit chance bonus, short duration)
+  stackBehavior  = "refresh"
+
+EXAMPLE — Farming skill tree, "Green Aura":
+  presenceScope  = "housing_plots"
+  triggerChance  = 0.5
+  effectType     = "plot_buff"
+  buffEffectType = "growth_rate"
+  effectValue    = 0.1
+  durationHours  = 24
+  stackBehavior  = "refresh"
+
+EXAMPLE — Healing skill tree, "Restorative Presence":
+  presenceScope  = "colocated_patients"
+  triggerChance  = 0.6
+  effectType     = "multiplier"
+  multiplierTarget = "recovery_rate"
+  multiplierValue  = 1.25
+  stackBehavior  = "refresh"
+
+
+─────────────────────────────────────────────
+5. CONTEXT GATES
 ─────────────────────────────────────────────
 
 Context gates live on individual effect rows, not on AbilityDef. This means
-a single ability can have different effects in different environments.
+a single ability can have different effects in different environments or states.
+All gates are independently optional — any combination may be set on one row.
 
-Example — "Aquatic" species ability:
-  Ability_StatModifier  DEX +4  biomeId = River   (faster in water)
-  Ability_StatModifier  CON +2  biomeId = River   (endurance boost in water)
-  Ability_StatModifier  DEX −2  biomeId = Desert  (sluggish in dry heat)
+ENVIRONMENT GATES (biomeId / weatherStateId)
+─────────────────────────────────────────────
+  biomeId        — only active when the entity is in this biome; null = all biomes
+  weatherStateId — only active during this weather state; null = all weather
 
-Null biomeId or weatherStateId means the effect applies in all contexts.
+  Example — "Aquatic" species ability:
+    Ability_StatModifier  DEX +4  biomeId = River   (faster in water)
+    Ability_StatModifier  CON +2  biomeId = River   (endurance boost in water)
+    Ability_StatModifier  DEX −2  biomeId = Desert  (sluggish in dry heat)
+
+ENTITY STATE GATES
+───────────────────
+Available on all passive effect tables (StatModifier, ProficiencyModifier,
+MultiplierEffect, CombatBehavior, DamageModifier). All values are fractions
+of the entity's current maximum (0.0–1.0). Null = no gate on that axis.
+
+  hpThresholdMin        — only active when HP ≥ this fraction of max HP
+                          e.g. 0.5 = "only when at half health or above"
+  hpThresholdMax        — only active when HP ≤ this fraction of max HP
+                          e.g. 0.3 = "only when at 30% HP or below" (berserker rage)
+  nutritionThresholdMax — only active when nutrition ≤ this fraction of max
+                          e.g. 0.2 = "only when starving"
+  hydrationThresholdMax — only active when hydration ≤ this fraction of max
+                          e.g. 0.2 = "only when dehydrated"
+
+  Example — "Berserker Rage":
+    Ability_StatModifier  STR +4  context = "attack"  hpThresholdMax = 0.3
+    Ability_StatModifier  CON +2                      hpThresholdMax = 0.3
+
+  Example — "Survival Instinct":
+    Ability_ProficiencyModifier  Perception +3  nutritionThresholdMax = 0.2
 
 
 ─────────────────────────────────────────────
@@ -265,7 +463,7 @@ Null biomeId or weatherStateId means the effect applies in all contexts.
   Entity_Ability             — per-entity active ability with source tracking
   Species_DefaultAbility     — abilities granted at entity creation by species
   SkillTreeNode              — guild-defined node; links discipline level → AbilityDef
-  SkillTreeNode_Prerequisite — prerequisite edges between nodes
+  SkillTreeNode_Relation     — REQUIRES / BLOCKS / UPGRADES edges between nodes
   Entity_SkillTreeNode       — records which nodes an entity has obtained
 
   Ability_StatModifier        — stat bonuses/penalties with optional context gates
@@ -276,6 +474,8 @@ Null biomeId or weatherStateId means the effect applies in all contexts.
   Ability_ConditionResistance — condition resistance/immunity
   Ability_DamageModifier      — damage type modifiers
   Ability_ActionTrigger       — action-triggered effects: plot buffs, condition grants, energy restore
+  Ability_ThresholdTrigger    — condition grant fired when HP/nutrition/hydration crosses a threshold
+  Ability_PresenceEffect      — daily housing-based passive effects: condition grants, multipliers, structure/plot buffs
 
 
 ─────────────────────────────────────────────

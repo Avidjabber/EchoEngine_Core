@@ -144,9 +144,19 @@ NODE SCHEMA
     statPointCost   — stat points required to purchase; 0 = auto-granted
     isAutoGranted   — true when the node is granted automatically on level-up
 
+  SkillTreeNode_DisciplineRequirement
+    nodeId          — the node being gated
+    disciplineDefId — a different discipline the entity must also meet
+    levelRequired   — minimum level required in that discipline
+    A node may have zero or more cross-discipline requirement rows.
+    All must be satisfied (in addition to the node's own levelRequired)
+    before the node is considered unlocked.
+    Example: a "Combat Medic" node in the Healing tree could require
+    Combat level 5 AND Healing level 3 (its own levelRequired).
+
   SkillTreeNode_Relation
     nodeId          — the node being constrained
-    relationType    — REQUIRES | BLOCKS | REPLACES
+    relationType    — REQUIRES | BLOCKS | UPGRADES
     targetNodeId    — the node being referenced
     Both nodeId and targetNodeId must belong to the same guildId.
     A node may have any number of relation rows.
@@ -286,6 +296,7 @@ ENTITY NODE PURCHASE / RESPEC
 ───────────────────────────────
   purchaseNode(entityId, nodeId)
     - Validates: entity discipline level >= levelRequired
+    - Validates: all SkillTreeNode_DisciplineRequirement rows are satisfied
     - Validates: all REQUIRES targets are in entity's obtained set
     - Validates: no BLOCKS targets are in entity's obtained set
     - Validates: entity skillPoints >= statPointCost (after any REPLACES refunds)
