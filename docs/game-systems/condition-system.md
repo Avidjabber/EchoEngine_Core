@@ -191,6 +191,12 @@ Null = not contagious.
 
 Contagion rolls happen on proximity events (patrols, sharing dens, etc.).
 
+If the entity is housed (Entity_Housing) in a structure with a medical type,
+StructureDef_MedicalConfig.contagionResistBonus is added as a flat bonus to
+their contagion resistance CON roll. This represents isolation protocols and
+quarantine — an isolation ward with a high bonus makes disease spread much
+harder even when healthy and sick entities share the same structure.
+
 
 ─────────────────────────────────────────────
 8. ENV RULES (difficultyMod)
@@ -318,6 +324,13 @@ After treatment:
 
 The daily CON roll and treatment are independent — both apply on the same day.
 Order of operations: CON roll first, then treatment on top.
+
+If the entity is housed (Entity_Housing) in a structure with a medical type, the
+progression delta from the CON roll is multiplied by StructureDef_MedicalConfig
+.recoveryModifier before being applied. This applies to Progressive and Chronic
+conditions only. Order of operations: CON roll → apply recoveryModifier → apply
+treatment. A recoveryModifier of 0.8 means the raw CON roll delta is scaled to
+80% before treatment adds its own reduction on top.
 
 
 ─────────────────────────────────────────────

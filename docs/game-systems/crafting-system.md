@@ -126,28 +126,20 @@ separate from ItemInteraction, which covers medicine use and item consumption.
     Carve     shapes bone, stone, or wood using a cutting tool
     Weave     interlaces fiber, vine, or reed into cloth or cord
     Tan       processes raw hide into leather (requires tanning rack — not yet implemented)
-    Compost   breaks down rotten food, spoiled herbs, and plant scraps into compost
-              (output feeds the farming system — not yet implemented)
-
-  Smithing / forging (structure system not yet implemented):
-    Smelt     melts ore into ingots (requires forge or furnace structure)
-    Forge     shapes a heated ingot into tools, weapons, or armor (requires forge structure)
-    Temper    hardens metal through heat cycles (requires forge structure)
-    Kiln      fires clay items into ceramics (requires kiln structure)
+  Smithing / forging (structure requirements configured per-guild via Guild_CraftingInteractionRule):
+    Smelt     melts ore into ingots
+    Forge     shapes a heated ingot into tools, weapons, or armor
+    Temper    hardens metal through heat cycles
+    Kiln      fires clay items into ceramics
 
 A CraftingInteraction has no behavior of its own. Behavior is defined by the
 recipe that uses it. The same verb (Dry) can have different skill requirements,
 inputs, and outputs depending on which recipe is matched.
 
-Note: Smelt, Forge, Temper, Kiln, and Tan are seeded now so recipes can be
-authored and discovered ahead of the structure system being built. Until
-structures are implemented, the app should gate these recipes behind a
-structure check that is always treated as unmet.
-
-Note: Compost is seeded ahead of the farming system. It requires no structure,
-but has no defined output items yet. Until the farming system is built, Compost
-recipes should be treated as having no outputs — ingredients are consumed and
-nothing is produced.
+Note: Composting is NOT a CraftingInteraction. It is handled entirely by the
+compost structure system (StructureDef_CompostConfig, Structure_CompostDeposit,
+Item_CompostOutput). Items are deposited directly into a compost structure and
+convert on a timer — no recipe or crafting action is involved.
 
 
 ─────────────────────────────────────────────
@@ -489,8 +481,9 @@ schema.
   Items       — All recipe inputs and outputs are Item rows. Crafting does not
                 introduce a separate item model. See item-definitions.md.
 
-  Farming     — Compost recipes consume rotten/spoiled items and will feed into
-                soil quality when the farming system is built. See farming-system.md.
+  Farming     — Compost outputs (soil additives) feed into plot soil quality when
+                the farming system is built. Composting itself is handled by the
+                compost structure system, not the crafting system. See farming-system.md.
 
   Conditions  — Crafted medicine items interact with the condition system via
                 ItemAction → ItemEffect / ItemConditionEffect. The crafting system
@@ -528,4 +521,80 @@ schema.
   "Does processing change nutritional values?"       → RecipeOutput_FoodOverride (sparse patch)
   "Does processing change how quantity is measured?" → RecipeOutput.outputMeasurementTypeId
   "What tags does the output item have?"             → source Item_IngredientType + AddTag - RemoveTag
+  "Does this interaction require a structure?"       → Guild_CraftingInteractionRule (relationType = "requires")
+  "Does this structure improve my output?"           → Guild_CraftingInteractionRule (relationType = "improves")
+  "Does this specific recipe require a structure?"   → Recipe_StructureRequirement (relationType = "requires")
+  "Does a structure improve this specific recipe?"   → Recipe_StructureRequirement (relationType = "improves")
+  "What interactions does this structure support?"   → StructureDef_CraftingConfig_Interaction
+  "Does this upgrade unlock a new interaction?"      → StructureDef_Upgrade_CraftingInteraction
+
+
+─────────────────────────────────────────────
+8. CRAFTING STRUCTURES
+─────────────────────────────────────────────
+
+Crafting structures (StructureType = "crafting") provide a physical location
+that gates or improves specific crafting interactions. They are optional —
+if a guild defines no rules, all interactions are available anywhere.
+
+STRUCTURE BONUSES
+──────────────────
+Each crafting-type StructureDef has a StructureDef_CraftingConfig row:
+
+  craftingRollBonus    Int   — flat bonus added to crafting skill rolls at this structure
+  outputQuantityBonus  Float — additive multiplier on output quantity (0.1 = +10%)
+
+These apply whenever the entity performs any supported interaction at this structure.
+
+SUPPORTED INTERACTIONS
+───────────────────────
+Which interactions a structure supports is defined in StructureDef_CraftingConfig_Interaction
+(one row per supported interaction). Additional interactions can be unlocked by applying
+upgrades — see StructureDef_Upgrade_CraftingInteraction.
+
+GUILD RULES (Guild_CraftingInteractionRule)
+────────────────────────────────────────────
+Per-guild rules control whether an interaction requires a structure and what improves it.
+If no rules exist for a guild+interaction, the interaction is available anywhere with no bonuses.
+
+  relationType  "requires" — the target must be present in the faction's active camp.
+                "improves" — the target is present and contributing bonuses. The bonus
+                             amounts are NOT stored on the rule row — the worker reads them
+                             from StructureDef_CraftingConfig (for structure targets) or
+                             StructureDef_Upgrade_Effect rows with effectType
+                             "crafting_roll_bonus" / "output_quantity_bonus" (for upgrade
+                             targets). The rule is purely a pointer.
+
+  orGroup       null    — standalone rule (AND logic). All null-group requires rows must be satisfied.
+                non-null — OR group. At least one row with the same orGroup must be satisfied.
+                           Different orGroup values on the same interaction are AND'd together.
+
+  structureDefId  Int? — requires/improves via a specific structure def in camp.
+  upgradeId       Int? — requires/improves via a specific upgrade applied to a structure in camp.
+
+Example — smelt requires a workshop AND (a forge OR an anvil), improved by a blast furnace upgrade:
+
+  relationType   structureDefId   upgradeId    orGroup
+  requires       workshop_id      null         null
+  requires       forge_id         null         1
+  requires       anvil_id         null         1
+  improves       null             blast_furn   null
+
+  Bonuses from the blast furnace upgrade are read from its StructureDef_Upgrade_Effect rows.
+
+RECIPE-LEVEL REQUIREMENTS (Recipe_StructureRequirement)
+─────────────────────────────────────────────────────────
+Individual recipes can also carry their own structure/upgrade requirements using
+the same relationType / orGroup pattern. Both recipe-level and interaction-level
+rules are evaluated at craft time — all must pass.
+
+"improves" rows here work the same way as interaction-level rules: the worker
+reads bonus values from the referenced structure's StructureDef_CraftingConfig
+or the upgrade's StructureDef_Upgrade_Effect rows. No bonus values are stored
+on the requirement row itself.
+
+This allows guild-specific recipes to require structures independently of the
+interaction-level rules. Example: a guild's "Advanced Alloy" recipe always
+requires the blast furnace upgrade, regardless of whether the guild has set up
+any smelt interaction rules.
   "Is this item safe to delete normally?"            → yes; Item.isEphemeral only affects cleanup timing

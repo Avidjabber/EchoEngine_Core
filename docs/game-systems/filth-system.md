@@ -219,12 +219,13 @@ removed from that structure daily before the day's generation is added.
 10. COMPOST PILE
 ─────────────────────────────────────────────
 
-The compost pile is a special structure that intentionally generates filth
-while converting rotting items into soil additives (a physical item that
-boosts soil quality on farming plots).
+The compost pile is a structure with the compost type (see structure-system.md).
+It intentionally generates filth while converting organic items into outputs
+defined on Item_CompostOutput (e.g. soil, worm tea, rare seeds).
 
-Mechanical details for composting are to be designed separately. The filth
-generation follows the same formula as any other structure — rotting items
-deposited into the compost pile count toward its rotItemCount and increase
-daily filth output. This is an intended trade-off: compost benefits come at
-a filth cost.
+Because items are consumed on deposit rather than stored as StoredItem rows,
+the rotItemCount for compost structures is derived from Structure_CompostDeposit
+rows instead of StoredItem rows. The worker counts active deposit rows as the
+rotItemCount when rolling daily filth for a compost structure.
+
+This is an intended trade-off: composting produces useful outputs at a filth cost.

@@ -409,13 +409,16 @@ model RelationType {
   isStructureSystem  Boolean @default(false)
   isSkillSystem      Boolean @default(false)
   isItemSystem       Boolean @default(false)
+  isCraftingSystem   Boolean @default(false)
 
-  conditionLinks       ConditionDef_Link[]
-  itemEffects          ItemEffect[]
-  itemConditionEffects ItemConditionEffect[]
-  skillTreeRelations   SkillTreeNode_Relation[]
-  upgradeRelations     StructureDef_Upgrade_Relation[]
-  structureRelations   StructureDef_Relation[]
+  conditionLinks              ConditionDef_Link[]
+  itemEffects                 ItemEffect[]
+  itemConditionEffects        ItemConditionEffect[]
+  skillTreeRelations          SkillTreeNode_Relation[]
+  upgradeRelations            StructureDef_Upgrade_Relation[]
+  structureRelations          StructureDef_Relation[]
+  craftingInteractionRules    Guild_CraftingInteractionRule[]
+  recipeStructureRequirements Recipe_StructureRequirement[]
 }
 
 // Base stats (global seed — Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma)
@@ -1930,7 +1933,7 @@ model Camp_StructureLimit {
 }
 
 // Seeded engine-level structure categories. Each type maps to a specific engine system.
-// Seeded: storage | farming | housing
+// Seeded: storage | farming | housing | medical | compost | crafting
 // Guilds reference these when defining their own StructureDefs — they cannot create new types.
 model StructureType {
   id   Int    @id @default(autoincrement())
@@ -1980,6 +1983,12 @@ model StructureDef {
   storageConfig    StructureDef_StorageConfig?
   farmingConfig    StructureDef_FarmingConfig?
   housingConfig    StructureDef_HousingConfig?
+  medicalConfig    StructureDef_MedicalConfig?
+  compostConfig    StructureDef_CompostConfig?
+  craftingConfig   StructureDef_CraftingConfig?
+  compostOutputs           Item_CompostOutput[]
+  craftingInteractionRules Guild_CraftingInteractionRule[]
+  recipeRequirements       Recipe_StructureRequirement[]
   upgrades         StructureDef_Upgrade[]
   structures       Structure[]
 
@@ -2065,6 +2074,27 @@ model StructureDef_HousingConfig {
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
 }
 
+// Base config for medical-type StructureDefs.
+// treatmentRollBonus:   flat bonus added to treatment proficiency rolls made inside this structure.
+// examRollBonus:        flat bonus added to examination (inspection) proficiency rolls made here.
+// recoveryModifier:     multiplier applied to each housed patient's daily condition progression delta
+//                       after the CON roll resolves. < 1.0 = conditions worsen more slowly / recover
+//                       more quickly. Applied to Progressive and Chronic conditions only (Timed and
+//                       LifeCycle conditions use fixed day counts, not progression deltas).
+//                       Example: 0.8 = each day's progression change is 80% of what it would be elsewhere.
+// contagionResistBonus: flat bonus added to the CON roll when a housed entity resists catching a
+//                       contagious condition. Higher values represent better isolation practices.
+//                       Default 0 (no bonus). Stack with the entity's own CON modifier.
+model StructureDef_MedicalConfig {
+  structureDefId      Int   @id
+  treatmentRollBonus  Int   @default(0)
+  examRollBonus       Int   @default(0)
+  recoveryModifier    Float @default(1.0)
+  contagionResistBonus Int  @default(0)
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+}
+
 // Base config for farming-type StructureDefs.
 // plotTypeId: all plots in this structure share this type. References PlotType (defined when farming schema is implemented).
 // defaultSoilQuality: assigned to each plot when created, including plots added by plot_count upgrades.
@@ -2076,6 +2106,93 @@ model StructureDef_FarmingConfig {
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
   plotType     PlotType     @relation(fields: [plotTypeId],     references: [id], onDelete: Restrict)
+}
+
+// Base config for crafting-type StructureDefs.
+// craftingRollBonus:      flat bonus added to crafting skill rolls performed at this structure.
+// outputQuantityBonus:    additive multiplier on output quantity (0.1 = +10% output).
+// Supported interactions are defined in StructureDef_CraftingConfig_Interaction.
+// Per-guild requirements and improvements are defined in Guild_CraftingInteractionRule.
+model StructureDef_CraftingConfig {
+  structureDefId      Int   @id
+  craftingRollBonus   Int   @default(0)
+  outputQuantityBonus Float @default(0.0)
+
+  structureDef   StructureDef                           @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  interactions   StructureDef_CraftingConfig_Interaction[]
+}
+
+// Which crafting interactions a structure supports by default.
+// Additional interactions can be unlocked via StructureDef_Upgrade_CraftingInteraction.
+model StructureDef_CraftingConfig_Interaction {
+  structureDefId        Int
+  craftingInteractionId Int
+
+  craftingConfig      StructureDef_CraftingConfig @relation(fields: [structureDefId],        references: [structureDefId], onDelete: Cascade)
+  craftingInteraction CraftingInteraction          @relation(fields: [craftingInteractionId], references: [id],            onDelete: Restrict)
+
+  @@id([structureDefId, craftingInteractionId])
+  @@index([craftingInteractionId])
+}
+
+// Interactions unlocked when this upgrade is applied to a structure.
+// Kept separate from StructureDef_Upgrade_Effect because the target is a CraftingInteraction
+// ID rather than a numeric value.
+model StructureDef_Upgrade_CraftingInteraction {
+  upgradeId             Int
+  craftingInteractionId Int
+
+  upgrade             StructureDef_Upgrade @relation(fields: [upgradeId],             references: [id], onDelete: Cascade)
+  craftingInteraction CraftingInteraction  @relation(fields: [craftingInteractionId],  references: [id], onDelete: Restrict)
+
+  @@id([upgradeId, craftingInteractionId])
+  @@index([craftingInteractionId])
+}
+
+// Base config for compost-type StructureDefs.
+// Compost structures must also have the storage type — the output storage is where converted
+// items land. Items eligible for composting are those with a non-null decayDays on Item.
+// On deposit, the item is consumed and a Structure_CompostDeposit row is created.
+//
+// conversionDays:  days before a deposit converts to output. Upgrades reduce this.
+// weightCapacity:  max total grams currently in the deposit queue; null = unlimited.
+// volumeCapacity:  max total ml currently in the deposit queue; null = unlimited.
+//
+// Outputs are defined per input item on Item_CompostOutput — the structure def controls
+// the timer and capacity only; what comes out is determined by what went in.
+//
+// Note: rotItemCount for filth generation is derived from deposit rows,
+// not StoredItem rows, since items are consumed on deposit.
+model StructureDef_CompostConfig {
+  structureDefId Int    @id
+  conversionDays Int
+  weightCapacity Float?
+  volumeCapacity Float?
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+}
+
+// A single in-progress compost batch. Created when an eligible item is deposited;
+// the item is consumed immediately (removed from inventory). On convertsAt, the worker:
+//   1. Looks up Item_CompostOutput rows for deposit.itemId.
+//   2. Rolls each output row against dropChance.
+//   3. For each triggered output: floor(amount / amountPerUnit) * outputQuantity added to storage.
+//   4. Deletes this row.
+// Remainders below the amountPerUnit threshold are lost (composting is not perfectly efficient).
+model Structure_CompostDeposit {
+  id          Int      @id @default(autoincrement())
+  structureId Int
+  itemId      Int                      // which item was deposited — needed to resolve Item_CompostOutput
+  measurement String   @db.VarChar(10) // "weight" | "volume" — mirrors the item's measurementType
+  amount      Float
+  depositedAt DateTime @default(now()) @db.Timestamptz
+  convertsAt  DateTime @db.Timestamptz
+
+  structure Structure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  item      Item      @relation(fields: [itemId],      references: [id], onDelete: Restrict)
+
+  @@index([structureId])
+  @@index([convertsAt])
 }
 
 // A discrete, independently applicable upgrade for a StructureDef.
@@ -2093,12 +2210,15 @@ model StructureDef_Upgrade {
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
 
-  effects          StructureDef_Upgrade_Effect[]
-  buildCosts       StructureDef_Upgrade_BuildCost[]
-  relations        StructureDef_Upgrade_Relation[] @relation("UpgradeRelations")
-  relatedTo        StructureDef_Upgrade_Relation[] @relation("UpgradeRelationTarget")
-  appliedUpgrades  Structure_AppliedUpgrade[]
-  constructions    Construction[]
+  effects              StructureDef_Upgrade_Effect[]
+  buildCosts           StructureDef_Upgrade_BuildCost[]
+  relations            StructureDef_Upgrade_Relation[]             @relation("UpgradeRelations")
+  relatedTo            StructureDef_Upgrade_Relation[]             @relation("UpgradeRelationTarget")
+  craftingInteractions     StructureDef_Upgrade_CraftingInteraction[]
+  craftingInteractionRules Guild_CraftingInteractionRule[]
+  recipeRequirements       Recipe_StructureRequirement[]
+  appliedUpgrades          Structure_AppliedUpgrade[]
+  constructions        Construction[]
 
   @@index([structureDefId])
 }
@@ -2178,6 +2298,7 @@ model Structure {
   constructions    Construction[]
   plots            Plot[]
   residents        Entity_Housing[]
+  compostDeposits  Structure_CompostDeposit[]
 
   @@index([campId])
   @@index([structureDefId])
@@ -2588,6 +2709,9 @@ model Item {
   structureBuildCosts               StructureDef_BuildCost[]
   structureUpgradeBuildCosts        StructureDef_Upgrade_BuildCost[]
   constructionItemRequirements      Construction_ItemRequirement[]
+  compostInputs                     Item_CompostOutput[] @relation("ItemCompostInputs")
+  compostOutputs                    Item_CompostOutput[] @relation("ItemCompostOutputs")
+  compostDeposits                   Structure_CompostDeposit[]
   treatmentLogs          EntityTreatmentLog[]
   abilityGrantedActions  Ability_GrantedAction[]
   requiredByProfiles     ItemEquipmentProfile_RequiredItem[] @relation("ProfileRequiredItem")
@@ -2607,6 +2731,35 @@ model Item_Type {
 
   @@id([itemId, itemTypeId])
   @@index([itemTypeId])
+}
+
+// Defines what an item produces when composted. One row per output per item.
+// An item with decayDays may have zero or more output rows — zero means it contributes
+// mass to the compost queue but produces no output (still reduces pile, generates filth).
+//
+// inputMeasurement: "weight" | "volume" — must match the deposited item's measurementType.
+// amountPerUnit:    grams or ml of input consumed per batch of this output.
+// outputQuantity:   how much of the output item is produced per batch.
+// dropChance:       0.0–1.0 probability this output triggers per conversion.
+//                   1.0 = always; < 1.0 = rare/bonus output.
+//                   Example: soil at 1.0 (guaranteed) + rare seed at 0.05 (5% bonus).
+model Item_CompostOutput {
+  id               Int    @id @default(autoincrement())
+  structureDefId   Int                      // which compost StructureDef produces this output
+  itemId           Int                      // the input item (must have decayDays)
+  outputItemId     Int                      // the item produced
+  inputMeasurement String @db.VarChar(10)   // "weight" | "volume"
+  amountPerUnit    Float
+  outputQuantity   Float  @default(1.0)
+  dropChance       Float  @default(1.0)
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  item         Item         @relation("ItemCompostInputs",  fields: [itemId],       references: [id], onDelete: Cascade)
+  outputItem   Item         @relation("ItemCompostOutputs", fields: [outputItemId], references: [id], onDelete: Restrict)
+
+  @@unique([structureDefId, itemId, outputItemId])
+  @@index([itemId])
+  @@index([outputItemId])
 }
 
 // Reusable warning labels for items — e.g. "Dangerous for kits", "Dangerous for elders"
@@ -2975,7 +3128,10 @@ model CraftingInteraction {
   name        String @unique @db.VarChar(100)
   description String @db.VarChar(300)
 
-  recipes Recipe[]
+  recipes              Recipe[]
+  structureConfigs     StructureDef_CraftingConfig_Interaction[]
+  upgradeUnlocks       StructureDef_Upgrade_CraftingInteraction[]
+  guildRules           Guild_CraftingInteractionRule[]
 }
 
 // Output quantity modes (global seed).
@@ -3009,7 +3165,8 @@ model Recipe {
   slots              RecipeSlot[]
   outputs            RecipeOutput[]
   entityDiscoveries  Entity_DiscoveredRecipe[]
-  disciplineRewards  Recipe_DisciplineReward[]
+  disciplineRewards      Recipe_DisciplineReward[]
+  structureRequirements  Recipe_StructureRequirement[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -3031,6 +3188,47 @@ model Entity_DiscoveredRecipe {
   @@index([recipeId])
 }
 
+// Per-guild rules controlling when a crafting interaction is available and what improves it.
+// If no rows exist for a guild+interaction, the interaction is available anywhere with no bonuses.
+//
+// relationType:
+//   "requires" — the target must be present for the interaction to be usable.
+//   "improves" — if the target is present, apply craftingRollBonus and outputQuantityBonus.
+//
+// orGroup:
+//   null    — standalone rule; evaluated independently (AND logic).
+//   non-null — grouped with other rows sharing the same guildId + craftingInteractionId + orGroup.
+//             At least one row in the group must be satisfied (OR logic).
+//             Different orGroup values on the same interaction are AND'd together.
+//
+// Example — smelt requires a workshop AND (a forge OR an anvil):
+//   REQUIRES  structureDefId=workshop  orGroup: null
+//   REQUIRES  structureDefId=forge     orGroup: 1
+//   REQUIRES  structureDefId=anvil     orGroup: 1
+//
+// Exactly one of structureDefId or upgradeId must be set (enforced at app layer).
+// craftingRollBonus and outputQuantityBonus are only applied when relationType = "improves".
+model Guild_CraftingInteractionRule {
+  id                    Int    @id @default(autoincrement())
+  guildId               String @db.VarChar(50)
+  craftingInteractionId Int
+  relationTypeId        Int                      // FK → RelationType (isCraftingSystem = true); "requires" | "improves"
+  orGroup               Int?                     // null = AND; non-null = OR group key
+  structureDefId        Int?
+  upgradeId             Int?
+  // No bonus fields — for "improves" rows, bonus values are read from the referenced
+  // StructureDef_CraftingConfig (structure) or StructureDef_Upgrade_Effect (upgrade).
+
+  craftingInteraction CraftingInteraction   @relation(fields: [craftingInteractionId], references: [id], onDelete: Restrict)
+  relationType        RelationType          @relation(fields: [relationTypeId],         references: [id], onDelete: Restrict)
+  structureDef        StructureDef?         @relation(fields: [structureDefId],         references: [id], onDelete: Cascade)
+  upgrade             StructureDef_Upgrade? @relation(fields: [upgradeId],              references: [id], onDelete: Cascade)
+
+  @@index([guildId, craftingInteractionId])
+  @@index([structureDefId])
+  @@index([upgradeId])
+}
+
 // Discipline XP granted to the crafting entity on a successful recipe execution.
 // Mirrors ActionType_DisciplineReward — any number of disciplines per recipe.
 // Include the stat progression DisciplineDef row to grant stat point XP.
@@ -3044,6 +3242,37 @@ model Recipe_DisciplineReward {
 
   @@id([recipeId, disciplineId])
   @@index([disciplineId])
+}
+
+// Per-recipe structure and upgrade requirements. Follows the same logic as
+// Guild_CraftingInteractionRule but applies to a single recipe rather than all
+// recipes using a given interaction.
+//
+// relationType / orGroup semantics are identical to Guild_CraftingInteractionRule:
+//   "requires" + orGroup null   → this target must be present (AND)
+//   "requires" + orGroup N      → at least one row with orGroup N must be present (OR)
+//   "improves"                  → if target is present, apply the bonus fields
+//
+// Exactly one of structureDefId or upgradeId must be set (enforced at app layer).
+// Both recipe-level and interaction-level rules are evaluated at craft time; all must pass.
+model Recipe_StructureRequirement {
+  id             Int  @id @default(autoincrement())
+  recipeId       Int
+  relationTypeId Int                   // FK → RelationType (isCraftingSystem = true); "requires" | "improves"
+  orGroup        Int?
+  structureDefId Int?
+  upgradeId      Int?
+  // No bonus fields — for "improves" rows, bonus values are read from the referenced
+  // StructureDef_CraftingConfig (structure) or StructureDef_Upgrade_Effect (upgrade).
+
+  recipe       Recipe                @relation(fields: [recipeId],       references: [id], onDelete: Cascade)
+  relationType RelationType          @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
+  structureDef StructureDef?         @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  upgrade      StructureDef_Upgrade? @relation(fields: [upgradeId],      references: [id], onDelete: Cascade)
+
+  @@index([recipeId])
+  @@index([structureDefId])
+  @@index([upgradeId])
 }
 
 // One input requirement in a recipe. Multiple slots = multiple required ingredients.

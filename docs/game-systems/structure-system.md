@@ -85,12 +85,29 @@ their own StructureDefs.
   farming   │ Contains plots for growing crops. Connects to the Farming system.
   housing   │ Provides living quarters for entities. Config defined in
             │ StructureDef_HousingConfig. Entities are assigned via Entity_Housing.
+  medical   │ Provides treatment and examination bonuses and speeds up condition
+            │ recovery for housed patients. Config defined in StructureDef_MedicalConfig.
+            │ Typically combined with housing and/or storage types on the same def.
+  crafting  │ Provides crafting roll and output quantity bonuses. Supports specific
+            │ crafting interactions (smelt, bake, brew, etc.) defined in
+            │ StructureDef_CraftingConfig_Interaction. Upgrades can unlock additional
+            │ interactions via StructureDef_Upgrade_CraftingInteraction. Per-guild
+            │ requirements and improvements defined in Guild_CraftingInteractionRule.
+  compost   │ Converts deposited organic items (those with decayDays) into outputs
+            │ defined per item on Item_CompostOutput. MUST also have storage type —
+            │ converted outputs are written to the structure's storage. Config defined
+            │ in StructureDef_CompostConfig. In-progress deposits tracked in
+            │ Structure_CompostDeposit.
 
 VALID EFFECT TYPES PER CATEGORY
 ─────────────────────────────────
   storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating | damage_resistance | filth_reduction
   farming:  plot_count | growth_rate | season_override | env_override | soil_quality | damage_resistance | filth_reduction
   housing:  comfortable_capacity | max_capacity | damage_resistance | filth_reduction
+  medical:  treatment_bonus | exam_bonus | recovery_modifier | contagion_resist | damage_resistance | filth_reduction
+  crafting: crafting_roll_bonus | output_quantity_bonus | damage_resistance | filth_reduction
+            (interaction unlocks handled via StructureDef_Upgrade_CraftingInteraction, not effectType)
+  compost:  conversion_speed | weight_capacity | volume_capacity | damage_resistance | filth_reduction
 
 
 ─────────────────────────────────────────────
@@ -211,6 +228,52 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
     overcrowdingFilthBonus    Float. Multiplier bonus applied to each overcrowded entity's daily
                               filth contribution. Default 0.5 (= 1.5× total). Ignored when
                               maxCapacity is null (strict structures never overcrowd).
+
+  StructureDef_MedicalConfig  (for structureTypeId = medical)
+    structureDefId        FK → StructureDef
+    treatmentRollBonus    Int. Flat bonus added to treatment proficiency rolls performed
+                          inside this structure. Default 0.
+    examRollBonus         Int. Flat bonus added to examination (inspection) proficiency
+                          rolls performed inside this structure. Default 0.
+    recoveryModifier      Float. Multiplier applied to each housed patient's daily condition
+                          progression delta after their CON roll resolves. < 1.0 = slower
+                          worsening / faster recovery. Applies to Progressive and Chronic
+                          conditions only — Timed and LifeCycle conditions use fixed day
+                          counts and are unaffected. Default 1.0 (no effect).
+                          Example: 0.8 means each day's progression change is 80% of normal.
+    contagionResistBonus  Int. Flat bonus added to the CON roll when a housed entity resists
+                          catching a contagious condition from a proximity event. Represents
+                          isolation practices, quarantine protocols, and cleaner air flow.
+                          Default 0. Stacks with the entity's own CON modifier.
+
+  StructureDef_CompostConfig  (for structureTypeId = compost; must also have storage type)
+    structureDefId    FK → StructureDef
+    conversionDays    Int. Days before a deposited batch converts to output. Reduced by
+                      conversion_speed upgrades.
+    weightCapacity    Float?. Max total grams currently in the deposit queue. null = unlimited.
+    volumeCapacity    Float?. Max total ml currently in the deposit queue. null = unlimited.
+
+  Item_CompostOutput defines what an item produces when composted in a specific structure.
+  Scoped to both the input item AND the structure def — a herb composted in a basic pile
+  and the same herb in a worm farm can produce entirely different outputs.
+    structureDefId    FK → StructureDef (must be a compost-type def)
+    itemId            FK → Item (the input item; must have decayDays)
+    outputItemId      FK → Item (the item produced)
+    inputMeasurement  "weight" | "volume" — must match the deposited item's measurementType.
+    amountPerUnit     Float. Grams or ml of input consumed to produce one batch.
+    outputQuantity    Float. Amount of output item produced per batch. Default 1.0.
+    dropChance        Float (0.0–1.0). Probability this output triggers per conversion.
+                      1.0 = always produced. < 1.0 = rare or bonus output.
+                      Example: soil at 1.0 (guaranteed) + rare seed at 0.05 (5% chance).
+    @@unique([structureDefId, itemId, outputItemId])
+
+  Structure_CompostDeposit tracks each in-progress batch:
+    structureId       FK → Structure
+    itemId            FK → Item (needed to look up Item_CompostOutput on conversion)
+    measurement       "weight" | "volume"
+    amount            Float. Total grams or ml deposited.
+    depositedAt       DateTime.
+    convertsAt        DateTime. Pre-computed: depositedAt + conversionDays.
 
   Entity_Housing tracks which structure each entity is assigned to live in:
     entityId     FK → Entity (@id — one housing assignment per entity)
@@ -633,6 +696,14 @@ selects one and the action resolves immediately with no further tracking needed.
   StructureDef_FarmingConfig     — base plot count and soil quality for farming-type defs
   StructureDef_HousingConfig     — comfortable/max capacity and overcrowding filth bonus for housing-type defs
   Entity_Housing                 — assigns an entity to a housing structure (one per entity)
+  StructureDef_MedicalConfig     — treatment/exam roll bonuses and recovery modifier for medical-type defs
+  StructureDef_CraftingConfig                — roll and output bonuses for crafting-type defs
+  StructureDef_CraftingConfig_Interaction    — crafting interactions supported by a structure def by default
+  StructureDef_Upgrade_CraftingInteraction   — interactions unlocked when a specific upgrade is applied
+  Guild_CraftingInteractionRule              — per-guild REQUIRES / IMPROVES rules on crafting interactions
+  StructureDef_CompostConfig                 — conversion timer and capacity for compost-type defs (must pair with storage type)
+  Item_CompostOutput             — per-item-per-structureDef compost output rules; same item can produce different outputs in different structure types
+  Structure_CompostDeposit       — in-progress compost queue; one row per deposited batch
   StructureDef_Upgrade           — guild-defined modular upgrade for a StructureDef
   StructureDef_Upgrade_Effect    — individual effects of an upgrade (one row per effect; upgrades may have many)
   StructureDef_Upgrade_BuildCost — items required to apply an upgrade

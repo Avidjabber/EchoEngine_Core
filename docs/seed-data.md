@@ -134,18 +134,35 @@ RelationType                            [ TODO ]
 Replaces: ItemEffectType, ConditionLinkType
 Developer-seeded only. Boolean flags control which systems each value is valid for.
 
-  name        isConditionSystem  isStructureSystem  isSkillSystem  isItemSystem
-  ──────────  ─────────────────  ─────────────────  ─────────────  ────────────
-  requires    false              true               true           false
-  block       true               true               true           false
-  upgrades    false              true               true           false
-  treat       false              false              false          true
-  worsen      true               false              false          true
-  cure        false              false              false          true
-  transform   false              false              false          true
-  recover     true               false              false          false
-  spawn       true               false              false          false
-  spreads_as  true               false              false          false
+  name        isConditionSystem  isStructureSystem  isSkillSystem  isItemSystem  isCraftingSystem
+  ──────────  ─────────────────  ─────────────────  ─────────────  ────────────  ────────────────
+  requires    false              true               true           false         true
+  block       true               true               true           false         false
+  upgrades    false              true               true           false         false
+  treat       false              false              false          true          false
+  worsen      true               false              false          true          false
+  cure        false              false              false          true          false
+  transform   false              false              false          true          false
+  recover     true               false              false          false         false
+  spawn       true               false              false          false         false
+  spreads_as  true               false              false          false         false
+  improves    false              false              false          false         true
+
+
+──────────────────────────────────────────────
+StructureType                           [ DONE ]
+──────────────────────────────────────────────
+Developer-seeded only. Guilds reference these when defining their own StructureDefs.
+Each type has a corresponding config table (except storage, which uses Structure_Storage directly).
+
+  name      config table                    notes
+  ────────  ──────────────────────────────  ────────────────────���─────────────────────────────────
+  storage   Structure_Storage               capacity, rot modifier, item type restrictions
+  farming   StructureDef_FarmingConfig      plot count, plot type, soil quality
+  housing   StructureDef_HousingConfig      comfortable/max capacity, overcrowding filth bonus
+  medical   StructureDef_MedicalConfig      treatment/exam roll bonus, recovery modifier, contagion resist
+  compost   StructureDef_CompostConfig      conversion days, weight/volume capacity; MUST pair with storage
+  crafting  StructureDef_CraftingConfig     crafting roll bonus, output quantity bonus, supported interactions
 
 
 ──────────────────────────────────────────────
@@ -238,12 +255,15 @@ CraftingInteraction                     [ DONE ]
   Craft    Assemble raw materials into a finished item using skill and tools.
   Carve    Shape bone, stone, or wood into a finished form using a cutting tool.
   Weave    Interlace fibers, vines, or reeds into cloth, cord, or woven goods.
-  Tan      Treat a raw hide to produce durable leather. Requires a tanning rack (structure — not yet implemented).
-  Compost  Break down rotten food, spoiled herbs, and plant scraps into nutrient-rich compost. Feeds into the farming system.
-  Smelt    Melt raw ore in a furnace to produce refined metal ingots. Requires a forge or furnace structure.
-  Forge    Shape a heated ingot into tools, weapons, or armor using hammer and anvil. Requires a forge structure.
-  Temper   Harden and refine metal through repeated cycles of heating and cooling. Requires a forge structure.
-  Kiln     Fire clay or ceramic items at high heat to produce hardened, permanent forms. Requires a kiln structure.
+  Tan      Treat a raw hide to produce durable leather.
+  Smelt    Melt raw ore in a furnace to produce refined metal ingots.
+  Forge    Shape a heated ingot into tools, weapons, or armor using hammer and anvil.
+  Temper   Harden and refine metal through repeated cycles of heating and cooling.
+  Kiln     Fire clay or ceramic items at high heat to produce hardened, permanent forms.
+
+  NOTE: structure requirements (e.g. Smelt requires a forge) are NOT baked into the interaction
+  definition. They are configured per-guild via Guild_CraftingInteractionRule. Global defaults
+  may be provided in a future seeding pass once guilds have defined their structure defs.
 
 
 ──────────────────────────────────────────────
