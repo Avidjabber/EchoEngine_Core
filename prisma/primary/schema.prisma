@@ -133,6 +133,7 @@ model Season {
   envConditions   Season_EnvCondition[]
   patternWeights  Season_WeatherPattern[]
   guildDefaults   GuildSeason_DefaultWeather[]
+  plantDefSeasons PlantDef_Season[]
 }
 
 // A discrete named weather state (global seed — guild-extensible).
@@ -180,6 +181,7 @@ model EnvCondition {
   worldModifiers     EnvCondition_Modifier[]
   eventWeights       EnvCondition_EventDef[]
   conditionEnvRules  ConditionDef_EnvRule[]
+  plantDefEnvConditions PlantDef_EnvCondition[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -433,6 +435,8 @@ model DropTable {
   species             Species[]                  // species whose loot resolves from this table (catch/kill + NPC combat defeat)
   biomes              Biome[]                    // biomes whose gather yields resolve from this table
   combatParticipants  ActiveCombat_Participant[]  // snapshotted per-participant at combat spawn
+  plantDefHarvests    PlantDef[]                 @relation("PlantDefHarvestDrop")
+  plantDefUproots     PlantDef[]                 @relation("PlantDefUprootDrop")
 }
 
 // One item entry within a drop table
@@ -684,6 +688,7 @@ model Entity {
 
   entityStorage          Entity_Storage[]
   constructionsInitiated Construction[]
+  plotBuffs              Plot_Buff[]
 
   actionParticipations  ActionInstance_Entity[]
   actionLeaderships     ActionInstance[]          @relation("ActionInstanceLeader")
@@ -1804,11 +1809,12 @@ model StructureDef_StorageConfig {
 // defaultSoilQuality: assigned to each plot when created, including plots added by plot_count upgrades.
 model StructureDef_FarmingConfig {
   structureDefId     Int   @id
-  plotTypeId         Int   // FK → PlotType (not yet modelled; add @relation when farming schema is implemented)
+  plotTypeId         Int
   basePlotCount      Int
   defaultSoilQuality Float @default(1.0)
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  plotType     PlotType     @relation(fields: [plotTypeId],     references: [id], onDelete: Restrict)
 }
 
 // A discrete, independently applicable upgrade for a StructureDef.
@@ -1865,6 +1871,7 @@ model Structure {
   appliedUpgrades  Structure_AppliedUpgrade[]
   structureStorage Structure_Storage?
   constructions    Construction[]
+  plots            Plot[]
 
   @@index([campId])
   @@index([structureDefId])
@@ -2025,6 +2032,7 @@ model Biome {
   abilityStatModifiers        Ability_StatModifier[]
   abilityProficiencyModifiers Ability_ProficiencyModifier[]
   abilityMultiplierEffects    Ability_MultiplierEffect[]
+  plantDefBiomes              PlantDef_Biome[]
 
   @@unique([guildId, name])
   @@index([guildId])
@@ -2200,6 +2208,11 @@ model Item {
   // App deletes the Item row when the last StoredItem referencing it is consumed or removed.
   isEphemeral Boolean @default(false)
 
+  // Propagation items (seeds, spores, cuttings, bulbs) carry a plantDefId to define which plant they grow.
+  // Null for all non-propagation items. Ephemeral variant seeds point to an ephemeral PlantDef.
+  // App deletes ephemeral PlantDef rows when no PlotCrop.plantDefId and no Item.plantDefId references them.
+  plantDefId  Int?
+
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
 
@@ -2223,6 +2236,9 @@ model Item {
   conditionGrants               ConditionDef_GrantedItem[]
   foodProfile                   ItemFoodProfile?
   actionTypeDefaultItems        ActionType_DefaultItem[]
+  plantDef                      PlantDef?                      @relation("ItemPlantDef",         fields: [plantDefId], references: [id], onDelete: SetNull)
+  propagationForPlantDefs       PlantDef[]                     @relation("PlantDefPropagationItem")
+
   structureBuildCosts           StructureDef_BuildCost[]
   structureUpgradeBuildCosts    StructureDef_Upgrade_BuildCost[]
   treatmentLogs          EntityTreatmentLog[]
@@ -2925,7 +2941,7 @@ model ActionSystemType {
 
   actionTypes     ActionType[]
   abilityTriggers Ability_ActionTrigger[]
-  // back-relation: PlotCrop_TendRecord[] — add when farming schema is implemented
+  tendRecords     PlotCrop_TendRecord[]
 }
 
 // Defines the set of actions cats can spend daily energy on (patrol, hunt, gather herbs, train, etc.)
@@ -4207,4 +4223,204 @@ model ServiceClient {
   updatedAt    DateTime @updatedAt
 
   @@index([clientId])
+}
+
+// ─────────────────────────────────────────────
+// FARMING SYSTEM
+// ─────────────────────────────────────────────
+
+// Lookup table of heritable plant trait definitions. Seeded globally; never altered via app.
+// Traits: growth_rate, yield, potency, nutrition, decay_resistance, propagation_yield
+model PlantTrait {
+  id          Int     @id @default(autoincrement())
+  codeName    String  @unique @db.VarChar(100)
+  name        String  @db.VarChar(100)
+  description String? @db.VarChar(500)
+
+  plantDefTraits PlantDef_Trait[]
+}
+
+// Lookup table of plot environment types. Seeded globally; never altered via app.
+// e.g. Garden Bed, Crop Field, Orchard, Mushroom Substrate, Bog Bed, Aquatic Bed, Trellis, Rocky Bed, Shaded Bed
+model PlotType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(100)
+
+  plantDefPlotTypes PlantDef_PlotType[]
+  farmingConfigs    StructureDef_FarmingConfig[]
+}
+
+// Definition of a growable plant. Base plants are seeded globally.
+// Mutated variants are ephemeral PlantDef rows created by the cross-breeding system.
+// Ephemeral rows are deleted when no PlotCrop.plantDefId and no Item.plantDefId references them.
+model PlantDef {
+  id          Int     @id @default(autoincrement())
+  guildId     String  @default("global") @db.VarChar(50)
+  codeName    String  @db.VarChar(200)   // snake_case slug unique per guild; ephemeral: base_codeName + random suffix
+  name        String  @db.VarChar(200)
+  description String? @db.VarChar(1000)
+
+  isEphemeral    Boolean @default(false)    // false = seeded base plant; true = cross-breeding-created variant
+  rootPlantDefId Int?                       // FK → PlantDef; null for base plants; always the original non-ephemeral ancestor
+
+  growthCycleDays    Int      // base days to advance one growth stage
+  growthStages       Int      // stages from seedling to harvestable
+  maxHarvests        Int      // harvests before only uproot_crop is available (~3 for most plants)
+  harvestDropTableId Int      // FK → DropTable; used for harvest_crop and wild foraging
+  uprootDropTableId  Int      // FK → DropTable; used for uproot_crop; higher/different yield
+  propagationItemId  Int?     // FK → Item; the seed/spore/cutting consumed on planting; null if not yet assigned
+  requiresCultivated Boolean  @default(false)  // if true, plant will not grow without Cultivated EnvCondition
+  mutationChance     Float    @default(0.7)    // controls mutations at cross-breeding; floor = guaranteed, decimal = chance of +1
+
+  rootPlantDef   PlantDef?  @relation("PlantDefLineage", fields: [rootPlantDefId], references: [id], onDelete: Restrict)
+  variants       PlantDef[] @relation("PlantDefLineage")
+
+  harvestDropTable  DropTable @relation("PlantDefHarvestDrop", fields: [harvestDropTableId], references: [id], onDelete: Restrict)
+  uprootDropTable   DropTable @relation("PlantDefUprootDrop",  fields: [uprootDropTableId],  references: [id], onDelete: Restrict)
+  propagationItem   Item?     @relation("PlantDefPropagationItem", fields: [propagationItemId], references: [id], onDelete: SetNull)
+
+  seedItems      Item[]               @relation("ItemPlantDef")           // items whose Item.plantDefId points here
+  plotTypes      PlantDef_PlotType[]
+  biomes         PlantDef_Biome[]
+  envConditions  PlantDef_EnvCondition[]
+  seasons        PlantDef_Season[]
+  traits         PlantDef_Trait[]
+  plotCrops      PlotCrop[]
+
+  @@unique([guildId, codeName])
+  @@index([guildId])
+}
+
+// Which plot types a plant can grow in and at what rate.
+// No rows = can grow in any plot type at growthRateModifier 100.
+// If rows exist, plant can only be placed in matching plot types.
+model PlantDef_PlotType {
+  plantDefId          Int
+  plotTypeId          Int
+  growthRateModifier  Int @default(100)   // percentage; 100 = no modifier; 150 = 50% faster
+
+  plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
+  plotType PlotType @relation(fields: [plotTypeId], references: [id], onDelete: Restrict)
+
+  @@id([plantDefId, plotTypeId])
+}
+
+// Biome affinities for a plant. Controls wild foraging find rates and cultivated growth rate modifiers.
+// No rows = grows in any biome at 100 but never found during wild foraging.
+// findChance is only read from the base (rootPlantDefId = null) PlantDef.
+model PlantDef_Biome {
+  plantDefId          Int
+  biomeId             Int
+  growthRateModifier  Int   @default(100)  // percentage applied to growth rate when cultivated in this biome
+  findChance          Float @default(0.0)  // base probability (0.0–1.0) per foraging attempt; multiplied by herb_chance env modifier
+
+  plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
+  biome    Biome    @relation(fields: [biomeId],    references: [id], onDelete: Restrict)
+
+  @@id([plantDefId, biomeId])
+}
+
+// Env condition growth modifiers for a plant.
+// No row for a condition = neutral (100). Absence ≠ dormancy.
+// All active env condition modifiers multiply together; any 0 stops growth.
+model PlantDef_EnvCondition {
+  plantDefId          Int
+  envConditionId      Int
+  growthRateModifier  Int @default(100)  // percentage; >100 = improves; <100 = worsens; 0 = stunted
+
+  plantDef     PlantDef     @relation(fields: [plantDefId],     references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+
+  @@id([plantDefId, envConditionId])
+}
+
+// Per-season growth rates for a plant.
+// No row for a season = dormant (0) — growth does not advance.
+// Year-round plants require 4 explicit rows at 100.
+model PlantDef_Season {
+  plantDefId          Int
+  seasonId            Int
+  growthRateModifier  Int @default(100)  // percentage; 100 = base; 0 = dormant
+
+  plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
+  season   Season   @relation(fields: [seasonId],   references: [id], onDelete: Restrict)
+
+  @@id([plantDefId, seasonId])
+}
+
+// Trait values for a PlantDef. Ephemeral PlantDefs carry their own rows with mutated values.
+// minValue / maxValue are copied verbatim from the root PlantDef and never drift — only value drifts.
+model PlantDef_Trait {
+  plantDefId   Int
+  plantTraitId Int
+  value        Float  // actual value for this trait on this plant
+  minValue     Float  // floor — cross-breeding cannot go below this (from root PlantDef)
+  maxValue     Float  // ceiling — cross-breeding cannot go above this (from root PlantDef)
+
+  plantDef   PlantDef   @relation(fields: [plantDefId],   references: [id], onDelete: Cascade)
+  plantTrait PlantTrait @relation(fields: [plantTraitId], references: [id], onDelete: Restrict)
+
+  @@id([plantDefId, plantTraitId])
+}
+
+// A single growing slot within a farming structure. One Plot = one PlotCrop at a time.
+// Created when a farming structure is built (basePlotCount rows) and when plot_count upgrades complete.
+// PlotType is derived via Plot → Structure → StructureDef → StructureDef_FarmingConfig.
+model Plot {
+  id          Int     @id @default(autoincrement())
+  structureId Int                  // FK → Structure (farming-type)
+  name        String? @db.VarChar(100)
+  soilQuality Float   @default(1.0)  // multiplier on growth rate and harvest yield; degrades via env conditions; restored by compost
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  structure Structure  @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  buffs     Plot_Buff[]
+  crops     PlotCrop[]
+}
+
+// Active timed buffs on a plot, written when a skilled farmer tends and has a matching Ability_ActionTrigger.
+// PK is (plotId, sourceEntityId, effectType) — one active buff per effect type per entity per plot.
+// effectType: growth_rate | yield | decay_resistance
+model Plot_Buff {
+  plotId         Int
+  sourceEntityId Int
+  effectType     String   @db.VarChar(50)
+  effectValue    Float
+  appliedAt      DateTime @default(now()) @db.Timestamptz
+  expiresAt      DateTime @db.Timestamptz
+
+  plot   Plot   @relation(fields: [plotId],         references: [id], onDelete: Cascade)
+  entity Entity @relation(fields: [sourceEntityId], references: [id], onDelete: Cascade)
+
+  @@id([plotId, sourceEntityId, effectType])
+}
+
+// A live instance of a plant growing at a plot. One PlotCrop per plot at a time (enforced via Plot).
+model PlotCrop {
+  id           Int      @id @default(autoincrement())
+  plotId       Int      @unique   // one crop per plot at a time
+  plantDefId   Int
+  plantedAt    DateTime @default(now()) @db.Timestamptz
+  currentStage Int      @default(0)    // 0 = seedling; PlantDef.growthStages = harvestable
+  harvestCount Int      @default(0)    // increments each harvest; blocks harvest_crop when >= PlantDef.maxHarvests
+  carePoints   Int      @default(0)    // accumulated tending care points; used at cross-breeding for mutation bias
+
+  plot        Plot            @relation(fields: [plotId],      references: [id], onDelete: Cascade)
+  plantDef    PlantDef        @relation(fields: [plantDefId],  references: [id], onDelete: Restrict)
+  tendRecords PlotCrop_TendRecord[]
+}
+
+// Tracks when each tending action type was last performed on a crop.
+// Enforces per-systemType cooldown and prevents care point double-dipping.
+// PK is (plotCropId, systemType).
+model PlotCrop_TendRecord {
+  plotCropId      Int
+  systemType      String   @db.VarChar(50)   // FK → ActionSystemType
+  lastPerformedAt DateTime @db.Timestamptz
+
+  plotCrop         PlotCrop         @relation(fields: [plotCropId],  references: [id], onDelete: Cascade)
+  actionSystemType ActionSystemType @relation(fields: [systemType],  references: [id], onDelete: Restrict)
+
+  @@id([plotCropId, systemType])
 }

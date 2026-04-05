@@ -1,10 +1,6 @@
 FARMING SYSTEM — DESIGN REFERENCE
 ===================================
-Last updated: 2026-04-03
-
-[NOT YET IMPLEMENTED — Active design discussion in progress.
-Do not build against this doc without first confirming the design
-with the project owner.]
+Last updated: 2026-04-04
 
 
 ─────────────────────────────────────────────
@@ -78,7 +74,7 @@ The following are already seeded and ready:
 
 Ten new tables are needed. Everything else reuses existing infrastructure.
 Two existing tables gain new fields: Item gains plantDefId; PlantDef gains
-isEphemeral, parentPlantDefId, and rootPlantDefId.
+isEphemeral and rootPlantDefId.
 
 ──────────────────────
 PlantDef
@@ -95,15 +91,12 @@ complete definitions that carry their own drop tables and modifier rows.
   description          String?
   isEphemeral          Boolean   False for seeded base plants.
                                  True for cross-breeding-created variants.
-  parentPlantDefId     Int?      FK → PlantDef. The direct parent PlantDef this was
-                                 bred from (base or ephemeral). Null for base plants.
-                                 Used for tracing the full breeding history.
   rootPlantDefId       Int?      FK → PlantDef. Always points to the original non-ephemeral
-                                 base PlantDef at the start of the lineage. Never changes
-                                 across generations — a 10th-generation variant still points
-                                 to the same root as a 1st-generation variant.
+                                 base PlantDef this variant descended from. Never changes —
+                                 a variant bred from a variant still points to the same root.
                                  Null for base plants (they ARE the root).
-                                 Primary key for cross-breeding eligibility checks.
+                                 Used for cross-breeding eligibility: two crops may be
+                                 cross-bred if and only if their resolved roots match.
   growthCycleDays      Int       Base days to advance one growth stage.
   growthStages         Int       Number of stages from seedling to harvestable.
   maxHarvests          Int       How many times this plant can be harvested before
@@ -142,7 +135,8 @@ complete definitions that carry their own drop tables and modifier rows.
 RULE: Both harvestDropTableId and uprootDropTableId are always required.
 RULE: codeName is unique per guild (DB-enforced).
 RULE: isEphemeral = true rows are deleted when no PlotCrop.plantDefId and no
-      Item.plantDefId references them.
+      Item.plantDefId references them. No lineage chain is maintained beyond
+      rootPlantDefId — specific parentage is not tracked.
 
 ──────────────────────
 Item.plantDefId (existing table — new field)
@@ -353,8 +347,6 @@ A live instance of a plant growing at a plot.
                               Each harvest resets currentStage to 0 (full regrow).
                               App applies a fixed yield reduction per harvest based on
                               harvestCount — not schema-defined, handled in app logic.
-  generation        Int       Generational counter. Starts at 0. Increments each replant.
-  parentCropId      Int?      Self-FK → PlotCrop. Null for generation 0 plants.
   carePoints        Int       Accumulated tending care points since planting. Default 0.
                               Incremented by tending actions. Used at cross-breeding time
                               to compute carePercentage for mutation direction bias.
@@ -381,11 +373,10 @@ Growth rate formula (app-side):
       ÷ structure_growth_modifier          (1.0 + SUM of growth_rate upgrade effectValues
                                             applied to this structure; 1.0 if no upgrades)
 
-Generational replanting (normal seed):
+Replanting (normal seed):
   Normal seeds always produce exact copies. No mutation at harvest.
   - New PlotCrop.plantDefId = parent PlotCrop.plantDefId (exact copy)
-  - New PlotCrop.generation = parent.generation + 1
-  - New PlotCrop.parentCropId = parent PlotCrop.id
+  - No lineage tracking — the new crop is independent once planted.
 
 Cross-breeding (one entity, two parent crops):
   Eligibility:
@@ -421,10 +412,9 @@ Cross-breeding (one entity, two parent crops):
               Hard caps: PlantDef_Trait.minValue / maxValue (from root PlantDef)
               apply to trait values. Other values have no hard cap beyond
               reasonable limits enforced at implementation time.
-              New PlantDef.parentPlantDefId = the direct parent PlantDef
-              (implementation determines which parent when both are ephemeral).
               New PlantDef.rootPlantDefId = resolveRoot of either parent
-              (both resolve to the same value by eligibility).
+              (both resolve to the same value by eligibility — no other
+              lineage is recorded).
               A matching ephemeral seed Item (Item.plantDefId → new PlantDef)
               is also created.
     Failure → offspring inherits one parent's PlantDef unchanged. No new
@@ -488,11 +478,11 @@ Ephemeral PlantDef output:
     plantDefId → this ephemeral PlantDef — an exact copy of the parent.
 
 ──────────────────────
-Comparing lineage:
+Comparing variants:
   PlantDef.rootPlantDefId points to the founding base PlantDef.
   Compare the ephemeral PlantDef's PlantDef_Trait values against the root
-  PlantDef's PlantDef_Trait values to see how far the line has drifted.
-  Compare PlantDef.parentPlantDefId chain to trace the full breeding history.
+  PlantDef's PlantDef_Trait values to see how far the variant has drifted.
+  Specific breeding history is not tracked — only the root is known.
 
 
 ─────────────────────────────────────────────
