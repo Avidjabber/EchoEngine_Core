@@ -255,20 +255,22 @@ expiration modifiers live on the owner join table, not on Storage itself.
     Entity storage accepts all item types. No type restrictions apply.
     No expirationModifier — items decay at their natural rate in entity storage.
 
-  Structure_Storage — camp structure inventory
-    structureId        FK → Structure
-    storageId          FK → Storage
+  Structure_Storage — camp structure inventory; join between Structure and Storage.
+    structureId        FK → Structure (1:1)
+    storageId          FK → Storage   (1:1)
     weightCapacity     Float?  Null = no weight limit.
     fluidCapacity      Float?  Null = no fluid limit (ml).
     expirationModifier Float   Multiplier on item spoilage rates. >1.0 = spoils faster.
                                Driven by StructureDef_StorageConfig base value + rot_modifier
                                upgrade deltas. Recomputed when upgrades are applied.
     isPrimaryStorage   Boolean Faction's designated primary storage for its accepted types.
+    securityRating     Int     Effective sum of security_rating upgrade deltas. Read by the
+                               event system to weight theft/raid events at this camp.
     acceptedTypes      via Structure_Storage_ItemType — an item must match at least one
                        accepted type to be stored here.
 
   Structure_Storage_ItemType — accepted item types for a structure storage
-    storageId   FK → Storage
+    storageId   FK → Structure_Storage (via storageId)
     itemTypeId  FK → ItemType
 
   Capacity enforcement:
@@ -278,7 +280,7 @@ expiration modifiers live on the owner join table, not on Storage itself.
     fluidCapacity:  Volume → sum of StoredItem.quantity
                     Count and Weight items do not consume fluidCapacity.
 
-  StoredItem — key fields:
+  StoredItem — one physical item instance inside a Storage. FK → Storage via storageId.
     quantity          Amount in the item's measurement unit:
                         Count  → number of units (e.g. 5 leaves)
                         Weight → grams (e.g. 80g of paste)

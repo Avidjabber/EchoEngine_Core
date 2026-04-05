@@ -224,18 +224,28 @@ Effective values are computed at runtime:
 
 TYPE-SPECIFIC EXTENSIONS
 ──────────────────────────
-  Structure_Storage  (1:1; for structureTypeId = storage)
-    structureId        FK → Structure
-    storageId          FK → Storage
-    weightCapacity     Float?  — null = no weight limit; scales with solid_capacity upgrades
-    fluidCapacity      Float?  — null = no fluid limit; scales with liquid_capacity upgrades
-    expirationModifier Float   — default 1.0; scales with rot_modifier upgrades
-    isPrimaryStorage   Boolean — faction's designated primary for its accepted item types
-    acceptedTypes      via Structure_Storage_ItemType (storageId, itemTypeId)
+  Structure_Storage  — join table linking a storage-type Structure to its Storage instance.
+                       One row per storage structure. Carries all capacity and behaviour
+                       fields so that Storage itself remains a pure item container.
 
-  When an upgrade with effectType solid_capacity, liquid_capacity, or rot_modifier
-  completes, the app recomputes the effective value and updates the Structure_Storage
-  row directly.
+    structureId        FK → Structure (1:1)
+    storageId          FK → Storage   (1:1)
+    weightCapacity     Float?  — null = no weight limit; recomputed when solid_capacity upgrades apply
+    fluidCapacity      Float?  — null = no fluid limit; recomputed when liquid_capacity upgrades apply
+    expirationModifier Float   — default 1.0; recomputed when rot_modifier upgrades apply; < 1.0 = slower rot
+    isPrimaryStorage   Boolean — faction's designated primary storage for its accepted item types
+    securityRating     Int     — effective sum of security_rating upgrade deltas; read by the event
+                                 system to weight theft/raid events at this camp
+    acceptedTypes      via Structure_Storage_ItemType (storageId, itemTypeId) — item must match
+                       at least one accepted type to be stored here
+
+  Structure_Storage_ItemType — join between Structure_Storage and ItemType.
+    storageId   FK → Structure_Storage (via storageId)
+    itemTypeId  FK → ItemType
+
+  When an upgrade with effectType solid_capacity, liquid_capacity, rot_modifier, or
+  security_rating completes, the app recomputes the effective value and updates the
+  Structure_Storage row directly.
 
   Farming structures use Plot.structureId (FK → Structure) to link plots to their
   parent structure. Each Plot is one growing slot — PlotType and defaultSoilQuality
