@@ -649,7 +649,7 @@ All are guild-extensible. Seeded as global defaults.
 
   cross_breed          systemType = "farming_crossbreed"
     Entity cross-breeds two mature PlotCrops sharing the same resolved root.
-    Solo only (maxCats = 1). Gated behind ActionType_DisciplineRequirement
+    Solo only (maxEntities = 1). Gated behind ActionType_DisciplineRequirement
     (Farming discipline, minLevel set by guild, scope = "leader").
     On success: new ephemeral PlantDef + ephemeral seed Item created.
     On failure: no new PlantDef; offspring inherits one parent's PlantDef.

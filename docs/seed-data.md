@@ -949,8 +949,9 @@ ActionSystemType                        [ DONE ]
   crafting  Opens the crafting UI for participants; XP flows from Recipe_DisciplineReward
   healing   Opens the treatment UI for the healer; XP flows from treatment subsystem
   clean     Interactive camp cleaning UI; player chooses target (base / food / herb storage)
-  farming   Farming harvest and growth logic (NOT YET IMPLEMENTED — see farming-system.md)
-  compost   Opens the compost deposit UI; player chooses items to deposit into a compost structure
+  farming             Farming harvest and growth logic (NOT YET IMPLEMENTED — see farming-system.md)
+  farming_crossbreed  Cross-breed two mature PlotCrops; solo only; produces ephemeral PlantDef + seed Item on success
+  compost             Opens the compost deposit UI; player chooses items to deposit into a compost structure
 
 ──────────────────────────────────────────────
 ActionType                              [ DONE ]
@@ -976,4 +977,5 @@ and ActionType_DisciplineReward.
   treat          Treat Patient        healing       true           false              true                       false                  null         Main XP flows from healing subsystem
   clean          Clean Camp           clean         true           false              true                       false                  null
   farming        Farm Work            farming       false          false              true                       false                  null         [ PLACEHOLDER — farming system not yet implemented ]
+  crossbreed     Crossbreed Crops     farming_crossbreed  true    false              false                      false                  null         Solo only (maxEntities = 1); gated via ActionType_DisciplineRequirement
   compost        Deposit to Compost   compost       true           false              true                       false                  null

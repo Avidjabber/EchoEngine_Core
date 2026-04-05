@@ -32,7 +32,7 @@ Faction is the core model. Key fields:
   guildId        — the owning Discord guild
   name           — display name of the faction
   codeName       — snake_case slug; unique per guild
-  factionRep        — current clan reputation score; modified by actions and events
+  factionRep        — current faction reputation score; modified by actions and events
   description    — optional flavour text
   activeCampId   — FK → Camp (nullable). The faction's currently active camp.
                    A faction may have multiple camps but only one is active at a
@@ -85,18 +85,33 @@ Disputed automatically.
 5. FACTION REPUTATION
 ─────────────────────────────────────────────
 
+There are two distinct factionRep fields. They serve different purposes.
+
+COLLECTIVE FACTION REP  (Faction.factionRep)
+─────────────────────────────────────────────
 Faction.factionRep is a running score modified by:
   - Action completion (ActionInstance: factionRepEarned per participant)
   - Event outcomes (event rewards with rep modifiers)
   - Admin adjustments
 
-factionRep is global to the faction — it represents the faction's overall
-standing and progress. Individual entities do NOT have their own factionRep;
-they contribute to and draw from the faction's shared value.
+This score represents the faction's overall standing and progress.
 
 Guild_ActionConfig.baseFactionReward (can be negative) defines the rep change
 per participant when that action type completes. Individual snapshots are
 stored on ActionInstance_Entity.factionRepEarned.
+
+INDIVIDUAL ENTITY REP  (Entity.factionRep)
+───────────────────────────────────────────
+Entity.factionRep is a personal score representing how well an entity is
+pulling their weight within their own faction.
+
+  Range:   0 to 500 (clamped at app layer)
+  Decay:   decays daily — rep must be actively maintained
+  Bonus:   every 100 rep = +1 to all stat rolls
+           (200 rep = +2, 300 rep = +3, up to a maximum of +5 at 500)
+
+This creates a persistent incentive for entities to keep contributing — the
+bonus is universal and meaningful, but requires ongoing upkeep to sustain.
 
 
 ─────────────────────────────────────────────

@@ -31,9 +31,9 @@ guilds may define their own.
   name                      │ Internal key e.g. "border_patrol" (unique per guild)
   displayName               │ User-facing label
   energyCost                │ Energy drained from each participant on start
-  minEntities / maxEntities         │ Participant bounds; maxCats null = unlimited
+  minEntities / maxEntities │ Participant bounds; maxEntities null = unlimited
   durationMinutes           │ Time until resolution; null = resolves on next tick
-  baseFactionReward         │ Clan rep granted per participant on completion (can be negative)
+  baseFactionReward         │ Faction rep granted per participant on completion (can be negative)
   systemTypeId              │ FK → ActionSystemType. null = pure reward action (auto-resolves,
                             │ no subsystem). Non-null = invokes a seeded bot subsystem on resolution.
                             │ See ActionSystemType seed rows for the full list of valid values.
@@ -57,7 +57,7 @@ how much XP is earned in each discipline on completion and who receives it.
   xpAmount        — flat XP granted to qualifying recipients
   recipientScope  — who receives this reward:
     "all"               — every participant (default)
-    "leader_only"       — only ActionInstance.leaderCatId
+    "leader_only"       — only ActionInstance.leaderEntityId
     "participants_only" — all non-leader participants
     "winners_only"      — winning side of a combat-spawning action
     "losers_only"       — losing side of a combat-spawning action
@@ -109,7 +109,7 @@ ActionInstance tracks a single run of an ActionType:
 
   factionId    — the owning faction
   locationId   — where it takes place; null = at camp
-  leaderCatId  — entity leading the instance
+  leaderEntityId  — entity leading the instance
   isActive     — false once completed or interrupted
   startedAt    — when the instance began
   completedAt  — set on resolution
@@ -162,7 +162,7 @@ flows differently depending on the system:
 
   systemType = "farming_crossbreed"
     Cross-breeds two mature PlotCrops sharing the same root PlantDef.
-    Solo only (maxCats = 1). Gated via ActionType_DisciplineRequirement.
+    Solo only (maxEntities = 1). Gated via ActionType_DisciplineRequirement.
     On success: new ephemeral PlantDef + ephemeral seed Item created.
     On failure: offspring inherits one parent's PlantDef unchanged.
 

@@ -682,7 +682,7 @@ model Entity {
 
   age      Int     @default(0)
   isDeceased Boolean @default(false)
-  factionRep  Int     @default(0)  // faction reputation; range -500 to +500; clamped at app layer
+  factionRep  Int     @default(0)  // individual rep within own faction; 0–500, clamped at app layer; decays daily. Every 100 = +1 to all stat rolls. Distinct from Faction.factionRep (collective score).
 
   // Hunger and hydration — drained daily by the worker; raised by eating.
   // Worker distributes food from faction storage automatically; manual eating is the fallback.
