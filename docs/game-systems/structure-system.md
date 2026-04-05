@@ -89,7 +89,7 @@ their own StructureDefs.
 VALID EFFECT TYPES PER CATEGORY
 ─────────────────────────────────
   storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating
-  farming:  plot_count | growth_rate | season_override | env_override
+  farming:  plot_count | growth_rate | season_override | env_override | soil_quality
   housing:  (TBD — defined when the housing system is built out)
 
 
@@ -145,22 +145,30 @@ StructureDef_Upgrade defines a discrete, independently applicable upgrade for
 a specific StructureDef. Upgrades are modular — there is no required linear
 path. A guild may define as many or as few upgrade options as they like, or none.
 
-  Field                │ Purpose
-  ─────────────────────┼──────────────────────────────────────────────────────
-  structureDefId       │ FK → StructureDef
-  name                 │ Internal key e.g. "irrigation", "rat_proofing"
-  displayName          │ User-facing label
-  description          │ Plain-language description of what this upgrade does.
-  effectType           │ Which property this upgrade modifies. Must be valid for the
+  Field              │ Purpose
+  ───────────────────┼────────────────────────────────────────────────────────
+  structureDefId     │ FK → StructureDef
+  name               │ Internal key e.g. "irrigation", "rat_proofing"
+  displayName        │ User-facing label
+  description        │ Plain-language description of what this upgrade does.
+  maxApplications    │ Int. Max times this upgrade may be applied to one structure.
+                     │ 1 = one-time only; > 1 = stackable up to this limit.
+  constructionPoints │ Int. Progress points required to apply this upgrade.
+
+Effects are defined in StructureDef_Upgrade_Effect — one row per effect per upgrade.
+An upgrade must have at least one effect row. All effects are applied together when
+the upgrade's Construction completes.
+
+StructureDef_Upgrade_Effect defines the individual effects of an upgrade:
+
+  upgradeId            │ FK → StructureDef_Upgrade
+  effectType           │ Which property this effect modifies. Must be valid for the
                        │ parent StructureDef's StructureType. See section 3.
   effectValue          │ Float. The delta applied per application (additive).
-  maxApplications      │ Int. Max times this upgrade may be applied to one structure.
-                       │ 1 = one-time only; > 1 = stackable up to this limit.
-  constructionPoints   │ Int. Progress points required to apply this upgrade.
   targetEnvConditionId │ FK → EnvCondition. Required when effectType = env_override;
                        │ null for all other effect types. Specifies which env condition
-                       │ this upgrade counteracts (e.g. Drought, Cold, Toxic).
-                       │ App enforces this is set for every env_override upgrade.
+                       │ this effect counteracts (e.g. Drought, Cold, Toxic).
+                       │ App enforces this is set for every env_override effect row.
 
 StructureDef_Upgrade_BuildCost defines items required to apply the upgrade:
 
@@ -169,17 +177,73 @@ StructureDef_Upgrade_BuildCost defines items required to apply the upgrade:
   quantity   │ Int
 
 EXAMPLE — Guild-defined upgrades for a "Mossy Storage Den" (type: storage):
-  "solid_expansion"  effectType: solid_capacity,  effectValue: 20,   maxApplications: 3
-  "liquid_barrels"   effectType: liquid_capacity, effectValue: 10,   maxApplications: 3
-  "cold_storage"     effectType: rot_modifier,    effectValue: -0.2, maxApplications: 2
-  "rat_proofing"     effectType: security_rating, effectValue: 1,    maxApplications: 1
+  "solid_expansion"  maxApplications: 3  effects: solid_capacity +20
+  "liquid_barrels"   maxApplications: 3  effects: liquid_capacity +10
+  "cold_storage"     maxApplications: 2  effects: rot_modifier -0.2
+  "rat_proofing"     maxApplications: 1  effects: security_rating +1
+  "fortified_den"    maxApplications: 1  effects: solid_capacity +10, security_rating +2
 
 EXAMPLE — Guild-defined upgrades for a "Bramble Garden" (type: farming):
-  "extra_plots"      effectType: plot_count,      effectValue: 3,    maxApplications: 6
-  "irrigation"       effectType: growth_rate,     effectValue: 0.15, maxApplications: 1
-  "greenhouse_cover" effectType: season_override, effectValue: 0.5,  maxApplications: 2
-  "drought_shield"   effectType: env_override,    effectValue: 0.5,  maxApplications: 2,  targetEnvConditionId → Drought
-  "frost_cover"      effectType: env_override,    effectValue: 1.0,  maxApplications: 1,  targetEnvConditionId → Cold
+  "extra_plots"      maxApplications: 6  effects: plot_count +3
+  "irrigation"       maxApplications: 1  effects: growth_rate +0.15
+  "greenhouse_cover" maxApplications: 2  effects: season_override +0.5
+  "drought_shield"   maxApplications: 2  effects: env_override +0.5 → Drought
+  "frost_cover"      maxApplications: 1  effects: env_override +1.0 → Cold
+  "basic_compost"    maxApplications: 5  effects: soil_quality +0.1
+  "rich_compost"     maxApplications: 2  effects: soil_quality +0.25, growth_rate +0.05
+
+SOIL QUALITY EFFECT
+─────────────────────
+  soil_quality upgrades are applied directly to Plot rows. When a soil_quality upgrade
+  completes, all Plot rows linked to this structure have soilQuality += effectValue
+  applied immediately. Plots added later (via plot_count upgrades) are initialized
+  with StructureDef_FarmingConfig.defaultSoilQuality — soil_quality upgrades do not
+  retroactively apply to new plots, so the order of upgrade application matters.
+
+  Unlike capacity upgrades (which recompute a stored field), soil_quality writes
+  directly into Plot.soilQuality. This means the effect persists on the plots
+  themselves and is visible to any system that reads Plot.soilQuality.
+
+UPGRADE RELATIONS
+───────────────────
+  StructureDef_Upgrade_Relation defines dependency and exclusion rules between upgrades
+  on the same StructureDef. Relations are directional — the app checks all relation
+  rows where upgradeId = the upgrade being applied.
+
+  StructureDef_Upgrade_Relation:
+    upgradeId       FK → StructureDef_Upgrade  (the upgrade being constrained)
+    relationType    REQUIRES | BLOCKS | UPGRADES
+    targetUpgradeId FK → StructureDef_Upgrade  (the upgrade being referenced)
+
+  Both upgradeId and targetUpgradeId must belong to the same StructureDef.
+  An upgrade may have any number of relation rows.
+
+  Relation semantics:
+
+    REQUIRES — upgradeId cannot be applied unless at least one application of
+               targetUpgradeId is already recorded on this structure. Enforced at
+               application time; if the requirement is not met, the construction
+               cannot be initiated.
+
+    BLOCKS   — upgradeId cannot be applied if any application of targetUpgradeId
+               is already recorded on this structure. One-directional: if A BLOCKS B,
+               A is blocked by B's presence — but B is not automatically blocked by A
+               unless a separate B BLOCKS A row exists.
+
+    UPGRADES — upgradeId is a direct tier upgrade of targetUpgradeId. Cannot be
+               applied unless at least one application of targetUpgradeId is already
+               recorded (implicit REQUIRES). On completion, all Structure_AppliedUpgrade
+               rows for targetUpgradeId are deleted — no item cost refund is given.
+               Net result: only one tier is active at a time.
+               Useful for upgrade tiers (basic → advanced) where the advanced version
+               supersedes the basic one.
+
+  EXAMPLE — upgrade relations for a "Bramble Garden":
+    "rich_compost"     REQUIRES "basic_compost"    — must have composted first
+    "greenhouse_cover" REQUIRES "irrigation"       — needs water infrastructure first
+    "frost_cover"      BLOCKS   "drought_shield"   — can't insulate for both extremes
+    "drought_shield"   BLOCKS   "frost_cover"
+    "rich_compost"     UPGRADES "basic_compost"    — advanced compost supersedes basic
 
 SEASON AND ENV OVERRIDE EFFECTS
 ──────────────────────────────────
@@ -390,7 +454,9 @@ selects one and the action resolves immediately with no further tracking needed.
   StructureDef_StorageConfig     — base capacity and rot values for storage-type defs
   StructureDef_FarmingConfig     — base plot count and soil quality for farming-type defs
   StructureDef_Upgrade           — guild-defined modular upgrade for a StructureDef
+  StructureDef_Upgrade_Effect    — individual effects of an upgrade (one row per effect; upgrades may have many)
   StructureDef_Upgrade_BuildCost — items required to apply an upgrade
+  StructureDef_Upgrade_Relation  — REQUIRES / BLOCKS / UPGRADES rules between upgrades on the same def
   Structure                      — a single installation within a camp
   Structure_AppliedUpgrade       — record of each upgrade application on a structure
   Structure_Storage              — join: links a storage-type Structure to a Storage; carries capacity/rot/type rules

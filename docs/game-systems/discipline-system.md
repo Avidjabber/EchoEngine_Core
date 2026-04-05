@@ -116,9 +116,12 @@ Discipline XP reaches an entity through three paths:
 5. SCHEMA
 ─────────────────────────────────────────────
 
-  DisciplineDef         — global seeded table, one row per discipline + one stat progression row
-                          key fields: baseXp, isStatProgression, dailyXpCap
-  Entity_Discipline     — per-entity progression tracking (level, currentXp)
+  DisciplineDef             — global seeded table, one row per discipline + one stat progression row
+                              key fields: baseXp, isStatProgression, dailyXpCap
+  Entity_Discipline         — per-entity progression tracking (level, currentXp)
+  SkillTreeNode             — guild-defined node: ability granted, level threshold, cost
+  SkillTreeNode_Relation    — REQUIRES / BLOCKS / REPLACES rules between nodes on the same guild's tree
+  Entity_SkillTreeNode      — records which nodes an entity has obtained
 
 DisciplineDef has no guildId — disciplines are the same across all guilds.
 
@@ -141,8 +144,12 @@ NODE SCHEMA
     statPointCost   — stat points required to purchase; 0 = auto-granted
     isAutoGranted   — true when the node is granted automatically on level-up
 
-  SkillTreeNode_Prerequisite
-    nodeId / prerequisiteNodeId — directed edge; prerequisite must be obtained first
+  SkillTreeNode_Relation
+    nodeId          — the node being constrained
+    relationType    — REQUIRES | BLOCKS | REPLACES
+    targetNodeId    — the node being referenced
+    Both nodeId and targetNodeId must belong to the same guildId.
+    A node may have any number of relation rows.
 
   Entity_SkillTreeNode
     entityId / nodeId — records which nodes an entity has obtained
@@ -168,14 +175,39 @@ A purchased node can be removed (respec). On removal:
     with their costs refunded as well
   - Auto-granted nodes (isAutoGranted = true) cannot be manually removed
 
-PREREQUISITES
-──────────────
-Prerequisites are within the same guild's tree. The app layer enforces that
-referenced prerequisiteNodeIds belong to the same guildId.
-Circular prerequisites are rejected at the app layer on node creation/update —
-the API validates there is no cycle in the prerequisite graph before saving.
-Guild administrators are responsible for maintaining sensible tree layouts;
-the API provides cycle detection as a safeguard, not a full design validator.
+NODE RELATIONS
+───────────────
+  Relations are directional — the app checks all SkillTreeNode_Relation rows
+  where nodeId = the node being purchased.
+
+  REQUIRES — nodeId cannot be purchased unless at least one application of
+             targetNodeId is already in the entity's obtained set. Enforced at
+             purchase time. REQUIRES edges also define the dependency graph for
+             recursive respec removal: if targetNodeId is removed, nodeId is
+             also removed (and its cost refunded).
+
+  BLOCKS   — nodeId cannot be purchased if targetNodeId is already obtained.
+             One-directional: if A BLOCKS B, the entity cannot purchase A while
+             they have B — but B is not automatically blocked by A unless a
+             separate B BLOCKS A row exists.
+
+  UPGRADES — nodeId is a direct tier upgrade of targetNodeId. nodeId cannot be
+             purchased unless targetNodeId is already obtained (implicit REQUIRES).
+             On purchase, the Entity_SkillTreeNode and Entity_Ability rows for
+             targetNodeId are deleted — no stat point refund is given. Only one
+             tier is active at a time.
+             In the bot UI, nodeId is hidden until the entity has targetNodeId;
+             once they do, targetNodeId is replaced in the display by nodeId so
+             the player only ever sees the next relevant tier, not the full chain.
+             Useful for tiered abilities (Parry I → Parry II) where each tier
+             supersedes the previous one.
+
+  Only REQUIRES and UPGRADES edges are considered for cycle detection. The API
+  validates that no cycle exists in the REQUIRES+UPGRADES graph when creating or
+  updating nodes. BLOCKS edges are not part of the dependency graph and cannot
+  create cycles.
+  All referenced nodeIds and targetNodeIds must belong to the same guildId —
+  enforced at the app layer.
 
 SKILL TREES ARE PER-GUILD
 ──────────────────────────
@@ -230,13 +262,14 @@ DISCIPLINE PROGRESSION
 SKILL TREE NODE MANAGEMENT (admin / guild setup)
 ──────────────────────────────────────────────────
   createSkillTreeNode(guildId, disciplineDefId, abilityDefId, levelRequired,
-                      statPointCost, isAutoGranted, prerequisiteNodeIds[])
-    - Validates prerequisiteNodeIds belong to same guildId + disciplineDefId
-    - Validates no cycle is introduced
-    - Creates SkillTreeNode and SkillTreeNode_Prerequisite rows
+                      statPointCost, isAutoGranted, relations[])
+    - relations[] is an array of { relationType, targetNodeId } pairs
+    - Validates all targetNodeIds belong to same guildId
+    - Validates no cycle is introduced in the REQUIRES graph
+    - Creates SkillTreeNode and SkillTreeNode_Relation rows
 
   updateSkillTreeNode(nodeId, fields)
-    - Same validation as create for any prerequisite changes
+    - Same validation as create for any relation changes
     - Changing levelRequired or statPointCost does not retroactively affect
       already-obtained Entity_SkillTreeNode rows
 
@@ -253,15 +286,19 @@ ENTITY NODE PURCHASE / RESPEC
 ───────────────────────────────
   purchaseNode(entityId, nodeId)
     - Validates: entity discipline level >= levelRequired
-    - Validates: all prerequisiteNodeIds are in entity's obtained set
-    - Validates: entity skillPoints >= statPointCost
-    - Deducts statPointCost from EntityStats.skillPoints immediately
+    - Validates: all REQUIRES targets are in entity's obtained set
+    - Validates: no BLOCKS targets are in entity's obtained set
+    - Validates: entity skillPoints >= statPointCost (after any REPLACES refunds)
+    - Validates: if node has an UPGRADES relation, targetNodeId must be obtained
+    - For each UPGRADES target the entity has obtained: removes its
+      Entity_SkillTreeNode + Entity_Ability rows (no refund)
+    - Deducts statPointCost from EntityStats.skillPoints
     - Creates Entity_SkillTreeNode row
     - Creates Entity_Ability row (sourceType = "skill_tree", sourceId = nodeId)
 
   removeNode(entityId, nodeId)
     - Rejects if node isAutoGranted = true
-    - Collects all nodes that depend on this node (recursive prerequisite check)
+    - Collects all nodes that depend on this node via REQUIRES edges (recursive)
     - Removes Entity_SkillTreeNode and Entity_Ability rows for node + dependents
     - Refunds total statPointCost of all removed nodes to EntityStats.skillPoints
 

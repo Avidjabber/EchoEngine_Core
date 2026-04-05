@@ -187,7 +187,7 @@ model EnvCondition {
   conditionEnvRules     ConditionDef_EnvRule[]
   plantDefRequiredEnvConditions PlantDef_RequiredEnvCondition[]
   plotTypeEnvConditions         PlotType_EnvCondition[]
-  structureUpgradeTargets       StructureDef_Upgrade[]
+  structureUpgradeEffects       StructureDef_Upgrade_Effect[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -899,9 +899,9 @@ model SkillTreeNode {
   disciplineDef  DisciplineDef @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
   abilityDef     AbilityDef    @relation(fields: [abilityDefId],    references: [id], onDelete: Restrict)
 
-  // Prerequisites: other nodes that must be obtained before this one can be unlocked/purchased.
-  prerequisites  SkillTreeNode_Prerequisite[] @relation("NodePrerequisites")
-  requiredBy     SkillTreeNode_Prerequisite[] @relation("PrerequisiteOf")
+  // Relations to/from other nodes: REQUIRES, BLOCKS, or UPGRADES (see SkillTreeNode_Relation).
+  relations  SkillTreeNode_Relation[] @relation("NodeRelations")
+  relatedTo  SkillTreeNode_Relation[] @relation("RelationTarget")
 
   entityProgress Entity_SkillTreeNode[]
 
@@ -910,15 +910,22 @@ model SkillTreeNode {
   @@index([abilityDefId])
 }
 
-// Prerequisite edges between skill tree nodes (within a guild's tree).
-model SkillTreeNode_Prerequisite {
-  nodeId             Int
-  prerequisiteNodeId Int
+// Directed relation edges between skill tree nodes (within a guild's tree).
+// relationType: REQUIRES | BLOCKS | UPGRADES
+// REQUIRES: nodeId cannot be purchased unless targetNodeId is already obtained.
+// BLOCKS:   nodeId cannot be purchased if targetNodeId is already obtained (one-directional).
+// UPGRADES: nodeId supersedes targetNodeId; on purchase, targetNodeId's obtained record is
+//           deleted (no refund). Only one tier is active at a time. UPGRADES implies REQUIRES.
+model SkillTreeNode_Relation {
+  nodeId       Int
+  relationType String @db.VarChar(20)
+  targetNodeId Int
 
-  node         SkillTreeNode @relation("NodePrerequisites", fields: [nodeId],             references: [id], onDelete: Cascade)
-  prerequisite SkillTreeNode @relation("PrerequisiteOf",    fields: [prerequisiteNodeId], references: [id], onDelete: Cascade)
+  node   SkillTreeNode @relation("NodeRelations",  fields: [nodeId],       references: [id], onDelete: Cascade)
+  target SkillTreeNode @relation("RelationTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
 
-  @@id([nodeId, prerequisiteNodeId])
+  @@id([nodeId, relationType, targetNodeId])
+  @@index([targetNodeId])
 }
 
 // Tracks which skill tree nodes an entity has obtained (auto-granted or purchased).
@@ -1824,33 +1831,64 @@ model StructureDef_FarmingConfig {
 }
 
 // A discrete, independently applicable upgrade for a StructureDef.
-// effectType must be valid for the parent StructureDef's StructureType (enforced at app layer).
-// effectValue: additive delta applied per application.
 // maxApplications: 1 = one-time only; > 1 = stackable up to this limit.
 // constructionPoints: progress points required to apply this upgrade.
+// Effects are defined in StructureDef_Upgrade_Effect — one row per effect.
 model StructureDef_Upgrade {
-  id              Int     @id @default(autoincrement())
-  structureDefId  Int
-  name            String  @db.VarChar(200)
-  displayName     String  @db.VarChar(200)
-  description     String? @db.VarChar(1000)
-  effectType      String  @db.VarChar(50)
-  effectValue     Float
-  maxApplications Int
+  id                 Int     @id @default(autoincrement())
+  structureDefId     Int
+  name               String  @db.VarChar(200)
+  displayName        String  @db.VarChar(200)
+  description        String? @db.VarChar(1000)
+  maxApplications    Int
   constructionPoints Int
 
-  // Only set when effectType = "env_override". Targets a specific env condition to counteract
-  // at this structure (e.g. Drought, Cold). App enforces this is non-null for env_override upgrades.
-  targetEnvConditionId Int?
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
 
-  structureDef     StructureDef  @relation(fields: [structureDefId],        references: [id], onDelete: Cascade)
-  targetEnvCondition EnvCondition? @relation(fields: [targetEnvConditionId], references: [id], onDelete: Restrict)
-
+  effects          StructureDef_Upgrade_Effect[]
   buildCosts       StructureDef_Upgrade_BuildCost[]
+  relations        StructureDef_Upgrade_Relation[] @relation("UpgradeRelations")
+  relatedTo        StructureDef_Upgrade_Relation[] @relation("UpgradeRelationTarget")
   appliedUpgrades  Structure_AppliedUpgrade[]
   constructions    Construction[]
 
   @@index([structureDefId])
+}
+
+// Individual effects of an upgrade. An upgrade may have one or more effects,
+// all applied together when the upgrade's Construction completes.
+// effectType must be valid for the parent StructureDef's StructureType (enforced at app layer).
+// effectValue: additive delta applied per application.
+// targetEnvConditionId: required when effectType = "env_override"; null for all other types.
+model StructureDef_Upgrade_Effect {
+  id                   Int    @id @default(autoincrement())
+  upgradeId            Int
+  effectType           String @db.VarChar(50)
+  effectValue          Float
+  targetEnvConditionId Int?
+
+  upgrade            StructureDef_Upgrade @relation(fields: [upgradeId],            references: [id], onDelete: Cascade)
+  targetEnvCondition EnvCondition?        @relation(fields: [targetEnvConditionId], references: [id], onDelete: Restrict)
+
+  @@index([upgradeId])
+}
+
+// Directed relation edges between upgrades on the same StructureDef.
+// relationType: REQUIRES | BLOCKS | UPGRADES
+// REQUIRES: upgradeId cannot be applied unless targetUpgradeId has been applied at least once.
+// BLOCKS:   upgradeId cannot be applied if targetUpgradeId is already applied (one-directional).
+// UPGRADES: upgradeId supersedes targetUpgradeId; on completion, all Structure_AppliedUpgrade
+//           rows for targetUpgradeId are deleted (no item refund). UPGRADES implies REQUIRES.
+model StructureDef_Upgrade_Relation {
+  upgradeId       Int
+  relationType    String @db.VarChar(20)
+  targetUpgradeId Int
+
+  upgrade StructureDef_Upgrade @relation("UpgradeRelations",       fields: [upgradeId],       references: [id], onDelete: Cascade)
+  target  StructureDef_Upgrade @relation("UpgradeRelationTarget",  fields: [targetUpgradeId], references: [id], onDelete: Cascade)
+
+  @@id([upgradeId, relationType, targetUpgradeId])
+  @@index([targetUpgradeId])
 }
 
 // Items required to apply a specific upgrade.
