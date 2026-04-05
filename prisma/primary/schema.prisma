@@ -884,6 +884,7 @@ model DisciplineDef {
   skillTreeNodes                SkillTreeNode[]
   skillTreeNodeRequirements     SkillTreeNode_DisciplineRequirement[]
   actionRewards                 ActionType_DisciplineReward[]
+  actionRequirements            ActionType_DisciplineRequirement[]
   actionInstanceXp              ActionInstance_Entity_DisciplineXp[]
   recipeRewards                 Recipe_DisciplineReward[]
   abilityActionTriggerXpGrants  Ability_ActionTrigger[]
@@ -3280,11 +3281,12 @@ model ActionType {
   // true  = interactive (step-by-step): each participant's roll is surfaced
   isInteractive Boolean @default(false)
 
-  eventTriggers      EventDef_ActionType[]
-  instances          ActionInstance[]
-  defaultItems       ActionType_DefaultItem[]
-  disciplineRewards  ActionType_DisciplineReward[]
-  entityUsage        Entity_ActionUsage[]
+  eventTriggers          EventDef_ActionType[]
+  instances              ActionInstance[]
+  defaultItems           ActionType_DefaultItem[]
+  disciplineRewards      ActionType_DisciplineReward[]
+  disciplineRequirements ActionType_DisciplineRequirement[]
+  entityUsage            Entity_ActionUsage[]
 
   @@unique([guildId, name])
   @@index([guildId])
@@ -3326,6 +3328,22 @@ model ActionType_DefaultItem {
 
   @@id([actionTypeId, itemId])
   @@index([itemId])
+}
+
+// Discipline level gate on an action type.
+// scope = "leader" → only the ActionInstance.leaderCatId must meet the requirement.
+// scope = "all"    → every participant must meet the requirement.
+model ActionType_DisciplineRequirement {
+  actionTypeId    Int
+  disciplineId    Int
+  minLevel        Int
+  scope           String @default("all") @db.VarChar(10)  // "leader" | "all"
+
+  actionType  ActionType    @relation(fields: [actionTypeId], references: [id], onDelete: Cascade)
+  discipline  DisciplineDef @relation(fields: [disciplineId], references: [id], onDelete: Restrict)
+
+  @@id([actionTypeId, disciplineId])
+  @@index([disciplineId])
 }
 
 // Tracks how many times an entity has started each action type on a given calendar day.
