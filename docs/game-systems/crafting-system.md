@@ -521,10 +521,10 @@ schema.
   "Does processing change nutritional values?"       → RecipeOutput_FoodOverride (sparse patch)
   "Does processing change how quantity is measured?" → RecipeOutput.outputMeasurementTypeId
   "What tags does the output item have?"             → source Item_IngredientType + AddTag - RemoveTag
-  "Does this interaction require a structure?"       → Guild_CraftingInteractionRule (relationType = "requires")
-  "Does this structure improve my output?"           → Guild_CraftingInteractionRule (relationType = "improves")
-  "Does this specific recipe require a structure?"   → Recipe_StructureRequirement (relationType = "requires")
-  "Does a structure improve this specific recipe?"   → Recipe_StructureRequirement (relationType = "improves")
+  "Does this interaction require a structure/skill?"  → Guild_CraftingInteractionRule (relationType = "requires")
+  "Does this structure improve my output?"            → Guild_CraftingInteractionRule (relationType = "improves")
+  "Does this specific recipe require a structure/skill?" → Recipe_CraftingRequirement (relationType = "requires")
+  "Does a structure improve this specific recipe?"    → Recipe_CraftingRequirement (relationType = "improves")
   "What interactions does this structure support?"   → StructureDef_CraftingConfig_Interaction
   "Does this upgrade unlock a new interaction?"      → StructureDef_Upgrade_CraftingInteraction
 
@@ -571,6 +571,12 @@ If no rules exist for a guild+interaction, the interaction is available anywhere
 
   structureDefId  Int? — requires/improves via a specific structure def in camp.
   upgradeId       Int? — requires/improves via a specific upgrade applied to a structure in camp.
+  disciplineDefId Int? — requires a discipline at minLevel or above (used with minLevel).
+  minLevel        Int? — minimum discipline level; only meaningful when disciplineDefId is set.
+  skillTreeNodeId Int? — requires the crafting entity to have obtained a specific skill tree node.
+
+Exactly one target type must be set per row. discipline+level and skillTreeNode requirements
+apply to the crafting entity; structure and upgrade requirements apply to the camp.
 
 Example — smelt requires a workshop AND (a forge OR an anvil), improved by a blast furnace upgrade:
 
@@ -582,19 +588,22 @@ Example — smelt requires a workshop AND (a forge OR an anvil), improved by a b
 
   Bonuses from the blast furnace upgrade are read from its StructureDef_Upgrade_Effect rows.
 
-RECIPE-LEVEL REQUIREMENTS (Recipe_StructureRequirement)
+RECIPE-LEVEL REQUIREMENTS (Recipe_CraftingRequirement)
 ─────────────────────────────────────────────────────────
-Individual recipes can also carry their own structure/upgrade requirements using
-the same relationType / orGroup pattern. Both recipe-level and interaction-level
+Individual recipes can also carry their own requirements using the same
+relationType / orGroup pattern. Both recipe-level and interaction-level
 rules are evaluated at craft time — all must pass.
 
-"improves" rows here work the same way as interaction-level rules: the worker
+The same four target types are available: structureDefId, upgradeId,
+disciplineDefId + minLevel, and skillTreeNodeId.
+
+"improves" rows work the same way as interaction-level rules: the worker
 reads bonus values from the referenced structure's StructureDef_CraftingConfig
 or the upgrade's StructureDef_Upgrade_Effect rows. No bonus values are stored
 on the requirement row itself.
 
-This allows guild-specific recipes to require structures independently of the
-interaction-level rules. Example: a guild's "Advanced Alloy" recipe always
-requires the blast furnace upgrade, regardless of whether the guild has set up
-any smelt interaction rules.
+This allows guild-specific recipes to require structures, upgrades, disciplines,
+or specific skills independently of the interaction-level rules. Example: a
+guild's "Advanced Alloy" recipe always requires the blast furnace upgrade and
+Metalworking discipline level 5, regardless of broader smelt interaction rules.
   "Is this item safe to delete normally?"            → yes; Item.isEphemeral only affects cleanup timing

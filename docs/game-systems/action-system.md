@@ -31,9 +31,9 @@ guilds may define their own.
   name                      │ Internal key e.g. "border_patrol" (unique per guild)
   displayName               │ User-facing label
   energyCost                │ Energy drained from each participant on start
-  minCats / maxCats         │ Participant bounds; maxCats null = unlimited
+  minEntities / maxEntities         │ Participant bounds; maxCats null = unlimited
   durationMinutes           │ Time until resolution; null = resolves on next tick
-  baseClanRepReward         │ Clan rep granted per participant on completion (can be negative)
+  baseFactionReward         │ Clan rep granted per participant on completion (can be negative)
   systemTypeId              │ FK → ActionSystemType. null = pure reward action (auto-resolves,
                             │ no subsystem). Non-null = invokes a seeded bot subsystem on resolution.
                             │ See ActionSystemType seed rows for the full list of valid values.
@@ -117,7 +117,7 @@ ActionInstance tracks a single run of an ActionType:
 ActionInstance_Entity records each participant and snapshots their rewards:
 
   energySpent        — energy drained from this entity
-  clanRepEarned      — clan rep snapshot (may be negative)
+  factionRepEarned      — faction rep snapshot (may be negative)
   disciplineXpEarned — per-discipline XP snapshots (ActionInstance_Entity_DisciplineXp)
 
 
@@ -134,10 +134,10 @@ flows differently depending on the system:
       - Combat discipline XP flows from Species.combatXpReward × 0.5 to all
         non-fled winning participants (same path as regular combat, halved).
       - ActionType_DisciplineReward rows handle everything else: Training XP
-        to the leader, StatProgression to winners/losers, clan rep, etc.
+        to the leader, StatProgression to winners/losers, faction rep, etc.
         Use recipientScope = "winners_only" / "losers_only" as needed.
-    The spar flag suppresses lethal outcomes. Energy cost, duration, and clan
-    rep are defined on the ActionType.
+    The spar flag suppresses lethal outcomes. Energy cost, duration, and faction
+    rep are configured in Guild_ActionConfig.
 
   systemType = "crafting"
     Opens the crafting UI for participants. The ActionType carries NO

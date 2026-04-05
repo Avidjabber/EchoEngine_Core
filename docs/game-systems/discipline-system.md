@@ -39,7 +39,7 @@ NOTE: DisciplineDef also contains one stat progression row (isStatProgression = 
 That row is not a discipline — it tracks EXP toward stat points using a flat threshold
 instead of the level curve. It is excluded from discipline listings in the app.
 It carries a dailyXpCap — once an entity hits that cap, further actions that day do
-not grant stat XP, though they still yield all other rewards (items, clan rep,
+not grant stat XP, though they still yield all other rewards (items, faction rep,
 discipline XP, event triggers). Discipline XP itself has no daily cap.
 See stats-proficiencies-disciplines.md section 2 for full details.
 

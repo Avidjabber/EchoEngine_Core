@@ -306,13 +306,14 @@ the upgrade's Construction completes.
 StructureDef_Upgrade_Effect defines the individual effects of an upgrade:
 
   upgradeId            │ FK → StructureDef_Upgrade
-  effectType           │ Which property this effect modifies. Must be valid for the
-                       │ parent StructureDef's StructureType. See section 3.
+  effectTypeId         │ FK → UpgradeEffectType. Which property this effect modifies.
+                       │ The UpgradeEffectType row carries boolean flags indicating which
+                       │ StructureType categories accept it. App enforces compatibility.
+                       │ See section 3 and seed-data.md → UpgradeEffectType for the full list.
   effectValue          │ Float. The delta applied per application (additive).
-  targetEnvConditionId │ FK → EnvCondition. Required when effectType = env_override;
-                       │ null for all other effect types. Specifies which env condition
-                       │ this effect counteracts (e.g. Drought, Cold, Toxic).
-                       │ App enforces this is set for every env_override effect row.
+  targetEnvConditionId │ FK → EnvCondition. Required when UpgradeEffectType.requiresEnvTarget
+                       │ = true (env_override); null for all other types. Specifies which
+                       │ env condition this effect counteracts (e.g. Drought, Cold, Toxic).
 
 StructureDef_Upgrade_BuildCost defines items required to apply the upgrade:
 
@@ -614,7 +615,7 @@ Contributing uses the systemType = "structure_contribute" action:
 
   - Energy cost:       GuildSettings.defaultDailyEnergy ÷ 8 per contribution
   - Effect:            Construction.pointsRemaining − ActionSystemType.progressPoints
-  - Reward:            Clan rep (baseClanRepReward on the ActionType)
+  - Reward:            Faction rep (baseFactionReward on Guild_ActionConfig)
   - Natural daily cap: energy runs out after 8 contributions (one full work day)
 
 The bot presents active Construction projects in the faction's camps; the player
@@ -649,7 +650,7 @@ selects one and the action resolves immediately with no further tracking needed.
                selecting daily events. See event-system.md for event weight rules.
 
   Actions    — Construction contribution uses systemType = "structure_contribute".
-               Energy, clan rep, and the daily contribution cap are all governed
+               Energy, faction rep, and the daily contribution cap are all governed
                by the existing action and energy systems.
 
   Items      — Build and upgrade item costs are consumed from faction storage on

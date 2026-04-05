@@ -20,7 +20,7 @@ model EchoDens {
   channelId String
 
   // Channel posting permissions — controls which bot message types can be posted here
-  // Multiple channels can share the same flags (e.g. two clans each with their own activity channel)
+  // Multiple channels can share the same flags (e.g. two factions each with their own activity channel)
   allowWorldSim    Boolean @default(true)  // weather/env condition announcements
   allowConditions  Boolean @default(true)  // condition/medicine updates
   allowCombat      Boolean @default(true)  // combat messages
@@ -75,7 +75,7 @@ model GuildSettings {
   activitiesEnabled  Boolean @default(true)  // patrols, hunts, action types
   eventsEnabled      Boolean @default(true)  // event chains (requires activitiesEnabled for activity-triggered events)
   craftingEnabled    Boolean @default(true)  // items, storage, crafting recipes, ingredient processing, food/prey
-  progressionEnabled Boolean @default(true)  // energy, aging, EXP, skill points, clan reputation
+  progressionEnabled Boolean @default(true)  // energy, aging, EXP, skill points, faction reputation
   socialEnabled      Boolean @default(true)  // faction standings, entity relationships, family trees
 
   // One-time default data seed — null = never seeded; set by /data seed-defaults; blocks re-runs
@@ -418,7 +418,7 @@ model RelationType {
   upgradeRelations            StructureDef_Upgrade_Relation[]
   structureRelations          StructureDef_Relation[]
   craftingInteractionRules    Guild_CraftingInteractionRule[]
-  recipeStructureRequirements Recipe_StructureRequirement[]
+  recipeCraftingRequirements  Recipe_CraftingRequirement[]
 }
 
 // Base stats (global seed — Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma)
@@ -580,7 +580,7 @@ model Species {
   adultFilthPerDay Float
   elderFilthPerDay Float
 
-  // Base combat stats — all default to 10 (the Cat baseline)
+  // Base combat stats — all default to 10 (the baseline)
   baseStrength     Int @default(10)  // physical power, melee damage
   baseDexterity    Int @default(10)  // movement, AC modifier, initiative
   baseConstitution Int @default(10)  // health pool and illness resistance
@@ -629,7 +629,7 @@ model Species_EquipmentLoadout {
 // Biomes a prey or predator species can inhabit — pure presence join, no spawn weight needed.
 //
 // Tracking (encounter phase):
-//   Cat rolls d20 + Tracking skill (+ any active EnvCondition_ProficiencyModifier bonuses for Tracking).
+//   Entity rolls d20 + Tracking skill (+ any active EnvCondition_ProficiencyModifier bonuses for Tracking).
 //   All species present in the location's biomes whose passive stealth <= effective roll are candidates.
 //   Passive stealth is derived from the species' base stats at runtime — no per-biome override stored here.
 //   Env conditions (plentiful prey, season bonuses, etc.) apply flat Tracking bonuses via
@@ -637,7 +637,7 @@ model Species_EquipmentLoadout {
 //   One candidate is selected at random (quick hunt) or presented as choices (extended hunt flow).
 //
 // Catch (pursuit phase):
-//   Cat rolls Stealth vs prey's passive perception: 10 + floor((prey.baseWisdom - 10) / 2)
+//   Entity rolls Stealth vs prey's passive perception: 10 + floor((prey.baseWisdom - 10) / 2)
 model Species_Biome {
   speciesId   Int
   biomeId     Int
@@ -682,7 +682,7 @@ model Entity {
 
   age      Int     @default(0)
   isDeceased Boolean @default(false)
-  clanRep  Int     @default(0)  // clan reputation; range -500 to +500; clamped at app layer
+  factionRep  Int     @default(0)  // faction reputation; range -500 to +500; clamped at app layer
 
   // Hunger and hydration — drained daily by the worker; raised by eating.
   // Worker distributes food from faction storage automatically; manual eating is the fallback.
@@ -892,6 +892,8 @@ model DisciplineDef {
   actionInstanceXp              ActionInstance_Entity_DisciplineXp[]
   recipeRewards                 Recipe_DisciplineReward[]
   abilityActionTriggerXpGrants  Ability_ActionTrigger[]
+  craftingInteractionRules      Guild_CraftingInteractionRule[]
+  recipeCraftingRequirements    Recipe_CraftingRequirement[]
 }
 
 // Per-entity discipline progression. A row is created for every discipline at entity creation.
@@ -933,8 +935,10 @@ model SkillTreeNode {
   relations  SkillTreeNode_Relation[] @relation("NodeRelations")
   relatedTo  SkillTreeNode_Relation[] @relation("RelationTarget")
 
-  disciplineRequirements SkillTreeNode_DisciplineRequirement[]
-  entityProgress         Entity_SkillTreeNode[]
+  disciplineRequirements     SkillTreeNode_DisciplineRequirement[]
+  entityProgress             Entity_SkillTreeNode[]
+  craftingInteractionRules   Guild_CraftingInteractionRule[]
+  recipeCraftingRequirements Recipe_CraftingRequirement[]
 
   @@index([guildId])
   @@index([disciplineDefId])
@@ -1944,6 +1948,27 @@ model StructureType {
   campRequirements  StructureDef_CampRequirement[]
 }
 
+// Global seeded lookup for valid upgrade effect types.
+// Boolean flags indicate which StructureType categories accept this effect.
+// The worker switches on the name to apply the correct logic.
+// requiresEnvTarget: when true, targetEnvConditionId on StructureDef_Upgrade_Effect must be set.
+model UpgradeEffectType {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique @db.VarChar(50)
+  description String? @db.VarChar(500)
+
+  isStorage  Boolean @default(false)
+  isFarming  Boolean @default(false)
+  isHousing  Boolean @default(false)
+  isMedical  Boolean @default(false)
+  isCrafting Boolean @default(false)
+  isCompost  Boolean @default(false)
+
+  requiresEnvTarget Boolean @default(false)
+
+  effects StructureDef_Upgrade_Effect[]
+}
+
 // Assigns one or more StructureTypes to a StructureDef.
 // Most defs have exactly one type. Multi-type defs (e.g. a hospital = housing + medical) are supported.
 // For multi-type defs, all relevant type-specific config tables must have a corresponding row.
@@ -1987,8 +2012,8 @@ model StructureDef {
   compostConfig    StructureDef_CompostConfig?
   craftingConfig   StructureDef_CraftingConfig?
   compostOutputs           Item_CompostOutput[]
-  craftingInteractionRules Guild_CraftingInteractionRule[]
-  recipeRequirements       Recipe_StructureRequirement[]
+  craftingInteractionRules   Guild_CraftingInteractionRule[]
+  recipeCraftingRequirements Recipe_CraftingRequirement[]
   upgrades         StructureDef_Upgrade[]
   structures       Structure[]
 
@@ -2215,9 +2240,9 @@ model StructureDef_Upgrade {
   relations            StructureDef_Upgrade_Relation[]             @relation("UpgradeRelations")
   relatedTo            StructureDef_Upgrade_Relation[]             @relation("UpgradeRelationTarget")
   craftingInteractions     StructureDef_Upgrade_CraftingInteraction[]
-  craftingInteractionRules Guild_CraftingInteractionRule[]
-  recipeRequirements       Recipe_StructureRequirement[]
-  appliedUpgrades          Structure_AppliedUpgrade[]
+  craftingInteractionRules   Guild_CraftingInteractionRule[]
+  recipeCraftingRequirements Recipe_CraftingRequirement[]
+  appliedUpgrades            Structure_AppliedUpgrade[]
   constructions        Construction[]
 
   @@index([structureDefId])
@@ -2225,20 +2250,22 @@ model StructureDef_Upgrade {
 
 // Individual effects of an upgrade. An upgrade may have one or more effects,
 // all applied together when the upgrade's Construction completes.
-// effectType must be valid for the parent StructureDef's StructureType (enforced at app layer).
+// effectTypeId must be valid for the parent StructureDef's StructureType (enforced at app layer).
 // effectValue: additive delta applied per application.
-// targetEnvConditionId: required when effectType = "env_override"; null for all other types.
+// targetEnvConditionId: required when UpgradeEffectType.requiresEnvTarget = true; null otherwise.
 model StructureDef_Upgrade_Effect {
   id                   Int    @id @default(autoincrement())
   upgradeId            Int
-  effectType           String @db.VarChar(50)
+  effectTypeId         Int
   effectValue          Float
   targetEnvConditionId Int?
 
   upgrade            StructureDef_Upgrade @relation(fields: [upgradeId],            references: [id], onDelete: Cascade)
+  effectType         UpgradeEffectType    @relation(fields: [effectTypeId],          references: [id], onDelete: Restrict)
   targetEnvCondition EnvCondition?        @relation(fields: [targetEnvConditionId], references: [id], onDelete: Restrict)
 
   @@index([upgradeId])
+  @@index([effectTypeId])
 }
 
 // Directed relation edges between upgrades on the same StructureDef.
@@ -2373,7 +2400,7 @@ model Construction_ItemRequirement {
 // All scaling formula: effectiveMod = 1.0 + (value − 1.0) × stackCount
 //   filth          — daily filth gain multiplier (e.g. Windy value=1.30 → +30% filth per stack)
 //   prey_weight    — prey yield / carcass size multiplier
-//   herb_chance    — herb find rate multiplier (medicine cat gathering)
+//   herb_chance    — herb find rate multiplier (healer/forager gathering)
 //   herb_amount    — herb yield / quantity per gather multiplier
 //   gather_chance  — general forage / drop table find rate multiplier (non-herb items from biome drop table)
 //   gather_amount  — general forage yield multiplier
@@ -2450,7 +2477,7 @@ model Location_Faction {
 }
 
 // A neighboring faction that borders this location from outside the owning faction's territory
-// Used to determine whether a cat could trespass without crossing all of another faction's land
+// Used to determine whether an entity could trespass without crossing all of another faction's land
 model LocationBorder {
   locationId       Int
   borderingFactionId Int
@@ -2768,7 +2795,7 @@ model ItemWarning {
   guildId String @default("global") @db.VarChar(50)
   name    String @db.VarChar(200)
 
-  // If both are set: when a cat performs triggeredByInteraction on this item, conditionDef is applied
+  // If both are set: when an entity performs triggeredByInteraction on this item, conditionDef is applied
   // If both are null: display-only warning (e.g. "Dangerous for Kits") — informational, no automation
   conditionDefId           Int?
   triggeredByInteractionId Int?
@@ -3166,7 +3193,7 @@ model Recipe {
   outputs            RecipeOutput[]
   entityDiscoveries  Entity_DiscoveredRecipe[]
   disciplineRewards      Recipe_DisciplineReward[]
-  structureRequirements  Recipe_StructureRequirement[]
+  craftingRequirements   Recipe_CraftingRequirement[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -3175,7 +3202,7 @@ model Recipe {
 }
 
 // Tracks which entities have discovered a recipe through experimentation or admin grant.
-// Discovery is per-entity — each cat must discover a recipe themselves.
+// Discovery is per-entity — each entity must discover a recipe themselves.
 model Entity_DiscoveredRecipe {
   entityId     Int
   recipeId     Int
@@ -3206,7 +3233,11 @@ model Entity_DiscoveredRecipe {
 //   REQUIRES  structureDefId=forge     orGroup: 1
 //   REQUIRES  structureDefId=anvil     orGroup: 1
 //
-// Exactly one of structureDefId or upgradeId must be set (enforced at app layer).
+// Exactly one target type must be set per row (enforced at app layer):
+//   structureDefId                    — requires/improves a specific structure type
+//   upgradeId                         — requires/improves a specific upgrade
+//   disciplineDefId + minLevel        — requires a discipline at a minimum level
+//   skillTreeNodeId                   — requires a specific skill tree node to be obtained
 // craftingRollBonus and outputQuantityBonus are only applied when relationType = "improves".
 model Guild_CraftingInteractionRule {
   id                    Int    @id @default(autoincrement())
@@ -3216,6 +3247,9 @@ model Guild_CraftingInteractionRule {
   orGroup               Int?                     // null = AND; non-null = OR group key
   structureDefId        Int?
   upgradeId             Int?
+  disciplineDefId       Int?
+  minLevel              Int?
+  skillTreeNodeId       Int?
   // No bonus fields — for "improves" rows, bonus values are read from the referenced
   // StructureDef_CraftingConfig (structure) or StructureDef_Upgrade_Effect (upgrade).
 
@@ -3223,10 +3257,14 @@ model Guild_CraftingInteractionRule {
   relationType        RelationType          @relation(fields: [relationTypeId],         references: [id], onDelete: Restrict)
   structureDef        StructureDef?         @relation(fields: [structureDefId],         references: [id], onDelete: Cascade)
   upgrade             StructureDef_Upgrade? @relation(fields: [upgradeId],              references: [id], onDelete: Cascade)
+  disciplineDef       DisciplineDef?        @relation(fields: [disciplineDefId],        references: [id], onDelete: Restrict)
+  skillTreeNode       SkillTreeNode?        @relation(fields: [skillTreeNodeId],         references: [id], onDelete: Cascade)
 
   @@index([guildId, craftingInteractionId])
   @@index([structureDefId])
   @@index([upgradeId])
+  @@index([disciplineDefId])
+  @@index([skillTreeNodeId])
 }
 
 // Discipline XP granted to the crafting entity on a successful recipe execution.
@@ -3244,7 +3282,7 @@ model Recipe_DisciplineReward {
   @@index([disciplineId])
 }
 
-// Per-recipe structure and upgrade requirements. Follows the same logic as
+// Per-recipe requirements and improvements. Follows the same logic as
 // Guild_CraftingInteractionRule but applies to a single recipe rather than all
 // recipes using a given interaction.
 //
@@ -3253,26 +3291,37 @@ model Recipe_DisciplineReward {
 //   "requires" + orGroup N      → at least one row with orGroup N must be present (OR)
 //   "improves"                  → if target is present, apply the bonus fields
 //
-// Exactly one of structureDefId or upgradeId must be set (enforced at app layer).
+// Exactly one target type must be set per row (enforced at app layer):
+//   structureDefId                    — requires/improves a specific structure type
+//   upgradeId                         — requires/improves a specific upgrade
+//   disciplineDefId + minLevel        — requires a discipline at a minimum level
+//   skillTreeNodeId                   — requires a specific skill tree node to be obtained
 // Both recipe-level and interaction-level rules are evaluated at craft time; all must pass.
-model Recipe_StructureRequirement {
-  id             Int  @id @default(autoincrement())
-  recipeId       Int
-  relationTypeId Int                   // FK → RelationType (isCraftingSystem = true); "requires" | "improves"
-  orGroup        Int?
-  structureDefId Int?
-  upgradeId      Int?
+model Recipe_CraftingRequirement {
+  id              Int  @id @default(autoincrement())
+  recipeId        Int
+  relationTypeId  Int                   // FK → RelationType (isCraftingSystem = true); "requires" | "improves"
+  orGroup         Int?
+  structureDefId  Int?
+  upgradeId       Int?
+  disciplineDefId Int?
+  minLevel        Int?
+  skillTreeNodeId Int?
   // No bonus fields — for "improves" rows, bonus values are read from the referenced
   // StructureDef_CraftingConfig (structure) or StructureDef_Upgrade_Effect (upgrade).
 
-  recipe       Recipe                @relation(fields: [recipeId],       references: [id], onDelete: Cascade)
-  relationType RelationType          @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
-  structureDef StructureDef?         @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
-  upgrade      StructureDef_Upgrade? @relation(fields: [upgradeId],      references: [id], onDelete: Cascade)
+  recipe        Recipe                @relation(fields: [recipeId],        references: [id], onDelete: Cascade)
+  relationType  RelationType          @relation(fields: [relationTypeId],  references: [id], onDelete: Restrict)
+  structureDef  StructureDef?         @relation(fields: [structureDefId],  references: [id], onDelete: Cascade)
+  upgrade       StructureDef_Upgrade? @relation(fields: [upgradeId],       references: [id], onDelete: Cascade)
+  disciplineDef DisciplineDef?        @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
+  skillTreeNode SkillTreeNode?        @relation(fields: [skillTreeNodeId],  references: [id], onDelete: Cascade)
 
   @@index([recipeId])
   @@index([structureDefId])
   @@index([upgradeId])
+  @@index([disciplineDefId])
+  @@index([skillTreeNodeId])
 }
 
 // One input requirement in a recipe. Multiple slots = multiple required ingredients.
@@ -3511,8 +3560,10 @@ model ActionSystemType {
 
 // Defines the set of actions cats can spend daily energy on (patrol, hunt, gather herbs, train, etc.)
 // Guild-extensible; guildId = "global" for seeded defaults.
+// Identity and eligibility only — costs and rewards are configured per-guild in Guild_ActionConfig
+// and ActionType_DisciplineReward.
 // Eligibility mirrors EventDef: requiresCanMentor gates adult-only actions; allowApprenticesWithAdult permits
-// apprentices when at least one canMentor cat is present.
+// apprentices when at least one canMentor entity is present.
 model ActionType {
   id          Int     @id @default(autoincrement())
   guildId     String  @default("global") @db.VarChar(50)
@@ -3520,20 +3571,10 @@ model ActionType {
   displayName String  @db.VarChar(200)
   description String? @db.VarChar(1000)
 
-  energyCost      Int  @default(10)
-  dailyLimit      Int?               // null = energy-only limit; non-null = max times per entity per day regardless of energy
-  minCats         Int  @default(1)   // minimum cats required to start this action
-  maxCats         Int?               // null = unlimited
-  durationMinutes Int?               // null = resolves immediately on next tick
-
-  // Rewards granted to each participating cat on successful completion.
-  // clanRepReward may be negative (e.g. a risky or taboo activity).
-  baseClanRepReward  Int @default(0)
-
   // Eligibility
   requiresCanMentor         Boolean @default(false)
   allowApprenticesWithAdult Boolean @default(false)
-  requiresCanLeadEvents     Boolean @default(false)  // true = the cat initiating this action must have Rank.canLeadEvents
+  requiresCanLeadEvents     Boolean @default(false)  // true = the entity initiating this action must have Rank.canLeadEvents
   minAgeMoons               Int?
 
   // Resolution mode — null = pure reward action (auto-resolves, no subsystem invoked).
@@ -3547,6 +3588,7 @@ model ActionType {
   eventTriggers          EventDef_ActionType[]
   instances              ActionInstance[]
   defaultItems           ActionType_DefaultItem[]
+  guildConfigs           Guild_ActionConfig[]
   disciplineRewards      ActionType_DisciplineReward[]
   disciplineRequirements ActionType_DisciplineRequirement[]
   entityUsage            Entity_ActionUsage[]
@@ -3555,31 +3597,52 @@ model ActionType {
   @@index([guildId])
 }
 
-// XP rewarded to each participating entity per discipline on action completion.
+// Per-guild configuration for a global action type.
+// If no row exists for a guild+action, the action is unavailable in that guild until configured.
+// baseFactionReward may be negative (e.g. a risky or taboo activity).
+model Guild_ActionConfig {
+  guildId      String @db.VarChar(50)
+  actionTypeId Int
+
+  energyCost        Int  @default(10)
+  dailyLimit        Int?               // null = energy-only limit; non-null = max starts per entity per day
+  minEntities       Int  @default(1)
+  maxEntities       Int?               // null = unlimited
+  durationMinutes   Int?               // null = resolves immediately on next tick
+  baseFactionReward Int  @default(0)
+
+  actionType ActionType @relation(fields: [actionTypeId], references: [id], onDelete: Cascade)
+
+  @@id([guildId, actionTypeId])
+  @@index([actionTypeId])
+}
+
+// Per-guild XP rewards for action completion. Each guild configures its own reward amounts.
 // Include the stat progression DisciplineDef row here to grant stat point XP.
-// Most actions will have at least one row pointing to the stat progression discipline.
 model ActionType_DisciplineReward {
-  actionTypeId    Int
-  disciplineId    Int
-  xpAmount        Int
+  guildId      String @db.VarChar(50)
+  actionTypeId Int
+  disciplineId Int
+  xpAmount     Int
   // Who receives this reward on completion:
   // "all"               — every participant
-  // "leader_only"       — only ActionInstance.leaderCatId
+  // "leader_only"       — only ActionInstance.leaderEntityId
   // "participants_only" — all non-leader participants
   // "winners_only"      — winning side of a combat-spawning action (e.g. spar)
   // "losers_only"       — losing side of a combat-spawning action
-  recipientScope  String        @default("all") @db.VarChar(30)
+  recipientScope String @default("all") @db.VarChar(30)
 
-  actionType   ActionType    @relation(fields: [actionTypeId], references: [id], onDelete: Cascade)
-  discipline   DisciplineDef @relation(fields: [disciplineId], references: [id], onDelete: Restrict)
+  actionType ActionType    @relation(fields: [actionTypeId], references: [id], onDelete: Cascade)
+  discipline DisciplineDef @relation(fields: [disciplineId], references: [id], onDelete: Restrict)
 
-  @@id([actionTypeId, disciplineId, recipientScope])
+  @@id([guildId, actionTypeId, disciplineId, recipientScope])
+  @@index([actionTypeId])
   @@index([disciplineId])
 }
 
 // Items shadow-added and equipped to the patrol leader when they start an ActionInstance, removed when it ends.
-// leaderOnly = true  → only granted to the entity in ActionInstance.leaderCatId (default)
-// leaderOnly = false → granted to all participants (e.g. a shared patrol item every cat carries)
+// leaderOnly = true  → only granted to the entity in ActionInstance.leaderEntityId (default)
+// leaderOnly = false → granted to all participants (e.g. a shared patrol item every entity carries)
 model ActionType_DefaultItem {
   actionTypeId Int
   itemId       Int
@@ -3594,7 +3657,7 @@ model ActionType_DefaultItem {
 }
 
 // Discipline level gate on an action type.
-// scope = "leader" → only the ActionInstance.leaderCatId must meet the requirement.
+// scope = "leader" → only the ActionInstance.leaderEntityId must meet the requirement.
 // scope = "all"    → every participant must meet the requirement.
 model ActionType_DisciplineRequirement {
   actionTypeId    Int
@@ -3631,7 +3694,7 @@ model ActionInstance {
   actionTypeId Int
   factionId      Int
   locationId   Int?   // where the action takes place; null = at camp
-  leaderCatId  Int?   // the cat leading this instance; null until set at start
+  leaderEntityId  Int?   // the entity leading this instance; null until set at start
 
   isActive    Boolean   @default(true)  // false = ended (completed or interrupted)
   startedAt   DateTime  @default(now()) @db.Timestamptz
@@ -3640,7 +3703,7 @@ model ActionInstance {
   actionType ActionType @relation(fields: [actionTypeId], references: [id], onDelete: Restrict)
   faction      Faction      @relation(fields: [factionId],      references: [id], onDelete: Cascade)
   location   Location?  @relation(fields: [locationId],   references: [id], onDelete: SetNull)
-  leader     Entity?    @relation("ActionInstanceLeader", fields: [leaderCatId], references: [id], onDelete: SetNull)
+  leader     Entity?    @relation("ActionInstanceLeader", fields: [leaderEntityId], references: [id], onDelete: SetNull)
 
   participants ActionInstance_Entity[]
   activeEvent  ActiveEvent?
@@ -3648,37 +3711,37 @@ model ActionInstance {
   @@index([factionId])
   @@index([actionTypeId])
   @@index([locationId])
-  @@index([leaderCatId])
+  @@index([leaderEntityId])
 }
 
-// The cats participating in an action instance and how much energy each spent
+// The entities participating in an action instance and how much energy each spent
 model ActionInstance_Entity {
   actionInstanceId Int
-  catId            Int
+  entityId         Int
 
-  energySpent   Int @default(0)
-  clanRepEarned Int @default(0)  // snapshot of clan rep granted to this cat on completion; may be negative
+  energySpent      Int @default(0)
+  factionRepEarned Int @default(0)  // snapshot of faction rep granted to this entity on completion; may be negative
 
-  actionInstance ActionInstance                   @relation(fields: [actionInstanceId], references: [id], onDelete: Cascade)
-  cat            Entity                           @relation(fields: [catId],            references: [id], onDelete: Cascade)
+  actionInstance ActionInstance                    @relation(fields: [actionInstanceId], references: [id], onDelete: Cascade)
+  entity         Entity                            @relation(fields: [entityId],         references: [id], onDelete: Cascade)
   disciplineXp   ActionInstance_Entity_DisciplineXp[]
 
-  @@id([actionInstanceId, catId])
-  @@index([catId])
+  @@id([actionInstanceId, entityId])
+  @@index([entityId])
 }
 
 // Snapshot of XP granted per discipline to a participant on action completion.
 // Mirrors ActionType_DisciplineReward at the time of resolution.
 model ActionInstance_Entity_DisciplineXp {
   actionInstanceId Int
-  catId            Int
+  entityId         Int
   disciplineId     Int
   xpEarned         Int
 
-  participant ActionInstance_Entity @relation(fields: [actionInstanceId, catId], references: [actionInstanceId, catId], onDelete: Cascade)
-  discipline  DisciplineDef         @relation(fields: [disciplineId],            references: [id],                     onDelete: Restrict)
+  participant ActionInstance_Entity @relation(fields: [actionInstanceId, entityId], references: [actionInstanceId, entityId], onDelete: Cascade)
+  discipline  DisciplineDef         @relation(fields: [disciplineId],               references: [id],                        onDelete: Restrict)
 
-  @@id([actionInstanceId, catId, disciplineId])
+  @@id([actionInstanceId, entityId, disciplineId])
   @@index([disciplineId])
 }
 
@@ -3766,8 +3829,8 @@ model EventCheckMode {
 // Eligibility (checked before the chain begins against the provided participant list):
 //   requiresLeader            — at least one participant must have Rank.canLeadEvents = true
 //   requiresCanMentor         — all participants must have Rank.canMentor = true
-//   allowApprenticesWithAdult — non-mentor ranks OK if ≥1 canMentor cat is present
-//   minAgeMoons               — minimum cat age gate; null = no requirement
+//   allowApprenticesWithAdult — non-mentor ranks OK if ≥1 canMentor entity is present
+//   minAgeMoons               — minimum entity age gate; null = no requirement
 model EventDef {
   id          Int     @id @default(autoincrement())
   guildId     String  @default("global") @db.VarChar(50)
@@ -3933,7 +3996,7 @@ model EventStepDef {
   winStepId            Int?  // next step when players win; null = event ends
   loseStepId           Int?  // next step when players lose; null = event ends
   winExpReward         Int   @default(0)  // exp awarded to each non-fleeing player participant on win
-  winClanRepReward     Int   @default(0)  // clan rep awarded to each non-fleeing player participant on win
+  winFactionRepReward  Int   @default(0)  // faction rep awarded to each non-fleeing player participant on win
 
   // ── relations ────────────────────────────────────────────────────────────
   eventDef           EventDef            @relation(fields: [eventDefId],           references: [id], onDelete: Cascade)
@@ -4027,9 +4090,9 @@ model EventEffect {
 // A choice option presented during a "choice" step. The patrol leader selects one.
 // If statId or proficiencyDefId is set, a check is rolled after the choice is made.
 // checkMode determines how the roll is computed across participants:
-//   "individual"        — each cat rolls independently; each may get a different outcome
+//   "individual"        — each entity rolls independently; each may get a different outcome
 //   "faction_average"     — single roll using the average stat/skill across all participants
-//   "leader_designates" — leader names one cat to roll on behalf of the faction
+//   "leader_designates" — leader names one entity to roll on behalf of the faction
 model EventChoiceDef {
   id          Int     @id @default(autoincrement())
   stepDefId   Int
@@ -4122,23 +4185,23 @@ model ActiveEvent {
   @@index([currentStepId])
 }
 
-// A cat participating in an active event chain.
+// An entity participating in an active event chain.
 model ActiveEvent_Participant {
   id            Int    @id @default(autoincrement())
   activeEventId Int
-  catId         Int
+  entityId      Int
   userId        String
 
   isLeader Boolean  @default(false)
   joinedAt DateTime @default(now()) @db.Timestamptz
 
   activeEvent ActiveEvent @relation(fields: [activeEventId], references: [id], onDelete: Cascade)
-  cat         Entity      @relation(fields: [catId],         references: [id], onDelete: Cascade)
+  entity      Entity      @relation(fields: [entityId],      references: [id], onDelete: Cascade)
 
   @@unique([activeEventId, userId])
-  @@unique([activeEventId, catId])
+  @@unique([activeEventId, entityId])
   @@index([activeEventId])
-  @@index([catId])
+  @@index([entityId])
 }
 
 // Binds an EventDef to one or more named Locations.
@@ -4721,10 +4784,10 @@ model ActiveCombat_Action {
 }
 
 // ============================================================
-// MEDICINE CAT ACTIVITY LOGS
+// MEDICINE Entity ACTIVITY LOGS
 // ============================================================
 
-// One row per examination. A medicine cat (medicEntityId) may examine a
+// One row per examination. A healer entity (medicEntityId) may examine a
 // patient (patientEntityId) at most once per calendar day — enforced at
 // the application layer. The highest rollResult across all examiners for
 // a given patient on a given day feeds into EntityCondition.discoveryLevel.

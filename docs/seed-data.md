@@ -129,7 +129,7 @@ ItemActionType                          [ DONE ]
 
 
 ──────────────────────────────────────────────
-RelationType                            [ TODO ]
+RelationType                            [ DONE ]
 ──────────────────────────────────────────────
 Replaces: ItemEffectType, ConditionLinkType
 Developer-seeded only. Boolean flags control which systems each value is valid for.
@@ -146,7 +146,7 @@ Developer-seeded only. Boolean flags control which systems each value is valid f
   recover     true               false              false          false         false
   spawn       true               false              false          false         false
   spreads_as  true               false              false          false         false
-  improves    false              false              false          false         true
+  improves    false              false              true           false         true
 
 
 ──────────────────────────────────────────────
@@ -163,6 +163,39 @@ Each type has a corresponding config table (except storage, which uses Structure
   medical   StructureDef_MedicalConfig      treatment/exam roll bonus, recovery modifier, contagion resist
   compost   StructureDef_CompostConfig      conversion days, weight/volume capacity; MUST pair with storage
   crafting  StructureDef_CraftingConfig     crafting roll bonus, output quantity bonus, supported interactions
+
+
+──────────────────────────────────────────────
+UpgradeEffectType                       [ DONE ]
+──────────────────────────────────────────────
+Developer-seeded only. Each row names an upgrade effect and declares which
+StructureType categories accept it. The worker switches on name to apply logic.
+validFor = comma-separated list; "all" = every structure type.
+
+  name                  validFor                                    requiresEnvTarget
+  ────────────────────  ──────────────────────────────────────────  ─────────────────
+  solid_capacity        storage                                     false
+  liquid_capacity       storage                                     false
+  rot_modifier          storage                                     false
+  security_rating       storage                                     false
+  plot_count            farming                                     false
+  growth_rate           farming                                     false
+  season_override       farming                                     false
+  env_override          farming                                     true
+  soil_quality          farming                                     false
+  comfortable_capacity  housing                                     false
+  max_capacity          housing                                     false
+  treatment_bonus       medical                                     false
+  exam_bonus            medical                                     false
+  recovery_modifier     medical                                     false
+  contagion_resist      medical                                     false
+  crafting_roll_bonus   crafting                                    false
+  output_quantity_bonus crafting                                    false
+  conversion_speed      compost                                     false
+  weight_capacity       compost                                     false
+  volume_capacity       compost                                     false
+  damage_resistance     all                                         false
+  filth_reduction       all                                         false
 
 
 ──────────────────────────────────────────────
@@ -568,12 +601,6 @@ ConditionType                           [ DONE ]
 
 
 ──────────────────────────────────────────────
-ConditionLinkType                       [ REMOVED ]
-──────────────────────────────────────────────
-Consolidated into RelationType. See RelationType entry above.
-
-
-──────────────────────────────────────────────
 ConditionBehaviorType                   [ DONE ]
 ──────────────────────────────────────────────
   name      description
@@ -721,7 +748,7 @@ NOTE — stat progression calibration:
   Active player (~28 active days/mo, capped daily) earns ~2,800 XP/mo →
   ~2.24 stat points/month → 60 points in ~2.2 years.
   Actions remain worth doing past the daily cap for their tangible rewards
-  (food, items, clan rep, event triggers).
+  (food, items, faction rep, event triggers).
 
 
 ──────────────────────────────────────────────
@@ -923,135 +950,30 @@ ActionSystemType                        [ DONE ]
   healing   Opens the treatment UI for the healer; XP flows from treatment subsystem
   clean     Interactive camp cleaning UI; player chooses target (base / food / herb storage)
   farming   Farming harvest and growth logic (NOT YET IMPLEMENTED — see farming-system.md)
+  compost   Opens the compost deposit UI; player chooses items to deposit into a compost structure
 
 ──────────────────────────────────────────────
 ActionType                              [ DONE ]
 ──────────────────────────────────────────────
 All rows: guildId = "global"
 
-Fields per row:
-  name · displayName · energyCost · dailyLimit · minCats · maxCats · durationMinutes
-  baseClanRepReward · systemTypeId · isInteractive
-  requiresCanMentor · allowApprenticesWithAdult · requiresCanLeadEvents · minAgeMoons
+Seeded fields: name · displayName · systemTypeId · isInteractive
+               requiresCanMentor · allowApprenticesWithAdult · requiresCanLeadEvents · minAgeMoons
 
-dailyLimit: null = energy-only limit; number = max starts per entity per day
-StatProgression XP is capped at 100 XP/day across all actions (DisciplineDef.dailyXpCap).
-DisciplineReward rows listed as:  discipline → xpAmount  [recipientScope]
-  (Combat XP via Species.combatXpReward is handled by the combat engine, not listed here)
-  (Crafting and Treat XP flow from their subsystem reward rows, not ActionType_DisciplineReward)
+Costs and rewards (energyCost, dailyLimit, minEntities, maxEntities, durationMinutes, baseFactionReward,
+DisciplineRewards) are NOT seeded globally — each guild configures these via Guild_ActionConfig
+and ActionType_DisciplineReward.
 
-────────────────────────────────────────
-
-border_patrol · Border Patrol
-  energyCost: 30  dailyLimit: 1  minCats: 2  maxCats: 5  durationMinutes: 60
-  baseClanRepReward: 15  systemTypeId: "patrol"  isInteractive: false
-  requiresCanMentor: false  allowApprenticesWithAdult: true
-  requiresCanLeadEvents: false  minAgeMoons: null
-  DisciplineRewards:
-    Scouting        → 50 XP  [all]
-    StatProgression → 75 XP  [all]
-
-────────────────────────────────────────
-
-hunting · Hunting Run
-  energyCost: 35  dailyLimit: 2  minCats: 1  maxCats: 4  durationMinutes: 45
-  baseClanRepReward: 10  systemTypeId: "hunting"  isInteractive: false
-  requiresCanMentor: false  allowApprenticesWithAdult: true
-  requiresCanLeadEvents: false  minAgeMoons: null
-  DisciplineRewards:
-    StatProgression → 60 XP  [all]
-    (Combat XP distributed by combat engine from hunted species)
-
-────────────────────────────────────────
-
-foraging · Foraging Run
-  energyCost: 25  dailyLimit: 2  minCats: 1  maxCats: 4  durationMinutes: 45
-  baseClanRepReward: 8  systemTypeId: "foraging"  isInteractive: false
-  requiresCanMentor: false  allowApprenticesWithAdult: true
-  requiresCanLeadEvents: false  minAgeMoons: null
-  DisciplineRewards:
-    Farming         → 45 XP  [all]
-    StatProgression → 50 XP  [all]
-
-────────────────────────────────────────
-
-spar · Spar
-  energyCost: 20  dailyLimit: 3  minCats: 2  maxCats: 2  durationMinutes: null
-  baseClanRepReward: 5  systemTypeId: "spar"  isInteractive: true
-  requiresCanMentor: false  allowApprenticesWithAdult: true
-  requiresCanLeadEvents: false  minAgeMoons: null
-  DisciplineRewards:
-    Training        → 50 XP  [leader_only]   (initiator earns mentor XP; bonus applied at app layer if registered mentor)
-    StatProgression → 40 XP  [winners_only]
-    StatProgression → 20 XP  [losers_only]
-    (Combat XP distributed by combat engine at 50% from defeated species)
-
-────────────────────────────────────────
-
-fight · Fight
-  energyCost: 40  dailyLimit: 1  minCats: 2  maxCats: 6  durationMinutes: null
-  baseClanRepReward: 0  systemTypeId: "fight"  isInteractive: true
-  requiresCanMentor: false  allowApprenticesWithAdult: false
-  requiresCanLeadEvents: false  minAgeMoons: null
-  NOTE: clan rep outcome is determined by the app layer based on target faction
-        (positive vs own-faction fights may apply a rep penalty instead)
-  DisciplineRewards:
-    StatProgression → 50 XP  [winners_only]
-    (Combat XP distributed by combat engine from defeated species)
-
-────────────────────────────────────────
-
-training · Training Session
-  energyCost: 20  dailyLimit: 1  minCats: 2  maxCats: 2  durationMinutes: 45
-  baseClanRepReward: 10  systemTypeId: null  isInteractive: false
-  requiresCanMentor: true  allowApprenticesWithAdult: true
-  requiresCanLeadEvents: false  minAgeMoons: null
-  NOTE: app layer applies a bonus XP multiplier if the trainer is the trainee's registered mentor
-  DisciplineRewards:
-    Training        → 40 XP  [leader_only]
-    StatProgression → 50 XP  [all]
-
-────────────────────────────────────────
-
-crafting · Crafting Session
-  energyCost: 10  dailyLimit: null  minCats: 1  maxCats: 4  durationMinutes: null
-  baseClanRepReward: 5  systemTypeId: "crafting"  isInteractive: true
-  requiresCanMentor: false  allowApprenticesWithAdult: true
-  requiresCanLeadEvents: false  minAgeMoons: null
-  DisciplineRewards:
-    StatProgression → 15 XP  [all]
-    (all other XP flows from Recipe_DisciplineReward on executed recipes)
-
-────────────────────────────────────────
-
-treat · Treat Patient
-  energyCost: 15  dailyLimit: null  minCats: 1  maxCats: 2  durationMinutes: null
-  baseClanRepReward: 10  systemTypeId: "healing"  isInteractive: true
-  requiresCanMentor: false  allowApprenticesWithAdult: true
-  requiresCanLeadEvents: false  minAgeMoons: null
-  DisciplineRewards:
-    StatProgression → 40 XP  [all]
-    (all other XP flows from the healing subsystem per treatment performed)
-
-────────────────────────────────────────
-
-clean · Clean Camp
-  energyCost: 20  dailyLimit: 1  minCats: 1  maxCats: 6  durationMinutes: 30
-  baseClanRepReward: 20  systemTypeId: "clean"  isInteractive: true
-  requiresCanMentor: false  allowApprenticesWithAdult: true
-  requiresCanLeadEvents: false  minAgeMoons: null
-  NOTE: player chooses what to clean — faction base (reduces filth condition),
-        food storage (removes rotting food), herb storage / farm (removes spoiled herbs)
-  DisciplineRewards:
-    StatProgression → 40 XP  [all]
-
-────────────────────────────────────────
-
-farming · Farm Work                     [ PLACEHOLDER — farming system not yet implemented ]
-  energyCost: 20  dailyLimit: 1  minCats: 1  maxCats: 4  durationMinutes: 45
-  baseClanRepReward: 5  systemTypeId: "farming"  isInteractive: false
-  requiresCanMentor: false  allowApprenticesWithAdult: true
-  requiresCanLeadEvents: false  minAgeMoons: null
-  DisciplineRewards:
-    Farming         → 50 XP  [all]
-    StatProgression → 60 XP  [all]
+  name           displayName          systemTypeId  isInteractive  requiresCanMentor  allowApprenticesWithAdult  requiresCanLeadEvents  minAgeMoons  notes
+  ─────────────  ───────────────────  ────────────  ─────────────  ─────────────────  ─────────────────────────  ─────────────────────  ───────────  ─────────────────────────────────────────────────────────────
+  border_patrol  Border Patrol        patrol        false          false              true                       false                  null
+  hunting        Hunting Run          hunting       false          false              true                       false                  null         Combat XP distributed by engine, not DisciplineReward
+  foraging       Foraging Run         foraging      false          false              true                       false                  null
+  spar           Spar                 spar          true           false              true                       false                  null         Combat XP at 50% from engine; StatProgression split winners/losers
+  fight          Fight                fight         true           false              false                      false                  null         Faction rep outcome determined by app layer based on target faction
+  training       Training Session     null          false          true               true                       false                  null         App layer applies bonus XP multiplier for registered mentors
+  crafting       Crafting Session     crafting      true           false              true                       false                  null         Main XP flows from Recipe_DisciplineReward
+  treat          Treat Patient        healing       true           false              true                       false                  null         Main XP flows from healing subsystem
+  clean          Clean Camp           clean         true           false              true                       false                  null
+  farming        Farm Work            farming       false          false              true                       false                  null         [ PLACEHOLDER — farming system not yet implemented ]
+  compost        Deposit to Compost   compost       true           false              true                       false                  null

@@ -20,7 +20,7 @@ other factions, and operate within a Guild.
 
 Factions are distinct from Guilds: a Guild is the Discord server / community
 running the bot. A Guild can have multiple Factions — each representing a
-different in-world group (e.g. ThunderClan, ShadowClan).
+different in-world group (e.g. ThunderClan, ShadowClan are clan-based examples).
 
 
 ─────────────────────────────────────────────
@@ -32,7 +32,7 @@ Faction is the core model. Key fields:
   guildId        — the owning Discord guild
   name           — display name of the faction
   codeName       — snake_case slug; unique per guild
-  clanRep        — current clan reputation score; modified by actions and events
+  factionRep        — current clan reputation score; modified by actions and events
   description    — optional flavour text
   activeCampId   — FK → Camp (nullable). The faction's currently active camp.
                    A faction may have multiple camps but only one is active at a
@@ -82,21 +82,21 @@ Disputed automatically.
 
 
 ─────────────────────────────────────────────
-5. CLAN REPUTATION
+5. FACTION REPUTATION
 ─────────────────────────────────────────────
 
-Faction.clanRep is a running score modified by:
-  - Action completion (ActionInstance: clanRepEarned per participant)
+Faction.factionRep is a running score modified by:
+  - Action completion (ActionInstance: factionRepEarned per participant)
   - Event outcomes (event rewards with rep modifiers)
   - Admin adjustments
 
-clanRep is global to the faction — it represents the faction's overall
-standing and progress. Individual entities do NOT have their own clanRep;
+factionRep is global to the faction — it represents the faction's overall
+standing and progress. Individual entities do NOT have their own factionRep;
 they contribute to and draw from the faction's shared value.
 
-ActionType.baseClanRepReward (can be negative) defines the default rep change
+Guild_ActionConfig.baseFactionReward (can be negative) defines the rep change
 per participant when that action type completes. Individual snapshots are
-stored on ActionInstance_Entity.clanRepEarned.
+stored on ActionInstance_Entity.factionRepEarned.
 
 
 ─────────────────────────────────────────────
