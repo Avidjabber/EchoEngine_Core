@@ -409,9 +409,9 @@ Cross-breeding (one entity, two parent crops):
               carePercentage (per crop) =
                 PlotCrop.carePoints
                 ÷ SUM over all tending systemTypes of:
-                    tendCarePoints × floor(totalGrowthDays / cooldownDays)
+                    progressPoints × floor(totalGrowthDays / cooldownDays)
                 where totalGrowthDays = PlantDef.growthCycleDays × PlantDef.growthStages
-                      cooldownDays    = ActionSystemType.tendCooldownHours / 24
+                      cooldownDays    = ActionSystemType.cooldownHours / 24
 
               mutationCareScore = average(parent1.carePercentage, parent2.carePercentage)
 
@@ -447,8 +447,8 @@ the per-systemType cooldown and prevents care point double-dipping.
 PK is (plotCropId, systemType).
 
 On tending action resolution:
-  1. Check: lastPerformedAt + ActionSystemType.tendCooldownHours > now → blocked, show cooldown.
-  2. If allowed: update lastPerformedAt, add ActionSystemType.tendCarePoints to PlotCrop.carePoints.
+  1. Check: lastPerformedAt + ActionSystemType.cooldownHours > now → blocked, show cooldown.
+  2. If allowed: update lastPerformedAt, add ActionSystemType.progressPoints to PlotCrop.carePoints.
   3. If entity has a matching Ability_PlotBuff: upsert Plot_Buff on the target plot.
 
 
@@ -610,23 +610,23 @@ Tending actions are available to all entities. Any entity earns Farming XP on
 completion. Only entities with a matching Ability_PlotBuff write a Plot_Buff.
 All tending actions update PlotCrop_TendRecord and increment PlotCrop.carePoints.
 
-Cooldowns and care points are defined on ActionSystemType (tendCooldownHours,
-tendCarePoints) — engine-level values, not guild-configurable.
+Cooldowns and care points are defined on ActionSystemType (cooldownHours,
+progressPoints) — engine-level values, not guild-configurable.
 
   water_crop           systemType = "farming_water"
-    Daily watering. tendCooldownHours = 24. tendCarePoints = 1.
+    Daily watering. cooldownHours = 24. progressPoints = 1.
     Ability buff effectType: growth_rate.
     Solo or small group.
     Rewards: Farming XP.
 
   prune_crop           systemType = "farming_prune"
-    Weekly pruning. tendCooldownHours = 168. tendCarePoints = 7.
+    Weekly pruning. cooldownHours = 168. progressPoints = 7.
     Ability buff effectType: yield.
     Solo or small group.
     Rewards: Farming XP.
 
   fertilize_crop       systemType = "farming_fertilize"
-    Weekly fertilizing. tendCooldownHours = 168. tendCarePoints = 7.
+    Weekly fertilizing. cooldownHours = 168. progressPoints = 7.
     Ability buff effectType: decay_resistance.
     Solo or small group.
     Rewards: Farming XP.
@@ -635,12 +635,12 @@ RULE: harvest_crop requires PlotCrop.currentStage = PlantDef.growthStages.
       uproot_crop has no stage requirement — can remove a crop at any stage.
 RULE: cross_breed requires both target PlotCrops to be mature
       (currentStage = growthStages) and share the same resolved root.
-RULE: Tending actions are blocked if lastPerformedAt + tendCooldownHours > now
+RULE: Tending actions are blocked if lastPerformedAt + cooldownHours > now
       (checked via PlotCrop_TendRecord).
 
 
 ─────────────────────────────────────────────
-7. ANIMAL FARMING
+8. ANIMAL FARMING
 
 ─────────────────────────────────────────────
 
@@ -656,7 +656,7 @@ Entity_Relationship rows. No pen or plot linkage yet.
 
 
 ─────────────────────────────────────────────
-7. OUT OF SCOPE (DEFERRED)
+9. OUT OF SCOPE (DEFERRED)
 ─────────────────────────────────────────────
 
   - Animal pens / Plot linkage for animals (requires structure system)
@@ -668,7 +668,7 @@ Entity_Relationship rows. No pen or plot linkage yet.
 
 
 ─────────────────────────────────────────────
-8. RELATIONSHIP TO OTHER SYSTEMS
+10. RELATIONSHIP TO OTHER SYSTEMS
 ─────────────────────────────────────────────
 
   Environment    — plant_growth modifier from env conditions is the primary
@@ -707,7 +707,7 @@ Entity_Relationship rows. No pen or plot linkage yet.
 
 
 ─────────────────────────────────────────────
-9. OPEN QUESTIONS
+11. OPEN QUESTIONS
 ─────────────────────────────────────────────
 
   [x] Should plotting require a specific structure (Garden Bed)?

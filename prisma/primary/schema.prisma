@@ -401,7 +401,8 @@ model Stat {
   profilesAsHitStat    ItemEquipmentProfile[] @relation("ProfileHitStat")
   profilesAsHealStat   ItemEquipmentProfile[] @relation("ProfileHealStat")
   conditionCombatEffects       ConditionDef_CombatEffect[]
-  abilityStatModifiers         Ability_StatModifier[]
+  abilityStatModifiers   Ability_StatModifier[]
+  abilityActionTriggers  Ability_ActionTrigger[]
 }
 
 // Symptom labels — shared between ConditionDef (via ConditionDef_SymptomTag) and ItemEffect.
@@ -943,6 +944,7 @@ model AbilityDef {
   combatBehaviors      Ability_CombatBehavior[]
   conditionResistances Ability_ConditionResistance[]
   damageModifiers      Ability_DamageModifier[]
+  actionTriggers       Ability_ActionTrigger[]
 
   entityAbilities Entity_Ability[]
   speciesDefaults Species_DefaultAbility[]
@@ -1126,6 +1128,45 @@ model Ability_DamageModifier {
 
   @@index([abilityDefId])
   @@index([damageTypeId])
+}
+
+// Fires an effect when the entity performs a specific action system type.
+// Unlike passive ability effects, these are event-driven — activate on action resolution.
+// One ability can have multiple rows for different actions or different effects on the same action.
+//
+// effectType = "plot_buff":   buffEffectType / effectValue / durationHours set; statId / statValue / energyAmount null
+// effectType = "stat_mod":    statId / statValue / durationHours set; buffEffectType / effectValue / energyAmount null
+// effectType = "energy_restore": energyAmount set; all other effect fields null
+model Ability_ActionTrigger {
+  id           Int    @id @default(autoincrement())
+  abilityDefId Int
+
+  triggerSystemType String  @db.VarChar(50)  // FK → ActionSystemType
+  targetScope       String  @db.VarChar(50)  // "self" | "action_target" | "action_participants" | "area"
+  triggerOn         String  @db.VarChar(20)  // "completion" | "success" | "failure"
+  triggerChance     Float   @default(1.0)    // 0.0–1.0 probability the trigger fires
+  effectType        String  @db.VarChar(50)  // "plot_buff" | "stat_mod" | "energy_restore"
+  stackBehavior     String  @db.VarChar(20)  @default("refresh")  // "refresh" | "stack" | "ignore"
+
+  // effectType = "plot_buff"
+  buffEffectType String? @db.VarChar(50)  // growth_rate | yield | decay_resistance
+  effectValue    Float?
+  durationHours  Int?
+
+  // effectType = "stat_mod"
+  statId     Int?
+  statValue  Float?
+  // durationHours shared with plot_buff above
+
+  // effectType = "energy_restore"
+  energyAmount Float?
+
+  abilityDef        AbilityDef       @relation(fields: [abilityDefId],        references: [id], onDelete: Cascade)
+  triggerSystemTypeRel ActionSystemType @relation(fields: [triggerSystemType], references: [id], onDelete: Restrict)
+  stat              Stat?            @relation(fields: [statId],               references: [id], onDelete: Restrict)
+
+  @@index([abilityDefId])
+  @@index([triggerSystemType])
 }
 
 // ============================================================
@@ -1712,7 +1753,7 @@ model StructureType {
 
 // Guild-defined named structure. References a seeded StructureType.
 // name: internal snake_case key (e.g. "mossy_storage_den")
-// constructionHours: labour hours for the initial build
+// constructionPoints: progress points required for the initial build (see ActionSystemType.progressPoints for structure_contribute)
 model StructureDef {
   id              Int     @id @default(autoincrement())
   guildId         String  @db.VarChar(50)
@@ -1720,7 +1761,7 @@ model StructureDef {
   name            String  @db.VarChar(200)
   displayName     String  @db.VarChar(200)
   description     String? @db.VarChar(1000)
-  constructionHours Int
+  constructionPoints Int
 
   structureType StructureType @relation(fields: [structureTypeId], references: [id], onDelete: Restrict)
 
@@ -1774,7 +1815,7 @@ model StructureDef_FarmingConfig {
 // effectType must be valid for the parent StructureDef's StructureType (enforced at app layer).
 // effectValue: additive delta applied per application.
 // maxApplications: 1 = one-time only; > 1 = stackable up to this limit.
-// constructionHours: labour hours required to apply this upgrade.
+// constructionPoints: progress points required to apply this upgrade.
 model StructureDef_Upgrade {
   id              Int     @id @default(autoincrement())
   structureDefId  Int
@@ -1784,7 +1825,7 @@ model StructureDef_Upgrade {
   effectType      String  @db.VarChar(50)
   effectValue     Float
   maxApplications Int
-  constructionHours Int
+  constructionPoints Int
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
 
@@ -1852,8 +1893,8 @@ model Construction {
   id                  Int       @id @default(autoincrement())
   structureId         Int
   upgradeId           Int?
-  hoursRequired       Int
-  hoursRemaining      Int
+  pointsRequired      Int
+  pointsRemaining     Int
   initiatedByEntityId Int
   startedAt           DateTime  @default(now()) @db.Timestamptz
   completedAt         DateTime? @db.Timestamptz
@@ -2876,10 +2917,15 @@ model Rank_DefaultItem {
 // Seeded reference table — identifies which bot subsystem an ActionType invokes on resolution.
 // Only ActionTypes with guildId = "global" may reference this table (app-layer enforced).
 model ActionSystemType {
-  id          String  @id @db.VarChar(50)   // e.g. "patrol", "hunting", "spar"
+  id          String  @id @db.VarChar(50)   // e.g. "patrol", "hunting", "spar", "farming_water"
   description String  @db.VarChar(500)
 
-  actionTypes ActionType[]
+  cooldownHours  Int?  // null = no cooldown enforced by this system type
+  progressPoints Int?  // null = no progress tracking; for farming = care points per action; for construction = points per contribution
+
+  actionTypes     ActionType[]
+  abilityTriggers Ability_ActionTrigger[]
+  // back-relation: PlotCrop_TendRecord[] — add when farming schema is implemented
 }
 
 // Defines the set of actions cats can spend daily energy on (patrol, hunt, gather herbs, train, etc.)

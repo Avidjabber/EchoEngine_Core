@@ -100,14 +100,16 @@ VALID EFFECT TYPES PER CATEGORY
 StructureDef is the guild's specific named structure. It references a seeded
 StructureType and defines everything about how that structure is built and upgraded.
 
-  Field            │ Purpose
-  ─────────────────┼────────────────────────────────────────────────────────
-  guildId          │ Owning guild.
-  structureTypeId  │ FK → StructureType. Determines mechanical behaviour.
-  name             │ Internal key e.g. "mossy_storage_den"
-  displayName      │ User-facing label.
-  description      │ Optional flavour text.
-  constructionHours│ Labour hours required for the initial build.
+  Field              │ Purpose
+  ───────────────────┼────────────────────────────────────────────────────────
+  guildId            │ Owning guild.
+  structureTypeId    │ FK → StructureType. Determines mechanical behaviour.
+  name               │ Internal key e.g. "mossy_storage_den"
+  displayName        │ User-facing label.
+  description        │ Optional flavour text.
+  constructionPoints │ Progress points required for the initial build. Each
+                     │ structure_contribute action contributes ActionSystemType
+                     │ .progressPoints toward this total.
 
 Base values for type-specific properties are defined on extension config rows
 (see section 4a). These represent the structure's state before any upgrades apply.
@@ -151,10 +153,10 @@ path. A guild may define as many or as few upgrade options as they like, or none
   description      │ Plain-language description of what this upgrade does.
   effectType       │ Which property this upgrade modifies. Must be valid for the
                    │ parent StructureDef's StructureType. See section 3.
-  effectValue      │ Float. The delta applied per application (additive).
-  maxApplications  │ Int. Max times this upgrade may be applied to one structure.
-                   │ 1 = one-time only; > 1 = stackable up to this limit.
-  constructionHours│ Int. Labour hours required to apply this upgrade.
+  effectValue        │ Float. The delta applied per application (additive).
+  maxApplications    │ Int. Max times this upgrade may be applied to one structure.
+                     │ 1 = one-time only; > 1 = stackable up to this limit.
+  constructionPoints │ Int. Progress points required to apply this upgrade.
 
 StructureDef_Upgrade_BuildCost defines items required to apply the upgrade:
 
@@ -268,8 +270,10 @@ the build and closes on completion.
   structureId          │ FK → Structure
   upgradeId            │ FK → StructureDef_Upgrade. null = initial build;
                        │ non-null = applying a specific upgrade.
-  hoursRequired        │ Total labour hours to complete.
-  hoursRemaining       │ Decrements as entities contribute. 0 = complete.
+  pointsRequired       │ Total progress points to complete. Set from
+                       │ StructureDef.constructionPoints on initiation.
+  pointsRemaining      │ Decrements by ActionSystemType.progressPoints per
+                       │ contribution. 0 = complete.
   initiatedByEntityId  │ FK → Entity. Must be the faction leader.
   startedAt            │ DateTime
   completedAt          │ DateTime. Set on completion; null while in progress.
@@ -288,7 +292,7 @@ After a leader initiates construction, any faction member may contribute.
 Contributing uses the systemType = "structure_contribute" action:
 
   - Energy cost:       GuildSettings.defaultDailyEnergy ÷ 8 per contribution
-  - Effect:            Construction.hoursRemaining − 1
+  - Effect:            Construction.pointsRemaining − ActionSystemType.progressPoints
   - Reward:            Clan rep (baseClanRepReward on the ActionType)
   - Natural daily cap: energy runs out after 8 contributions (one full work day)
 
