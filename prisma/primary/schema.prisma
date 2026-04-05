@@ -387,12 +387,35 @@ model ConditionType {
   abilityResistances Ability_ConditionResistance[]
 }
 
-// Static seed values: block | recover | worsen | spawn | spreads_as
-model ConditionLinkType {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
+// Global seeded relation/effect type table. Developer-controlled — not user-editable.
+// Boolean flags indicate which systems each value is valid for, allowing the app to
+// filter valid options by context without hardcoding strings.
+//
+// Seeded values:
+//   requires     — isStructureSystem, isSkillSystem
+//   block        — isConditionSystem, isStructureSystem, isSkillSystem
+//   upgrades     — isStructureSystem, isSkillSystem
+//   treat        — isItemSystem
+//   worsen       — isConditionSystem, isItemSystem
+//   cure         — isItemSystem
+//   transform    — isItemSystem
+//   recover      — isConditionSystem
+//   spawn        — isConditionSystem
+//   spreads_as   — isConditionSystem
+model RelationType {
+  id                 Int     @id @default(autoincrement())
+  name               String  @unique @db.VarChar(50)
+  isConditionSystem  Boolean @default(false)
+  isStructureSystem  Boolean @default(false)
+  isSkillSystem      Boolean @default(false)
+  isItemSystem       Boolean @default(false)
 
-  links ConditionDef_Link[]
+  conditionLinks       ConditionDef_Link[]
+  itemEffects          ItemEffect[]
+  itemConditionEffects ItemConditionEffect[]
+  skillTreeRelations   SkillTreeNode_Relation[]
+  upgradeRelations     StructureDef_Upgrade_Relation[]
+  structureRelations   StructureDef_Relation[]
 }
 
 // Base stats (global seed — Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma)
@@ -917,15 +940,17 @@ model SkillTreeNode {
 // UPGRADES: nodeId supersedes targetNodeId; on purchase, targetNodeId's obtained record is
 //           deleted (no refund). Only one tier is active at a time. UPGRADES implies REQUIRES.
 model SkillTreeNode_Relation {
-  nodeId       Int
-  relationType String @db.VarChar(20)
-  targetNodeId Int
+  nodeId         Int
+  relationTypeId Int
+  targetNodeId   Int
 
-  node   SkillTreeNode @relation("NodeRelations",  fields: [nodeId],       references: [id], onDelete: Cascade)
-  target SkillTreeNode @relation("RelationTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
+  node         SkillTreeNode @relation("NodeRelations",  fields: [nodeId],         references: [id], onDelete: Cascade)
+  target       SkillTreeNode @relation("RelationTarget", fields: [targetNodeId],   references: [id], onDelete: Cascade)
+  relationType RelationType  @relation(                  fields: [relationTypeId], references: [id], onDelete: Restrict)
 
-  @@id([nodeId, relationType, targetNodeId])
+  @@id([nodeId, relationTypeId, targetNodeId])
   @@index([targetNodeId])
+  @@index([relationTypeId])
 }
 
 // Tracks which skill tree nodes an entity has obtained (auto-granted or purchased).
@@ -1477,7 +1502,7 @@ model ConditionDef_Link {
 
   parentCondition ConditionDef     @relation("ConditionLinkParent", fields: [parentConditionId], references: [id], onDelete: Cascade)
   childCondition  ConditionDef     @relation("ConditionLinkChild",  fields: [childConditionId],  references: [id], onDelete: Restrict)
-  linkType        ConditionLinkType @relation(                      fields: [linkTypeId],         references: [id], onDelete: Restrict)
+  linkType        RelationType      @relation(                      fields: [linkTypeId],         references: [id], onDelete: Restrict)
 
   @@unique([parentConditionId, childConditionId, linkTypeId])
   @@index([parentConditionId, linkTypeId])
@@ -1767,6 +1792,7 @@ model StructureType {
 
   structureDefs    StructureDef[]
   campLimits       Camp_StructureLimit[]
+  campRequirements StructureDef_CampRequirement[]
 }
 
 // Guild-defined named structure. References a seeded StructureType.
@@ -1784,14 +1810,55 @@ model StructureDef {
 
   structureType StructureType @relation(fields: [structureTypeId], references: [id], onDelete: Restrict)
 
-  buildCosts     StructureDef_BuildCost[]
-  storageConfig  StructureDef_StorageConfig?
-  farmingConfig  StructureDef_FarmingConfig?
-  upgrades       StructureDef_Upgrade[]
-  structures     Structure[]
+  buildCosts       StructureDef_BuildCost[]
+  campRequirements StructureDef_CampRequirement[]
+  relations        StructureDef_Relation[] @relation("StructureDefRelations")
+  relatedTo        StructureDef_Relation[] @relation("StructureDefRelationTarget")
+  storageConfig    StructureDef_StorageConfig?
+  farmingConfig    StructureDef_FarmingConfig?
+  upgrades         StructureDef_Upgrade[]
+  structures       Structure[]
 
   @@index([guildId])
   @@index([structureTypeId])
+}
+
+// Structure types that must have at least one active (non-broken, non-destroyed)
+// instance in a camp before this StructureDef can be built there.
+// Checked at Construction initiation. A def may have zero or more requirement rows.
+model StructureDef_CampRequirement {
+  structureDefId          Int
+  requiredStructureTypeId Int
+
+  structureDef          StructureDef  @relation(fields: [structureDefId],          references: [id], onDelete: Cascade)
+  requiredStructureType StructureType @relation(fields: [requiredStructureTypeId], references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, requiredStructureTypeId])
+  @@index([requiredStructureTypeId])
+}
+
+// Directed relation edges between StructureDefs within the same guild.
+// relationType: REQUIRES | BLOCKS | UPGRADES
+// REQUIRES: structureDefId cannot be built unless an active instance of targetStructureDefId
+//           exists in the camp.
+// BLOCKS:   structureDefId cannot be built if an active instance of targetStructureDefId
+//           exists in the camp (one-directional).
+// UPGRADES: structureDefId is a tier upgrade of targetStructureDefId. Requires an active
+//           instance of targetStructureDefId (implicit REQUIRES). On Construction completion,
+//           the target structure is set to destroyed and its applied upgrades are deleted.
+//           No resources refunded.
+model StructureDef_Relation {
+  structureDefId       Int
+  relationTypeId       Int
+  targetStructureDefId Int
+
+  structureDef StructureDef @relation("StructureDefRelations",     fields: [structureDefId],       references: [id], onDelete: Cascade)
+  targetDef    StructureDef @relation("StructureDefRelationTarget", fields: [targetStructureDefId], references: [id], onDelete: Cascade)
+  relationType RelationType @relation(                              fields: [relationTypeId],        references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, relationTypeId, targetStructureDefId])
+  @@index([targetStructureDefId])
+  @@index([relationTypeId])
 }
 
 // Items required to initiate the initial build of a StructureDef.
@@ -1882,14 +1949,16 @@ model StructureDef_Upgrade_Effect {
 //           rows for targetUpgradeId are deleted (no item refund). UPGRADES implies REQUIRES.
 model StructureDef_Upgrade_Relation {
   upgradeId       Int
-  relationType    String @db.VarChar(20)
+  relationTypeId  Int
   targetUpgradeId Int
 
-  upgrade StructureDef_Upgrade @relation("UpgradeRelations",       fields: [upgradeId],       references: [id], onDelete: Cascade)
-  target  StructureDef_Upgrade @relation("UpgradeRelationTarget",  fields: [targetUpgradeId], references: [id], onDelete: Cascade)
+  upgrade      StructureDef_Upgrade @relation("UpgradeRelations",      fields: [upgradeId],       references: [id], onDelete: Cascade)
+  target       StructureDef_Upgrade @relation("UpgradeRelationTarget", fields: [targetUpgradeId], references: [id], onDelete: Cascade)
+  relationType RelationType         @relation(                          fields: [relationTypeId],  references: [id], onDelete: Restrict)
 
-  @@id([upgradeId, relationType, targetUpgradeId])
+  @@id([upgradeId, relationTypeId, targetUpgradeId])
   @@index([targetUpgradeId])
+  @@index([relationTypeId])
 }
 
 // Items required to apply a specific upgrade.
@@ -2547,17 +2616,6 @@ model ItemAction {
   @@index([itemInteractionId])
 }
 
-// Shared effect type seed table for ItemEffect and ItemConditionEffect.
-// treat / worsen apply to both; cure / transform apply to conditions only.
-// Seeded: treat, worsen, cure, transform
-model ItemEffectType {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
-
-  symptomEffects   ItemEffect[]
-  conditionEffects ItemConditionEffect[]
-}
-
 // An effect of performing a specific action with a specific item on a symptom
 // e.g. eat + catmint → treats Coughing; eat + yarrow → worsens Nausea
 // Valid effectTypes for symptoms: treat, worsen
@@ -2573,7 +2631,7 @@ model ItemEffect {
 
   itemAction ItemAction   @relation(fields: [itemActionId], references: [id], onDelete: Cascade)
   symptom    Symptom      @relation(fields: [symptomId],    references: [id], onDelete: Restrict)
-  effectType ItemEffectType @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
+  effectType RelationType @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
 
   @@unique([itemActionId, symptomId])
   @@index([itemActionId])
@@ -2598,7 +2656,7 @@ model ItemConditionEffect {
 
   itemAction   ItemAction              @relation(fields: [itemActionId],   references: [id], onDelete: Cascade)
   conditionDef ConditionDef            @relation("ItemConditionEffectTarget", fields: [conditionDefId],       references: [id], onDelete: Restrict)
-  effectType   ItemEffectType          @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+  effectType   RelationType            @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
   outputCondition ConditionDef?        @relation("ItemConditionEffectOutput", fields: [outputConditionDefId], references: [id], onDelete: SetNull)
 
   @@unique([itemActionId, conditionDefId])

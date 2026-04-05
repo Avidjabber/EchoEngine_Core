@@ -118,6 +118,50 @@ StructureType and defines everything about how that structure is built and upgra
 Base values for type-specific properties are defined on extension config rows
 (see section 4a). These represent the structure's state before any upgrades apply.
 
+StructureDef_CampRequirement defines structure types that must already exist (and be
+active) in a camp before this def can be built there:
+
+  structureDefId          │ FK → StructureDef (the def being gated)
+  requiredStructureTypeId │ FK → StructureType (type that must exist in the camp)
+
+  The app checks at Construction initiation that at least one active (non-broken,
+  non-destroyed) structure of each required type exists in the camp. Broken structures
+  do not satisfy requirements — a broken storage does not count as having storage.
+  A def may have zero or more requirement rows.
+
+StructureDef_Relation defines dependency and exclusion rules between StructureDefs
+within the same guild. Relations are directional — the app checks all relation rows
+where structureDefId = the def being built.
+
+  structureDefId       │ FK → StructureDef (the def being constrained)
+  relationType         │ REQUIRES | BLOCKS | UPGRADES
+  targetStructureDefId │ FK → StructureDef (the def being referenced)
+
+  Both structureDefId and targetStructureDefId must belong to the same guild.
+  A def may have any number of relation rows.
+
+  Relation semantics:
+
+    REQUIRES — structureDefId cannot be built in a camp unless at least one active
+               (non-broken, non-destroyed) instance of targetStructureDefId exists
+               there. Checked at Construction initiation.
+
+    BLOCKS   — structureDefId cannot be built in a camp if any active instance of
+               targetStructureDefId exists there. One-directional: if A BLOCKS B,
+               A is blocked by B's presence — B is not automatically blocked by A
+               unless a separate B BLOCKS A row exists.
+
+    UPGRADES — structureDefId is a direct tier upgrade of targetStructureDefId.
+               Building it requires an active instance of targetStructureDefId in
+               the camp (implicit REQUIRES). On Construction completion, the target
+               structure is demolished — its Structure row is set to destroyed and
+               its Structure_AppliedUpgrade rows are deleted. No resources are
+               refunded. Only one tier is active at a time.
+
+  Note: StructureDef_CampRequirement gates on a StructureType (any storage will do).
+  StructureDef_Relation REQUIRES gates on a specific StructureDef (this exact def).
+  Both checks are enforced at initiation — a def may have both.
+
 StructureDef_BuildCost defines the items required to initiate the initial build:
 
   structureDefId  │ FK → StructureDef
@@ -445,6 +489,20 @@ On completion:
                Locked plots on farming structures are unlocked; plot count is
                restored to match the rebuilt upgrade set.
 
+CANCELLING A CONSTRUCTION
+──────────────────────────
+  Any active Construction may be cancelled by the faction leader. On cancellation:
+    1. All contributed items (quantityContributed per Construction_ItemRequirement row)
+       are refunded to faction storage.
+    2. The Construction row is deleted. Construction_ItemRequirement rows are
+       removed via cascade.
+    3. Structure state after cancellation depends on constructionType:
+         - build   → Structure row is deleted entirely. It was never active, so
+                     it no longer counts against Camp_StructureLimit.
+         - upgrade → Structure remains active. The upgrade is simply not applied.
+         - repair  → Structure remains broken.
+         - rebuild → Structure remains broken.
+
 CLEARING A BROKEN STRUCTURE
 ─────────────────────────────
   A broken structure may be cleared by the faction leader without initiating
@@ -532,6 +590,8 @@ selects one and the action resolves immediately with no further tracking needed.
   Camp                           — faction + location pairing; zero or more per faction; carries filthLevel
   Camp_StructureLimit            — per-camp cap on how many structures of each type may be built
   StructureDef                   — guild-defined named structure; references a StructureType
+  StructureDef_CampRequirement   — structure types that must be active in a camp before this def can be built
+  StructureDef_Relation          — REQUIRES / BLOCKS / UPGRADES rules between specific defs within a guild
   StructureDef_BuildCost         — items required for initial build
   StructureDef_StorageConfig     — base capacity and rot values for storage-type defs
   StructureDef_FarmingConfig     — base plot count and soil quality for farming-type defs

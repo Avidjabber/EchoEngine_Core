@@ -129,13 +129,23 @@ ItemActionType                          [ DONE ]
 
 
 ──────────────────────────────────────────────
-ItemEffectType                          [ DONE ]
+RelationType                            [ TODO ]
 ──────────────────────────────────────────────
-Values:
-  treat
-  worsen
-  cure
-  transform
+Replaces: ItemEffectType, ConditionLinkType
+Developer-seeded only. Boolean flags control which systems each value is valid for.
+
+  name        isConditionSystem  isStructureSystem  isSkillSystem  isItemSystem
+  ──────────  ─────────────────  ─────────────────  ─────────────  ────────────
+  requires    false              true               true           false
+  block       true               true               true           false
+  upgrades    false              true               true           false
+  treat       false              false              false          true
+  worsen      true               false              false          true
+  cure        false              false              false          true
+  transform   false              false              false          true
+  recover     true               false              false          false
+  spawn       true               false              false          false
+  spreads_as  true               false              false          false
 
 
 ──────────────────────────────────────────────
@@ -538,14 +548,9 @@ ConditionType                           [ DONE ]
 
 
 ──────────────────────────────────────────────
-ConditionLinkType                       [ DONE ]
+ConditionLinkType                       [ REMOVED ]
 ──────────────────────────────────────────────
-Values:
-  block
-  recover
-  worsen
-  spawn
-  spreads_as
+Consolidated into RelationType. See RelationType entry above.
 
 
 ──────────────────────────────────────────────
