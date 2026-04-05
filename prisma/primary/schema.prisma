@@ -327,9 +327,9 @@ model ItemType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(100)
 
-  items        Item_Type[]
-  storageTypes Storage_ItemType[]
-  eventEffects EventEffect[]
+  items                Item_Type[]
+  structureStorageTypes Structure_Storage_ItemType[]
+  eventEffects         EventEffect[]
 }
 
 // Biological sex options (global seed data — Male, Female, Intersex, Other)
@@ -681,7 +681,8 @@ model Entity {
   appliedConditions EntityCondition[] @relation("AppliedConditions")
   behaviorCounters EntityBehaviorCounter[]
 
-  storages      Storage[]
+  entityStorage          Entity_Storage[]
+  constructionsInitiated Construction[]
 
   actionParticipations  ActionInstance_Entity[]
   actionLeaderships     ActionInstance[]          @relation("ActionInstanceLeader")
@@ -1622,9 +1623,8 @@ model Faction {
 
   type String @db.VarChar(100)
 
-  // Camp filth — cap is an app-layer constant × living entity count in the faction
-  // Daily gain: baseRate × Π(effectiveMod) where effectiveMod = 1.0 + (EnvCondition_Modifier[filth].value − 1.0) × stackCount
-  filth Int @default(0)
+  // The faction's currently active camp. null = faction has no camps (campless factions rely on personal entity inventories).
+  activeCampId Int?
 
   // Faction-level event cooldown — null = no event has ever fired for this faction; updated whenever any event fires.
   // Worker skips firing any new event for this faction if now() < lastEventAt + EventDef.cooldownDays.
@@ -1638,10 +1638,12 @@ model Faction {
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
 
+  activeCamp Camp? @relation("FactionActiveCamp", fields: [activeCampId], references: [id], onDelete: SetNull)
+
   members                  Entity[]
   locations                Location_Faction[]
   borders                  LocationBorder[]
-  storages                 Storage[]
+  camps                    Camp[]             @relation("FactionCamps")
   ranks                    Rank_Faction[]
   activeEvents             ActiveEvent[]
   actionInstances          ActionInstance[]
@@ -1651,6 +1653,217 @@ model Faction {
 
   @@unique([guildId, name])
   @@index([guildId])
+}
+
+// ============================================================
+// CAMP & STRUCTURE SYSTEM
+// ============================================================
+
+// A faction's physical presence at a location. Admin-created; not built via Construction.
+// filthLevel: accumulates daily based on env conditions and entity count; drives filth-trigger events.
+//   Daily gain: baseRate × Π(effectiveMod) where effectiveMod = 1.0 + (EnvCondition_Modifier[filth].value − 1.0) × stackCount
+//   Cap is an app-layer constant × living entity count in the faction.
+model Camp {
+  id          Int     @id @default(autoincrement())
+  factionId   Int
+  locationId  Int
+  name        String  @db.VarChar(200)
+  description String? @db.VarChar(500)
+  filthLevel  Int     @default(0)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  faction    Faction  @relation("FactionCamps",     fields: [factionId],  references: [id], onDelete: Cascade)
+  location   Location @relation(                    fields: [locationId], references: [id], onDelete: Restrict)
+
+  structureLimits Camp_StructureLimit[]
+  structures      Structure[]
+  activeFactionsHere Faction[] @relation("FactionActiveCamp")
+
+  @@index([factionId])
+  @@index([locationId])
+}
+
+// Per-camp cap on how many structures of each type may be built.
+// No row for a given type means that type cannot be built in this camp.
+model Camp_StructureLimit {
+  campId          Int
+  structureTypeId Int
+  maxCount        Int
+
+  camp          Camp          @relation(fields: [campId],          references: [id], onDelete: Cascade)
+  structureType StructureType @relation(fields: [structureTypeId], references: [id], onDelete: Restrict)
+
+  @@id([campId, structureTypeId])
+  @@index([structureTypeId])
+}
+
+// Seeded engine-level structure categories. Each type maps to a specific engine system.
+// Seeded: storage | farming | housing
+// Guilds reference these when defining their own StructureDefs — they cannot create new types.
+model StructureType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  structureDefs    StructureDef[]
+  campLimits       Camp_StructureLimit[]
+}
+
+// Guild-defined named structure. References a seeded StructureType.
+// name: internal snake_case key (e.g. "mossy_storage_den")
+// constructionHours: labour hours for the initial build
+model StructureDef {
+  id              Int     @id @default(autoincrement())
+  guildId         String  @db.VarChar(50)
+  structureTypeId Int
+  name            String  @db.VarChar(200)
+  displayName     String  @db.VarChar(200)
+  description     String? @db.VarChar(1000)
+  constructionHours Int
+
+  structureType StructureType @relation(fields: [structureTypeId], references: [id], onDelete: Restrict)
+
+  buildCosts     StructureDef_BuildCost[]
+  storageConfig  StructureDef_StorageConfig?
+  farmingConfig  StructureDef_FarmingConfig?
+  upgrades       StructureDef_Upgrade[]
+  structures     Structure[]
+
+  @@index([guildId])
+  @@index([structureTypeId])
+}
+
+// Items required to initiate the initial build of a StructureDef.
+model StructureDef_BuildCost {
+  structureDefId Int
+  itemId         Int
+  quantity       Int
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  item         Item         @relation(fields: [itemId],         references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, itemId])
+  @@index([itemId])
+}
+
+// Base config for storage-type StructureDefs.
+// baseRotModifier: < 1.0 = slower rot; used as the starting expirationModifier before upgrades.
+model StructureDef_StorageConfig {
+  structureDefId      Int   @id
+  baseCapacitySolids  Int
+  baseCapacityLiquids Int
+  baseRotModifier     Float @default(1.0)
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+}
+
+// Base config for farming-type StructureDefs.
+// plotTypeId: all plots in this structure share this type. References PlotType (defined when farming schema is implemented).
+// defaultSoilQuality: assigned to each plot when created, including plots added by plot_count upgrades.
+model StructureDef_FarmingConfig {
+  structureDefId     Int   @id
+  plotTypeId         Int   // FK → PlotType (not yet modelled; add @relation when farming schema is implemented)
+  basePlotCount      Int
+  defaultSoilQuality Float @default(1.0)
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+}
+
+// A discrete, independently applicable upgrade for a StructureDef.
+// effectType must be valid for the parent StructureDef's StructureType (enforced at app layer).
+// effectValue: additive delta applied per application.
+// maxApplications: 1 = one-time only; > 1 = stackable up to this limit.
+// constructionHours: labour hours required to apply this upgrade.
+model StructureDef_Upgrade {
+  id              Int     @id @default(autoincrement())
+  structureDefId  Int
+  name            String  @db.VarChar(200)
+  displayName     String  @db.VarChar(200)
+  description     String? @db.VarChar(1000)
+  effectType      String  @db.VarChar(50)
+  effectValue     Float
+  maxApplications Int
+  constructionHours Int
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+
+  buildCosts       StructureDef_Upgrade_BuildCost[]
+  appliedUpgrades  Structure_AppliedUpgrade[]
+  constructions    Construction[]
+
+  @@index([structureDefId])
+}
+
+// Items required to apply a specific upgrade.
+model StructureDef_Upgrade_BuildCost {
+  upgradeId Int
+  itemId    Int
+  quantity  Int
+
+  upgrade StructureDef_Upgrade @relation(fields: [upgradeId], references: [id], onDelete: Cascade)
+  item    Item                 @relation(fields: [itemId],    references: [id], onDelete: Restrict)
+
+  @@id([upgradeId, itemId])
+  @@index([itemId])
+}
+
+// A single built (or in-progress) installation within a camp.
+// status: active | under_construction | destroyed
+// name: optional custom label for this specific structure instance.
+model Structure {
+  id             Int     @id @default(autoincrement())
+  campId         Int
+  structureDefId Int
+  status         String  @db.VarChar(50)
+  name           String? @db.VarChar(200)
+
+  camp         Camp         @relation(fields: [campId],         references: [id], onDelete: Cascade)
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Restrict)
+
+  appliedUpgrades  Structure_AppliedUpgrade[]
+  structureStorage Structure_Storage?
+  constructions    Construction[]
+
+  @@index([campId])
+  @@index([structureDefId])
+}
+
+// One row per upgrade application on a structure. Created when a Construction for that upgrade completes.
+model Structure_AppliedUpgrade {
+  id          Int      @id @default(autoincrement())
+  structureId Int
+  upgradeId   Int
+  appliedAt   DateTime @default(now()) @db.Timestamptz
+
+  structure Structure            @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  upgrade   StructureDef_Upgrade @relation(fields: [upgradeId],   references: [id], onDelete: Restrict)
+
+  @@index([structureId])
+  @@index([upgradeId])
+}
+
+// A build or upgrade project. Exists for the duration of the work; completedAt is set on completion.
+// upgradeId null = initial build; non-null = applying a specific upgrade.
+// Item costs are consumed from faction storage when the Construction is initiated.
+// On completion: initial build → Structure.status = active; upgrade → Structure_AppliedUpgrade row created.
+// For plot_count upgrades: new Plot rows are also created on completion.
+model Construction {
+  id                  Int       @id @default(autoincrement())
+  structureId         Int
+  upgradeId           Int?
+  hoursRequired       Int
+  hoursRemaining      Int
+  initiatedByEntityId Int
+  startedAt           DateTime  @default(now()) @db.Timestamptz
+  completedAt         DateTime? @db.Timestamptz
+
+  structure         Structure            @relation(fields: [structureId],         references: [id], onDelete: Cascade)
+  upgrade           StructureDef_Upgrade? @relation(fields: [upgradeId],          references: [id], onDelete: Restrict)
+  initiatedByEntity Entity               @relation(fields: [initiatedByEntityId], references: [id], onDelete: Restrict)
+
+  @@index([structureId])
+  @@index([initiatedByEntityId])
 }
 
 // Seed table for world-effect modifier categories used by EnvCondition_Modifier.
@@ -1708,11 +1921,12 @@ model Location {
   updatedAt DateTime @updatedAt @db.Timestamptz
 
   factions          Location_Faction[]
-  borders         LocationBorder[]
-  biomes          Location_Biome[]
-  envConditions   Location_EnvCondition[]
-  actionInstances ActionInstance[]
-  eventTriggers   EventDef_Location[]
+  borders           LocationBorder[]
+  biomes            Location_Biome[]
+  envConditions     Location_EnvCondition[]
+  actionInstances   ActionInstance[]
+  eventTriggers     EventDef_Location[]
+  camps             Camp[]
 
   @@unique([guildId, name])
   @@index([guildId])
@@ -1826,44 +2040,61 @@ model Location_EnvCondition {
 
 // A named storage container belonging to a faction or an entity (never both)
 // acceptedTypes restricts which item types this storage accepts; empty = accepts nothing
-// App layer must ensure exactly one of factionId or entityId is set
+// Pure item container. Capacity, rot modifier, type restrictions, and ownership
+// all live on the owner join table (Entity_Storage or Structure_Storage), not here.
 model Storage {
   id      Int    @id @default(autoincrement())
-  guildId String
+  guildId String @db.VarChar(50)
   name    String @db.VarChar(200)
-
-  factionId  Int?
-  entityId Int?
-
-  weightCapacity     Float?          // null = no weight limit; sum of (StoredItem.quantity × Item.averageWeight) for Count items, or StoredItem.quantity for Weight items
-  fluidCapacity      Float?          // null = no fluid limit (ml); sum of StoredItem.quantity for Volume items
-  expirationModifier Float @default(1.0)  // multiplier on item spoilage rates; >1.0 = spoils faster
-  isPrimaryStorage   Boolean @default(false)  // true = this is the faction's designated primary storage for its accepted item types
-  acceptsAll         Boolean @default(false)  // true = accepts any item type regardless of Storage_ItemType rows; used for personal entity storage
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
 
-  faction  Faction?  @relation(fields: [factionId],  references: [id], onDelete: Cascade)
-  entity Entity? @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  entityStorage    Entity_Storage?
+  structureStorage Structure_Storage?
+  storedItems      StoredItem[]
 
-  acceptedTypes Storage_ItemType[]
-  storedItems   StoredItem[]
-
-  @@unique([factionId, name])   // enforced when factionId is non-null (PostgreSQL treats NULLs as distinct)
-  @@unique([entityId, name])  // enforced when entityId is non-null
   @@index([guildId])
-  @@index([factionId])
-  @@index([entityId])
 }
 
-// Item types accepted by a storage — a storage with no entries accepts nothing
-model Storage_ItemType {
+// Personal entity inventory. Entity storage accepts all item types; no type restrictions apply.
+// No expirationModifier — items decay at their natural rate in entity storage.
+model Entity_Storage {
+  entityId       Int   @id
+  storageId      Int   @unique
+  weightCapacity Float?  // null = no weight limit
+  fluidCapacity  Float?  // null = no fluid limit (ml)
+
+  entity  Entity  @relation(fields: [entityId],  references: [id], onDelete: Cascade)
+  storage Storage @relation(fields: [storageId], references: [id], onDelete: Cascade)
+}
+
+// Camp structure inventory. Owned by a storage-type Structure.
+// expirationModifier: driven by StructureDef_StorageConfig base value + rot_modifier upgrade deltas; recomputed when upgrades apply.
+// isPrimaryStorage: faction's designated primary for its accepted item types.
+// acceptedTypes: item must match at least one accepted type to be stored here.
+model Structure_Storage {
+  structureId        Int   @id
+  storageId          Int   @unique
+  weightCapacity     Float?
+  fluidCapacity      Float?
+  expirationModifier Float   @default(1.0)
+  isPrimaryStorage   Boolean @default(false)
+  securityRating     Int     @default(0)  // effective sum of security_rating upgrade deltas; read by event system for theft/raid event weights
+
+  structure Structure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  storage   Storage   @relation(fields: [storageId],   references: [id], onDelete: Cascade)
+
+  acceptedTypes Structure_Storage_ItemType[]
+}
+
+// Item types accepted by a structure storage. A storage with no entries accepts nothing.
+model Structure_Storage_ItemType {
   storageId  Int
   itemTypeId Int
 
-  storage  Storage  @relation(fields: [storageId],  references: [id], onDelete: Cascade)
-  itemType ItemType @relation(fields: [itemTypeId], references: [id], onDelete: Restrict)
+  structureStorage Structure_Storage @relation(fields: [storageId],  references: [storageId], onDelete: Cascade)
+  itemType         ItemType          @relation(fields: [itemTypeId], references: [id],        onDelete: Restrict)
 
   @@id([storageId, itemTypeId])
   @@index([itemTypeId])
@@ -1947,10 +2178,12 @@ model Item {
   actionOutputs          ItemAction_Output[]  @relation("ItemActionOutputItem")  // back-relation: this item appears as an output of these actions
   eventItemEffects       EventEffect[]
   speciesDefaultLoadouts SpeciesDefaultLoadout[]
-  rankDefaultItems        Rank_DefaultItem[]
-  conditionGrants         ConditionDef_GrantedItem[]
-  foodProfile             ItemFoodProfile?
-  actionTypeDefaultItems  ActionType_DefaultItem[]
+  rankDefaultItems              Rank_DefaultItem[]
+  conditionGrants               ConditionDef_GrantedItem[]
+  foodProfile                   ItemFoodProfile?
+  actionTypeDefaultItems        ActionType_DefaultItem[]
+  structureBuildCosts           StructureDef_BuildCost[]
+  structureUpgradeBuildCosts    StructureDef_Upgrade_BuildCost[]
   treatmentLogs          EntityTreatmentLog[]
   abilityGrantedActions  Ability_GrantedAction[]
   requiredByProfiles     ItemEquipmentProfile_RequiredItem[] @relation("ProfileRequiredItem")

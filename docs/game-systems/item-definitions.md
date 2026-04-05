@@ -1,6 +1,6 @@
 ITEM DEFINITIONS — DESIGN REFERENCE
 ====================================
-Last updated: 2026-04-03
+Last updated: 2026-04-04
 
 This file is the authoritative reference for how item definitions work in EchoPaw.
 Read this before writing item seeding code, item-adjacent queries, or any system
@@ -401,9 +401,11 @@ those systems use ItemType instead.
   "How is this item's quantity measured?"            → Item.measurementTypeId → MeasurementType
   "How much does one unit of this item weigh?"       → Item.averageWeight (grams; always present)
   "How much volume does one unit occupy?"            → Item.averageVolume (ml; Volume items only)
-  "Where can this item be stored?"                   → ItemType tags + Storage_ItemType
-  "How much can a storage hold by weight?"           → Storage.weightCapacity
-  "How much fluid can a storage hold?"               → Storage.fluidCapacity
+  "Where can this item be stored?"                   → ItemType tags + Structure_Storage_ItemType
+                                                       (entity storage accepts all types)
+  "How much can a structure storage hold by weight?" → Structure_Storage.weightCapacity
+  "How much can a structure storage hold by fluid?"  → Structure_Storage.fluidCapacity
+  "How much can an entity inventory hold?"           → Entity_Storage.weightCapacity / fluidCapacity
   "Does this item decay?"                            → Item.decayDays (null = never decays)
   "Is this item dangerous to use?"                   → ItemWarning + Item_Warning
   "Does this item spawn a condition on use?"         → ItemWarning (conditionDefId + triggeredByInteractionId)

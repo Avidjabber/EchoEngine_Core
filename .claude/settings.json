@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm install:*)",
       "Bash(xargs grep:*)",
-      "Bash(find /d/CodingProjects/EchoEngine_Core/apps/api/src -type f -name \"*.ts\" ! -path \"*/generated/*\" -exec grep -l \"Discipline\\\\|Ability\\\\|Skill\" {} \\\\;)"
+      "Bash(find /d/CodingProjects/EchoEngine_Core/apps/api/src -type f -name \"*.ts\" ! -path \"*/generated/*\" -exec grep -l \"Discipline\\\\|Ability\\\\|Skill\" {} \\\\;)",
+      "Bash(npx prisma:*)"
     ]
   }
 }

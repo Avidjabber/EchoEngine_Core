@@ -1,6 +1,6 @@
 FACTION SYSTEM — DESIGN REFERENCE
 ===================================
-Last updated: 2026-04-03
+Last updated: 2026-04-04
 
 [PLACEHOLDER — Schema is fully built. This document captures current known design.
 Expand as implementation begins.]
@@ -111,8 +111,8 @@ Each guild has a GuildSettings row controlling bot-wide configuration:
 
 Guild settings are not per-faction — they apply across all factions in the guild.
 
-Note: filthLevel was previously tracked here. It now lives on Camp, since filth
-is a property of a specific physical location rather than the guild at large.
+Note: filthLevel was previously tracked on Faction. It now lives on Camp, since
+filth is a property of a specific physical location rather than the faction.
 
 
 ─────────────────────────────────────────────
@@ -123,4 +123,5 @@ is a property of a specific physical location rather than the guild at large.
   FactionStanding       — directional relationship between two factions
   FactionStandingType   — Ally | Neutral | Hostile | Enemy | Truce (seed)
   Location_Faction      — territory ownership records
+  Camp                  — see structure-system.md; zero or more per faction
   GuildSettings         — guild-wide bot configuration

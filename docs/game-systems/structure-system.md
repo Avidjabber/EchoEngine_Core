@@ -1,6 +1,6 @@
 STRUCTURE & CAMP SYSTEM — DESIGN REFERENCE
 ==========================================
-Last updated: 2026-04-03
+Last updated: 2026-04-04
 
 This file is the authoritative reference for how camps and structures work in
 EchoPaw. Read this before touching camp creation, structure definitions, upgrade
@@ -74,21 +74,23 @@ purpose of a structure and which effect types are valid for upgrades on it.
 Guilds do not create StructureType rows — they reference them when defining
 their own StructureDefs.
 
+  Each seeded type maps to a specific engine system. Guilds cannot create
+  new StructureType rows — they define structures within these categories.
+
   Seeded types:
 
   Name      │ Purpose
   ──────────┼──────────────────────────────────────────────────────────────
-  storage   │ Holds items. Exposes capacity and rot rate properties.
-  farming   │ Contains plots for growing crops. Exposes plot count and growth rate.
-  housing   │ Provides living quarters for entities. (Properties TBD.)
-  other     │ General-purpose; no engine-managed properties.
+  storage   │ Holds items. Connects to the Storage system.
+  farming   │ Contains plots for growing crops. Connects to the Farming system.
+  housing   │ Provides living quarters for entities. Connects to the Housing system.
+            │ Housing properties TBD when the housing system is designed.
 
 VALID EFFECT TYPES PER CATEGORY
 ─────────────────────────────────
   storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating
   farming:  plot_count | growth_rate | season_override | env_override
-  housing:  (TBD)
-  other:    (none enforced — guild may define custom behaviour)
+  housing:  (TBD — defined when the housing system is built out)
 
 
 ─────────────────────────────────────────────
@@ -289,7 +291,9 @@ selects one and the action resolves immediately with no further tracking needed.
 ─────────────────────────────────────────────
 
   Factions   — Camp.factionId links a camp to its owning faction. A faction with
-               no camps has no fixed territory and no structures or storage.
+               no camps has no fixed territory, no structures, and no faction
+               storage — campless factions rely on personal entity inventories.
+               Faction.activeCampId points to the faction's currently active camp.
 
   Locations  — Camp.locationId places the camp in the world. Farming structures
                inherit their location's biome and env conditions for crop growth.
@@ -297,8 +301,17 @@ selects one and the action resolves immediately with no further tracking needed.
   Farming    — Plot.structureId links plots to their farming structure.
                See farming-system.md for growth, harvest, and crop logic.
 
-  Storage    — Structure_Storage links storage structures to a Storage instance.
-               StoredItem rows live under that Storage record.
+  Storage    — Structure_Storage is a join table linking a storage-type Structure
+               to a Storage instance. It carries the capacity, rot modifier, item
+               type restrictions, and isPrimaryStorage flag. The Storage model
+               itself is a pure item container (id, guildId, name only).
+               See item-definitions.md section 7 for the full storage model.
+
+  Events     — security_rating (a storage upgrade effect type) feeds into event
+               weight for camp-level events. Low security_rating raises the weight
+               of theft/raid events (e.g. rats raiding food storage). The event
+               system reads the effective security_rating of camp structures when
+               selecting daily events. See event-system.md for event weight rules.
 
   Actions    — Construction contribution uses systemType = "structure_contribute".
                Energy, clan rep, and the daily contribution cap are all governed
@@ -312,35 +325,39 @@ selects one and the action resolves immediately with no further tracking needed.
 9. OPEN QUESTIONS
 ─────────────────────────────────────────────
 
-  1. StructureType list — are storage | farming | housing | other the complete
-     seeded set, or are additional types needed?
+  1. StructureType list — RESOLVED. Seeded types are: storage, farming, housing.
+     No "other" type. Additional types may be added when new engine systems are built.
 
-  2. Housing base config — what properties does the housing type expose?
-     To be designed when the housing system is built out.
+  2. Housing base config — DEFERRED. To be designed when the housing system is
+     built out. The housing StructureType will be seeded but its config table and
+     effect types are TBD.
 
-  3. Storage table definition — the Storage and StoredItem tables need to be fully
-     defined. Structure_Storage references Storage but that schema is not yet
-     documented. (Next discussion topic.)
+  3. Storage table definition — RESOLVED. See item-definitions.md section 7.
+     Storage is a pure item container. Capacity, rot modifier, and type
+     restrictions live on Structure_Storage (for structures) and Entity_Storage
+     (for personal inventories).
 
-  4. Raid / security system — security_rating is defined as an effect type but the
-     mechanic that reads it (raiding faction storage) is not yet designed.
+  4. Raid / security system — RESOLVED. security_rating feeds into event weight
+     for camp-level events. Low security increases the weight of theft/raid
+     events (e.g. rats raiding food). The event system reads effective
+     security_rating from Structure_Storage at event selection time.
 
 
 ─────────────────────────────────────────────
 10. SCHEMA SUMMARY
 ─────────────────────────────────────────────
 
-  StructureType                  — seeded category: storage | farming | housing | other
+  StructureType                  — seeded category: storage | farming | housing
+  Camp                           — faction + location pairing; zero or more per faction; carries filthLevel
   Camp_StructureLimit            — per-camp cap on how many structures of each type may be built
   StructureDef                   — guild-defined named structure; references a StructureType
   StructureDef_BuildCost         — items required for initial build
   StructureDef_StorageConfig     — base capacity and rot values for storage-type defs
-  StructureDef_FarmingConfig     — base plot count for farming-type defs
+  StructureDef_FarmingConfig     — base plot count and soil quality for farming-type defs
   StructureDef_Upgrade           — guild-defined modular upgrade for a StructureDef
   StructureDef_Upgrade_BuildCost — items required to apply an upgrade
-  Camp                           — faction + location pairing; zero or more per faction
   Structure                      — a single installation within a camp
   Structure_AppliedUpgrade       — record of each upgrade application on a structure
-  Structure_Storage              — 1:1 extension; owns the storage record and carries capacity/rot/type rules
+  Structure_Storage              — join: links a storage-type Structure to a Storage; carries capacity/rot/type rules
   Structure_Storage_ItemType     — item types accepted by a structure storage
   Construction                   — active or completed build/upgrade project
