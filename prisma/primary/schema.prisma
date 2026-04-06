@@ -1928,11 +1928,11 @@ model ConditionDef_DamageModifier {
 // relationshipType: "worsen" | "improve"
 //   worsen — env condition makes this illness harder to recover from (e.g. asthma + Smoke)
 //   improve — env condition aids recovery (e.g. a chest wound + Warm, Dry)
-// value: Float > 0.0, <= 2.0 (enforced app-side). Applied as a multiplier per active stack
-//   using the additive delta formula: effectiveMod = 1.0 + (value − 1.0) × stackCount
-//   For "worsen", this multiplier increases the daily roll DC (or worsening rate).
-//   For "improve", this multiplier decreases it (or accelerates recovery).
-//   A value of 1.0 has no effect; 2.0 is the maximum — a full doubling per stack.
+// value: Float >= 0.0, <= 2.0 (enforced app-side). Applied additively per active stack:
+//   effectiveMod = 1.0 + value × stackCount
+//   For "worsen":  effectiveDC = dailyRollDC × effectiveMod  (e.g. value=0.8, 1 stack → DC × 1.8)
+//   For "improve": effectiveDC = dailyRollDC / effectiveMod  (worsening rate reduced proportionally)
+//   A value of 0.0 has no effect; 2.0 is the maximum (3× DC per stack at cap).
 model ConditionDef_EnvRule {
   conditionDefId   Int
   envConditionId   Int
