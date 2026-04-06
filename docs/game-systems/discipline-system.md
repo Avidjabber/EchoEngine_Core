@@ -1,6 +1,6 @@
 DISCIPLINE SYSTEM — DESIGN REFERENCE
 =====================================
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 This file is the authoritative reference for how disciplines work in EchoPaw.
 Read this before touching any discipline seeding or discipline-adjacent code.
@@ -120,7 +120,7 @@ Discipline XP reaches an entity through three paths:
                               key fields: baseXp, isStatProgression, dailyXpCap
   Entity_Discipline         — per-entity progression tracking (level, currentXp)
   SkillTreeNode             — guild-defined node: ability granted, level threshold, cost
-  SkillTreeNode_Relation    — REQUIRES / BLOCKS / REPLACES rules between nodes on the same guild's tree
+  SkillTreeNode_Relation    — directed edges between nodes; relationTypeId FK → RelationType (REQUIRES / BLOCKS / UPGRADES)
   Entity_SkillTreeNode      — records which nodes an entity has obtained
 
 DisciplineDef has no guildId — disciplines are the same across all guilds.
@@ -156,7 +156,7 @@ NODE SCHEMA
 
   SkillTreeNode_Relation
     nodeId          — the node being constrained
-    relationType    — REQUIRES | BLOCKS | UPGRADES
+    relationTypeId  — FK → RelationType (REQUIRES | BLOCKS | UPGRADES)
     targetNodeId    — the node being referenced
     Both nodeId and targetNodeId must belong to the same guildId.
     A node may have any number of relation rows.
@@ -273,7 +273,7 @@ SKILL TREE NODE MANAGEMENT (admin / guild setup)
 ──────────────────────────────────────────────────
   createSkillTreeNode(guildId, disciplineDefId, abilityDefId, levelRequired,
                       statPointCost, isAutoGranted, relations[])
-    - relations[] is an array of { relationType, targetNodeId } pairs
+    - relations[] is an array of { relationTypeId, targetNodeId } pairs
     - Validates all targetNodeIds belong to same guildId
     - Validates no cycle is introduced in the REQUIRES graph
     - Creates SkillTreeNode and SkillTreeNode_Relation rows
@@ -299,7 +299,7 @@ ENTITY NODE PURCHASE / RESPEC
     - Validates: all SkillTreeNode_DisciplineRequirement rows are satisfied
     - Validates: all REQUIRES targets are in entity's obtained set
     - Validates: no BLOCKS targets are in entity's obtained set
-    - Validates: entity skillPoints >= statPointCost (after any REPLACES refunds)
+    - Validates: entity skillPoints >= statPointCost (after any UPGRADES refunds)
     - Validates: if node has an UPGRADES relation, targetNodeId must be obtained
     - For each UPGRADES target the entity has obtained: removes its
       Entity_SkillTreeNode + Entity_Ability rows (no refund)
