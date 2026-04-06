@@ -110,6 +110,9 @@ model GuildSettings {
   currentPatternStep WeatherPatternStep? @relation(fields: [currentPatternStepId], references: [id], onDelete: SetNull)
   weatherCooldowns   Guild_WeatherPatternCooldown[]
   seasonDefaults     GuildSeason_DefaultWeather[]
+  envConditionMods        EnvCondition_Modifier[]
+  envConditionStatMods    EnvCondition_StatModifier[]
+  envConditionProfMods    EnvCondition_ProficiencyModifier[]
 
   defaultDailyEnergy Int @default(100)  // baseline energy for all users; premium override stored in UserSettings
   doubleAgeMaxThreshold Int @default(0)  // cats at or below this age (in moons) age up twice per daily tick; 0 = disabled
@@ -206,6 +209,7 @@ model RelationType {
   plantTypeEnvConditionEffect    PlantType_EnvConditionEffect[]
   speciesEnvConditionEffect      Species_EnvConditionEffect[]
   speciesTypeEnvConditionEffect  SpeciesType_EnvConditionEffect[]
+  envConditionModifiers          EnvCondition_Modifier[]
   campFactions                   Camp_Faction[]
   locationFactions               Location_Faction[]
 }
@@ -217,6 +221,7 @@ model EffectType {
   isPlant         Boolean @default(false)
   isSpecies       Boolean @default(false)
   isAbility       Boolean @default(false)
+  isEnvModifier   Boolean @default(false)  // valid for EnvCondition_Modifier (global world effects e.g. filth, spoilage)
 
   plantDefEnvConditionEffect      PlantDef_EnvConditionEffect[]
   plantTypeEnvConditionEffect     PlantType_EnvConditionEffect[]
@@ -226,6 +231,7 @@ model EffectType {
   abilityActionTrigger            Ability_ActionTrigger[]
   abilityPresenceEffects          Ability_PresenceEffect[]
   plotBuffs                       Plot_Buff[]
+  envConditionModifiers           EnvCondition_Modifier[]
 }
 
 
@@ -376,14 +382,19 @@ model IngredientType {
 
 
 // Seasons
+// envConditionId — the one named condition this season always contributes 1 stack of (its own seasonal condition).
+// RULE: each season maps to exactly one env condition; null only during initial setup.
 model Season {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
+  id             Int  @id @default(autoincrement())
+  name           String @unique @db.VarChar(50)
+  envConditionId Int?
 
-  guilds          GuildSettings[]
-  envConditions   Season_EnvCondition[]
-  patternWeights  Season_WeatherPattern[]
-  guildDefaults   GuildSeason_DefaultWeather[]
+  envCondition   EnvCondition?              @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+  guilds         GuildSettings[]
+  patternWeights Season_WeatherPattern[]
+  guildDefaults  GuildSeason_DefaultWeather[]
+
+  @@index([envConditionId])
 }
 
 // A discrete named weather state.
@@ -416,9 +427,10 @@ model WeatherState {
 
 model EnvCondition {
   id       Int    @id @default(autoincrement())
+  codeName String @unique @db.VarChar(100)  // snake_case slug; stable lookup key
   name     String @db.VarChar(100)
 
-  seasonEntries       Season_EnvCondition[]
+  seasons             Season[]
   weatherStateEntries WeatherState_EnvCondition[]
   biomeEntries       Biome_EnvCondition[]
   locationEntries    Location_EnvCondition[]
@@ -434,18 +446,6 @@ model EnvCondition {
   plotTypeEnvConditions         PlotType_EnvCondition[]
   structureUpgradeEffects       StructureDef_Upgrade_Effect[]
   passiveGeneratorConditions    StructureDef_FuelConfig_EnvCondition[]
-}
-
-// Acts as a bridge to connect a season to it's specific environment condition
-model Season_EnvCondition {
-  seasonId       Int
-  envConditionId Int
-
-  season       Season       @relation(fields: [seasonId],       references: [id], onDelete: Cascade)
-  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
-
-  @@id([seasonId, envConditionId])
-  @@index([envConditionId])
 }
 
 // Environmental conditions active during a weather state (e.g. Storm → Damp, Windy)
@@ -545,60 +545,65 @@ model Guild_WeatherPatternCooldown {
   @@index([patternId])
 }
 
-// Seed table for world-effect modifier categories used by EnvCondition_Modifier.
-// Only two global types
-// value is a signed delta: 0.3 = +30% per stack, -0.3 = -30% per stack.
-//   filth    — daily filth gain delta
-//   spoilage — food spoilage rate delta
-model EnvModifierType {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
-
-  envConditionModifiers EnvCondition_Modifier[]
-}
-
-// Per-env-condition world effect modifiers. One row per (envCondition, modType) pair.
-// value is the base multiplier at severity 1.0; Worker scales it via the formula above.
+// Per-guild, per-env-condition world effect modifiers. One row per (guild, envCondition, effectType).
+// effectTypeId must have EffectType.isEnvModifier = true (e.g. filth, spoilage).
+// relationTypeId (isEnvConditionSystem = true) — increase | decrease | block
+// value: magnitude of effect (> 0.0); null when relationTypeId = "block" (block has no magnitude).
+// Each guild defines its own modifier values — no global defaults.
 model EnvCondition_Modifier {
+  guildId        String @db.VarChar(50)
   envConditionId Int
-  modTypeId      Int
-  value          Float
+  effectTypeId   Int
+  relationTypeId Int
+  value          Float?  // null when block
 
-  envCondition EnvCondition    @relation(fields: [envConditionId], references: [id], onDelete: Cascade)
-  modType      EnvModifierType @relation(fields: [modTypeId],      references: [id], onDelete: Restrict)
+  guild        GuildSettings @relation(fields: [guildId],        references: [guildId], onDelete: Cascade)
+  envCondition EnvCondition  @relation(fields: [envConditionId], references: [id],      onDelete: Cascade)
+  effectType   EffectType    @relation(fields: [effectTypeId],   references: [id],      onDelete: Restrict)
+  relationType RelationType  @relation(fields: [relationTypeId], references: [id],      onDelete: Restrict)
 
-  @@id([envConditionId, modTypeId])
+  @@id([guildId, envConditionId, effectTypeId])
+  @@index([guildId])
   @@index([envConditionId])
-  @@index([modTypeId])
+  @@index([effectTypeId])
+  @@index([relationTypeId])
 }
 
-// Stat modifier applied when an environmental condition is active.
+// Per-guild stat modifier applied when an environmental condition is active.
 // value is applied once per active stack — two sources of Cold each apply the modifier independently.
 model EnvCondition_StatModifier {
+  guildId        String @db.VarChar(50)
   envConditionId Int
   statId         Int
   value          Float  // flat additive modifier; applied once per active stack
 
-  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Cascade)
-  stat         Stat         @relation(fields: [statId],         references: [id], onDelete: Restrict)
+  guild        GuildSettings @relation(fields: [guildId],        references: [guildId], onDelete: Cascade)
+  envCondition EnvCondition  @relation(fields: [envConditionId], references: [id],      onDelete: Cascade)
+  stat         Stat          @relation(fields: [statId],         references: [id],      onDelete: Restrict)
 
-  @@id([envConditionId, statId])
+  @@id([guildId, envConditionId, statId])
+  @@index([guildId])
+  @@index([envConditionId])
   @@index([statId])
 }
 
-// Skill roll modifier applied when an environmental condition is active.
+// Per-guild proficiency roll modifier applied when an environmental condition is active.
 // value is applied once per active stack — two sources of Cold each apply the modifier independently.
 // hasDisadvantage triggers if at least one stack is active (not per stack).
 model EnvCondition_ProficiencyModifier {
-  envConditionId  Int
-  proficiencyDefId      Int
-  value           Float   @default(0.0)  // flat additive modifier to the skill roll; applied once per active stack
-  hasDisadvantage Boolean @default(false) // triggers if at least one stack is active (not per stack)
+  guildId          String @db.VarChar(50)
+  envConditionId   Int
+  proficiencyDefId Int
+  value            Float   @default(0.0)  // flat additive modifier to the skill roll; applied once per active stack
+  hasDisadvantage  Boolean @default(false) // triggers if at least one stack is active (not per stack)
 
-  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Cascade)
-  proficiency  ProficiencyDef     @relation(fields: [proficiencyDefId],     references: [id], onDelete: Cascade)
+  guild        GuildSettings  @relation(fields: [guildId],          references: [guildId], onDelete: Cascade)
+  envCondition EnvCondition   @relation(fields: [envConditionId],   references: [id],      onDelete: Cascade)
+  proficiency  ProficiencyDef @relation(fields: [proficiencyDefId], references: [id],      onDelete: Cascade)
 
-  @@id([envConditionId, proficiencyDefId])
+  @@id([guildId, envConditionId, proficiencyDefId])
+  @@index([guildId])
+  @@index([envConditionId])
   @@index([proficiencyDefId])
 }
 
@@ -629,7 +634,6 @@ model Biome {
   @@index([dropTableId])
 }
 
-// Inherent environmental conditions for a biome — the terrain's persistent baseline.
 // Inherent environmental conditions for a biome — always active regardless of weather or season.
 // e.g. Wetland biome always contributes a stack of Damp; River biome always contributes Damp.
 // A location with multiple biomes stacks each biome's conditions independently.

@@ -18,9 +18,9 @@ STATIC LOOKUP TABLES
 ──────────────────────────────────────────────
 Season                                  [ DONE ]
 ──────────────────────────────────────────────
-Season_EnvCondition contributes 1 stack of each linked condition (no stacks field — always 1).
+Each season carries a direct envConditionId FK (1:1). Contributes 1 stack of that condition always.
 
-  name    envConditions (Season_EnvCondition)
+  name    envConditionId (codeName)
   Spring  spring
   Summer  summer
   Autumn  autumn
@@ -236,15 +236,20 @@ EffectType                              [ DONE ]
 ──────────────────────────────────────────────
 Developer-seeded only. Boolean flags control which systems each value is valid for.
 Also used for Plot_Buff.effectTypeId — valid plot buff types are those with isPlant = true.
+isEnvModifier = true marks types valid for EnvCondition_Modifier (per-guild world effects; guilds define their own values, no global defaults).
 
-  name              isItem  isPlant  isSpecies  isAbility
-  ──────────        ──────  ───────  ─────────  ─────────
-  spawn_rate        true    true     true       false
-  spawn_weight      true    true     true       false
-  growth_rate       false   true     true       true
-  harvest_yeild     false   true     false      true
-  rot_rate          true    true     false      true
-  damage_resistance false   false    false      true
+  name              isItem  isPlant  isSpecies  isAbility  isEnvModifier
+  ──────────        ──────  ───────  ─────────  ─────────  ─────────────
+  spawn_rate        true    true     true       false      false
+  spawn_weight      true    true     true       false      false
+  growth_rate       false   true     true       true       false
+  harvest_yeild     false   true     false      true       false
+  rot_rate          true    true     false      true       false
+  damage_resistance false   false    false      true       false
+  cultivation       false   true     false      false      false
+  survival          false   true     false      false      false
+  filth             false   false    false      false      true
+  spoilage          false   false    false      false      true
 
 
 ──────────────────────────────────────────────
@@ -854,19 +859,6 @@ BehaviorRedirectTarget                  [ DONE ]
   random_enemy  A random member of the opposing side.
 
 
-──────────────────────────────────────────────
-EnvModifierType                         [ DONE ]
-──────────────────────────────────────────────
-Global world-effect multipliers. Only two types remain — all other effects
-(plant growth, foraging rates, encounter rates, illness progression) are now
-per-entity via PlantDef_EnvConditionEffect, Species_EnvConditionEffect, and
-ConditionDef_EnvRule.
-
-Values:
-  filth    daily filth gain multiplier
-  spoilage food spoilage rate multiplier
-
-Event weight boosting is handled per-condition via EnvCondition_EventDef rows, not here.
 
 
 ──────────────────────────────────────────────
@@ -1096,10 +1088,9 @@ Removed from original list as redundant:
 ──────────────────────────────────────────────
 EnvCondition                            [ DONE ]
 ──────────────────────────────────────────────
-Only two global modifier types remain: filth, spoilage.
-Values are signed deltas: 0.3 = +30% per stack, -0.3 = -30% per stack.
-Formula: effectiveMod = 1.0 + value × stackCount
-Conditions with no global modifiers are marked with —. Their effects on plants,
+EnvConditions are a global vocabulary — no guildId. codeName is the stable unique lookup key.
+EnvCondition_Modifier values (filth, spoilage) are per-guild and not seeded here — guilds define their own.
+Conditions with no inherent world modifiers are marked with —. Their effects on plants,
 species, and illnesses are expressed via per-entity tables (PlantDef_EnvConditionEffect,
 Species_EnvConditionEffect, ConditionDef_EnvRule) seeded separately.
 

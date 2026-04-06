@@ -63,11 +63,11 @@ World modifier formula (EnvCondition_Modifier):
   value = −0.3 → −30% per stack (2 stacks = −60%; floor enforced app-side)
 
 Stat modifiers (EnvCondition_StatModifier):
-  Applied as a flat additive modifier once per stack.
+  Per-guild. Applied as a flat additive modifier once per stack.
   e.g. Cold with STR modifier −1 and stackCount 2 → −2 STR total.
 
 Proficiency modifiers (EnvCondition_ProficiencyModifier):
-  value applied per stack (additive). hasDisadvantage triggers if at least
+  Per-guild. value applied per stack (additive). hasDisadvantage triggers if at least
   one stack is active — it does NOT stack (on or off).
 
 
@@ -123,7 +123,9 @@ All scaling formula: effectiveMod = 1.0 + value × stackCount
   Modifier convention: value is a signed delta where 0.0 = no effect.
   (e.g. −0.3 = −30% per stack; 0.3 = +30% per stack)
 
-EnvCondition_Modifier tracks these via `modTypeId FK → EnvModifierType`.
+EnvCondition_Modifier tracks these via `effectTypeId FK → EffectType` (where `EffectType.isEnvModifier = true`)
+and `relationTypeId FK → RelationType` (increase | decrease | block). Value is null for block relations.
+Each guild defines its own rows — no global defaults exist.
 
 ACTIVE TYPES (two global env modifiers):
 
@@ -148,11 +150,10 @@ Combat hazard rates are set directly on Location. None of these are global env m
 6. SCHEMA SUMMARY
 ─────────────────────────────────────────────
 
-  EnvCondition                     — named condition; global-default extensible
-  EnvModifierType                  — filth | spoilage (seed); defines valid modTypeId values
-  EnvCondition_Modifier            — global world modifiers per condition (filth and spoilage only)
-  EnvCondition_StatModifier        — flat stat modifier per stack
-  EnvCondition_ProficiencyModifier — proficiency roll modifier per stack
+  EnvCondition                     — named condition; global; codeName is the stable unique lookup key
+  EnvCondition_Modifier            — per-guild world modifiers; guildId + envConditionId + effectTypeId + relationTypeId (increase | decrease | block)
+  EnvCondition_StatModifier        — per-guild flat stat modifier per stack
+  EnvCondition_ProficiencyModifier — per-guild proficiency roll modifier per stack
   EnvCondition_EventDef            — event weight boost when condition is active
   Biome                            — terrain type; global-default extensible
   Biome_EnvCondition               — inherent conditions a biome always contributes
@@ -161,7 +162,7 @@ Combat hazard rates are set directly on Location. None of these are global env m
   Location_EnvCondition            — per-location condition overrides
   Location_Faction                 — ownership records
   LocationStatus                   — Owned | Disputed (seed)
-  Season_EnvCondition              — condition contributed by a season (1 stack)
+  Season                           — carries envConditionId FK → EnvCondition directly (1 stack, 1:1)
   WeatherState                     — a named weather state (guild-extensible); contributes env conditions
   WeatherState_EnvCondition        — condition contributed by a weather state (1 stack)
   WeatherPattern                   — ordered sequence of weather states; guild-extensible
@@ -184,17 +185,32 @@ condition. No row = neutral (no effect). Covers foraging, cultivation requiremen
 growth rate, and survival — including seasonal behaviour via the seasonal env conditions
 (spring/summer/autumn/winter).
 
+PlantType_EnvConditionEffect defines the same for a plant type — applies to all plants
+carrying that type unless overridden by a PlantDef_EnvConditionEffect row on the specific
+plant. Same field shape; checked as fallback when no per-plant row exists.
+
 Each row specifies:
   effectTypeId     Int? FK → EffectType   ("cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival")
   relationTypeId   Int  FK → RelationType ("requires" | "increase" | "decrease" | "block" | "kills")
-  value            Delta magnitude > 0.0; null when "requires" or "block"
+  value            Delta magnitude > 0.0; null when "requires", "block", or "kills"
+
+  effectTypeId is null when relationTypeId is "block" or "kills" — these target the
+  entity as a whole rather than a specific metric:
+    block  — condition prevents the entity from being grown/foraged entirely
+    kills  — condition has a per-tick chance to destroy the entity outright (value = probability 0.0–1.0)
+  For all other relationTypes, effectTypeId must be set.
+
+Plain-language reading: [env condition] [relationType] [effectType?] by [value?]
+  e.g. "Winter kills (no effectType) 0.05" — winter kills the plant at 5% per tick
+  e.g. "Damp requires cultivation"         — damp must be present for cultivation to proceed
+  e.g. "Rain increases growth_rate 0.2"    — rain boosts cultivated growth by 20% per stack
 
   cultivation / requires — hard planting prerequisite; condition must be present
                            for planting and growth to proceed (no value)
   spawn_rate   — wild foraging find chance (scales PlantDef_Biome.findChance)
   spawn_weight — quantity found per forage attempt
   growth_rate  — cultivated growth tick rate (farming only)
-  survival     — per-tick death probability; only valid with "kills" relationshipType.
+  survival     — per-tick death probability; only valid with "kills" relationTypeId.
                  value = probability (0.0–1.0) the crop is destroyed each tick while
                  this condition is active. Reduced by env_override upgrades targeting
                  this condition: effectiveKillChance = value × (1.0 − conditionOverride).
@@ -232,10 +248,24 @@ The same env condition can have opposite effects on different plants — fully p
 Species_EnvConditionEffect defines how a species' encounter rate and yield respond
 to an active env condition. No row = neutral (no effect).
 
+SpeciesType_EnvConditionEffect defines the same for a species type — applies to all
+species carrying that type unless overridden by a Species_EnvConditionEffect row on the
+specific species. Same field shape; checked as fallback when no per-species row exists.
+
 Each row specifies:
   effectTypeId     Int? FK → EffectType   ("spawn_rate" | "spawn_weight")
-  relationTypeId   Int  FK → RelationType ("increase" | "decrease" | "block")
-  value            Delta magnitude > 0.0; null when relationTypeId = "block"
+  relationTypeId   Int  FK → RelationType ("increase" | "decrease" | "block" | "kills")
+  value            Delta magnitude > 0.0; null when relationTypeId = "block" or "kills"
+
+  effectTypeId is null when relationTypeId is "block" or "kills" — these target the
+  species as a whole rather than a specific metric:
+    block  — species is excluded from the encounter pool entirely
+    kills  — species has a per-tick chance to die (ranching context); value = probability 0.0–1.0
+  For "increase" and "decrease", effectTypeId must be set.
+
+Plain-language reading: [env condition] [relationType] [effectType?] by [value?]
+  e.g. "Winter decreases spawn_rate 0.9" — winter nearly eliminates this species' encounters
+  e.g. "Flood blocks (no effectType)"    — species never appears during floods
 
   spawn_rate   — encounter rate (applied as multiplier to Species_Biome.spawnWeight
                  during candidate selection)
