@@ -4077,25 +4077,27 @@ model ActionType_DefaultItem {
   @@index([itemId])
 }
 
-// Discipline level gate on an action type.
+// Per-guild discipline level gate on an action type.
 // scope = "leader" → only the ActionInstance.leaderEntityId must meet the requirement.
 // scope = "all"    → every participant must meet the requirement.
 model ActionType_DisciplineRequirement {
-  actionTypeId    Int
-  disciplineId    Int
-  minLevel        Int
-  scope           String @default("all") @db.VarChar(10)  // "leader" | "all"
+  guildId      String @db.VarChar(50)
+  actionTypeId Int
+  disciplineId Int
+  minLevel     Int
+  scope        String @default("all") @db.VarChar(10)  // "leader" | "all"
 
   actionType  ActionType    @relation(fields: [actionTypeId], references: [id], onDelete: Cascade)
   discipline  DisciplineDef @relation(fields: [disciplineId], references: [id], onDelete: Restrict)
 
-  @@id([actionTypeId, disciplineId])
+  @@id([guildId, actionTypeId, disciplineId])
+  @@index([actionTypeId])
   @@index([disciplineId])
 }
 
 // Tracks how many times an entity has started each action type on a given calendar day.
 // Created on first use; incremented on each subsequent use that day.
-// Used to enforce ActionType.dailyLimit. Rows older than today can be pruned by the daily tick.
+// Used to enforce Guild_ActionConfig.dailyLimit. Rows older than today can be pruned by the daily tick.
 model Entity_ActionUsage {
   entityId     Int
   actionTypeId Int

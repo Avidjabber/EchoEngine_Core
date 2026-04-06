@@ -1,6 +1,6 @@
 ACTION SYSTEM — DESIGN REFERENCE
 ==================================
-Last updated: 2026-04-03
+Last updated: 2026-04-06
 
 This file is the authoritative reference for how actions (patrols, hunts, etc.)
 work in EchoPaw. Read this before touching action seeding, instance resolution,
@@ -15,7 +15,9 @@ Actions are activities that entities perform together — border patrols, herb
 gathering, hunting runs, training sessions, etc. They are the primary mechanism
 through which entities earn discipline XP and stat point XP.
 
-ActionType defines what an action is and how it behaves.
+ActionType defines what an action is and which system it invokes. Everything
+else — costs, durations, rewards, and discipline gates — is configured per guild.
+
 ActionInstance is a single in-progress or completed run of that action type.
 
 Actions are guild-extensible: guildId = "global" for seeded defaults;
@@ -26,23 +28,40 @@ guilds may define their own.
 2. ACTION TYPE DEFINITION
 ─────────────────────────────────────────────
 
+ActionType holds the universal definition of an action: what it is, what system
+it invokes, and which eligibility rules are enforced regardless of guild. It does
+NOT store costs, durations, or rewards — those are per-guild (see section 2b).
+
   Field                     │ Purpose
   ──────────────────────────┼────────────────────────────────────────────────
   name                      │ Internal key e.g. "border_patrol" (unique per guild)
   displayName               │ User-facing label
-  energyCost                │ Energy drained from each participant on start
-  minEntities / maxEntities │ Participant bounds; maxEntities null = unlimited
-  durationMinutes           │ Time until resolution; null = resolves on next tick
-  baseFactionReward         │ Faction rep granted per participant on completion (can be negative)
   systemTypeId              │ FK → ActionSystemType. null = pure reward action (auto-resolves,
                             │ no subsystem). Non-null = invokes a seeded bot subsystem on resolution.
-                            │ See ActionSystemType seed rows for the full list of valid values.
                             │ Only guildId = "global" actions may have a non-null systemTypeId.
   isInteractive             │ false = auto-resolves silently; true = step-by-step user interaction
   requiresCanMentor         │ At least one participant must have Rank.canMentor
-  allowApprenticesWithAdult │ Apprentices may join only if a canMentor cat is present
+  allowApprenticesWithAdult │ Apprentices may join only if a canMentor entity is present
   requiresCanLeadEvents     │ The initiating entity must have Rank.canLeadEvents
-  minAgeMoons               │ Minimum age to participate; null = no minimum
+  minAge                    │ Minimum age (in moons) to participate; null = no minimum
+
+
+─────────────────────────────────────────────
+2b. PER-GUILD ACTION CONFIGURATION
+─────────────────────────────────────────────
+
+Guild_ActionConfig holds the per-guild tuning for each action type. If no row
+exists for a guild + action pair, the action is unavailable in that guild until
+configured. baseFactionReward may be negative (e.g. a risky or taboo activity).
+
+  Field             │ Purpose
+  ──────────────────┼────────────────────────────────────────────────
+  energyCost        │ Energy drained from each participant on start
+  dailyLimit        │ null = energy-only limit; non-null = max starts per entity per day
+  minEntities       │ Minimum participants required
+  maxEntities       │ Maximum participants; null = unlimited
+  durationMinutes   │ Time until resolution; null = resolves immediately on next tick
+  baseFactionReward │ Faction rep granted per participant on completion (can be negative)
 
 
 ─────────────────────────────────────────────
@@ -51,7 +70,9 @@ guilds may define their own.
 
 Each ActionType has one or more ActionType_DisciplineReward rows specifying
 how much XP is earned in each discipline on completion and who receives it.
+These rows are per-guild — each guild configures its own reward amounts.
 
+  guildId         — the guild this reward row belongs to
   actionTypeId    — the action type
   disciplineId    — which DisciplineDef receives the XP
   xpAmount        — flat XP granted to qualifying recipients
@@ -61,6 +82,9 @@ how much XP is earned in each discipline on completion and who receives it.
     "participants_only" — all non-leader participants
     "winners_only"      — winning side of a combat-spawning action
     "losers_only"       — losing side of a combat-spawning action
+
+PK is (guildId, actionTypeId, disciplineId, recipientScope), allowing the same
+discipline to reward winners and losers at different amounts.
 
 The stat progression DisciplineDef row (isStatProgression = true) is referenced
 here exactly like any other discipline. Most actions will have a row for it.
@@ -107,25 +131,25 @@ Used for patrol leader tokens, shared tools, etc.
 
 ActionInstance tracks a single run of an ActionType:
 
-  factionId    — the owning faction
-  locationId   — where it takes place; null = at camp
-  leaderEntityId  — entity leading the instance
-  isActive     — false once completed or interrupted
-  startedAt    — when the instance began
-  completedAt  — set on resolution
+  factionId      — the owning faction
+  locationId     — where it takes place; null = at camp
+  leaderEntityId — entity leading the instance
+  isActive       — false once completed or interrupted
+  startedAt      — when the instance began
+  completedAt    — set on resolution
 
 ActionInstance_Entity records each participant and snapshots their rewards:
 
-  energySpent        — energy drained from this entity
-  factionRepEarned      — faction rep snapshot (may be negative)
-  disciplineXpEarned — per-discipline XP snapshots (ActionInstance_Entity_DisciplineXp)
+  energySpent      — energy drained from this entity
+  factionRepEarned — faction rep snapshot (may be negative)
+  disciplineXp     — relation to ActionInstance_Entity_DisciplineXp (one row per discipline rewarded)
 
 
 ─────────────────────────────────────────────
 5b. SYSTEM-BACKED ACTIONS AND XP
 ─────────────────────────────────────────────
 
-Actions with a non-null systemType invoke a bot subsystem at resolution. XP
+Actions with a non-null systemTypeId invoke a bot subsystem at resolution. XP
 flows differently depending on the system:
 
   systemType = "spar"
@@ -174,25 +198,25 @@ flows differently depending on the system:
     Daily tending action. Updates PlotCrop_TendRecord, increments PlotCrop.carePoints
     by 1. If the performing entity has a matching Ability_PlotBuff, writes a
     growth_rate Plot_Buff on the target plot (or refreshes its expiresAt).
-    tendCooldownHours = 24. tendCarePoints = 1.
+    cooldownHours = 24. progressPoints = 1.
 
   systemType = "farming_prune"
     Weekly tending action. Updates PlotCrop_TendRecord, increments PlotCrop.carePoints
     by 7. If the performing entity has a matching Ability_PlotBuff, writes a
     yield Plot_Buff on the target plot (or refreshes its expiresAt).
-    tendCooldownHours = 168. tendCarePoints = 7.
+    cooldownHours = 168. progressPoints = 7.
 
   systemType = "farming_fertilize"
     Weekly tending action. Updates PlotCrop_TendRecord, increments PlotCrop.carePoints
     by 7. If the performing entity has a matching Ability_PlotBuff, writes a
     decay_resistance Plot_Buff on the target plot (or refreshes its expiresAt).
-    tendCooldownHours = 168. tendCarePoints = 7.
+    cooldownHours = 168. progressPoints = 7.
 
   TENDING ACTIONS — ActionSystemType fields
-    tendCooldownHours  Int?  Hours before this action can be performed again on the
-                             same PlotCrop. Null for non-tending actions.
-    tendCarePoints     Int?  Points added to PlotCrop.carePoints on completion.
-                             Null for non-tending actions.
+    cooldownHours   Int?  Hours before this action can be performed again on the
+                          same PlotCrop. Null for non-tending actions.
+    progressPoints  Int?  Points added to PlotCrop.carePoints on completion.
+                          Null for non-tending actions.
 
   See farming-system.md section 7 for full farming action type reference.
 
@@ -205,27 +229,30 @@ ActionType_DisciplineRequirement gates an action type behind a minimum disciplin
 level. Guild-specific — each guild controls which of their action types are gated
 and at what threshold.
 
-  guildId          String   The guild that owns this requirement.
-  actionTypeId     Int      FK → ActionType
-  disciplineDefId  Int      FK → DisciplineDef
-  minLevel         Int      Minimum discipline level required.
-  scope            String   Who must meet the requirement:
-                              "leader" — only the leader entity must qualify.
-                              "all"    — every participant must qualify.
+  guildId      String   The guild that owns this requirement.
+  actionTypeId Int      FK → ActionType
+  disciplineId Int      FK → DisciplineDef
+  minLevel     Int      Minimum discipline level required.
+  scope        String   Who must meet the requirement:
+                          "leader" — only the leader entity must qualify.
+                          "all"    — every participant must qualify.
 
-No rows for a given action type = no gate; any entity may perform it.
+PK is (guildId, actionTypeId, disciplineId).
+
+No rows for a given guild + action type = no gate; any entity may perform it.
 Multiple rows on the same action type are all enforced (AND logic) — an entity
 could be required to meet both Farming level 3 AND Crafting level 2.
 
 EXAMPLE — Cross-breeding (farming guild gate):
+  guildId → the configuring guild
   actionTypeId → cross_breed
-  disciplineDefId → Farming
+  disciplineId → Farming
   minLevel → 5
   scope → "leader"   (solo action; only the performing entity is checked)
 
 EXAMPLE — Advanced Herb Gathering (all participants must qualify):
   actionTypeId → advanced_herb_gather
-  disciplineDefId → Farming
+  disciplineId → Farming
   minLevel → 3
   scope → "all"
 
@@ -245,7 +272,7 @@ EXAMPLE — Advanced Herb Gathering (all participants must qualify):
   Items       — ActionType_DefaultItem shadow-equips items for the duration.
                 Ability_GrantedAction can also unlock item actions during events.
 
-  Energy      — ActionType.energyCost drains EntityStats.currentEnergy on start.
+  Energy      — Guild_ActionConfig.energyCost drains EntityStats.currentEnergy on start.
                 Daily tick replenishes energy up to GuildSettings.defaultDailyEnergy.
 
 
@@ -254,11 +281,13 @@ EXAMPLE — Advanced Herb Gathering (all participants must qualify):
 ─────────────────────────────────────────────
 
   ActionSystemType              — seeded reference table; one row per bot subsystem
-  ActionType                    — definition; guild-extensible; systemTypeId FK → ActionSystemType
-  ActionType_DisciplineReward   — per-discipline XP rewards; PK is (actionTypeId, disciplineId, recipientScope)
+  ActionType                    — universal definition; guild-extensible; systemTypeId FK → ActionSystemType
+  Guild_ActionConfig            — per-guild costs and limits; PK is (guildId, actionTypeId)
+  ActionType_DisciplineReward   — per-guild XP rewards; PK is (guildId, actionTypeId, disciplineId, recipientScope)
                                   allowing the same discipline to reward winners and losers at different amounts
   ActionType_DefaultItem        — items shadow-equipped during the action
-  ActionType_DisciplineRequirement — guild-specific discipline level gates per action type
+  ActionType_DisciplineRequirement — per-guild discipline level gates; PK is (guildId, actionTypeId, disciplineId)
+  Entity_ActionUsage                 — daily usage counter per entity per action type; enforces Guild_ActionConfig.dailyLimit
   ActionInstance                     — a single in-progress or completed run
   ActionInstance_Entity              — per-participant record with reward snapshots
   ActionInstance_Entity_DisciplineXp — per-discipline XP snapshot per participant
