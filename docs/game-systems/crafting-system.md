@@ -358,13 +358,13 @@ any number of outputs — seeded items, ephemeral items, or a mix of both.
                     Assemble the display name: "{preName} {source.name} {postName}".
                     Either or both can be null (unchanged / omitted).
 
-  decayDaysMultiplier Float?
-                    Multiplied against the source item's decayDays.
+  rotCapMultiplier  Float?
+                    Multiplied against the source item's rotCap.
                     null = unchanged. 10.0 = lasts 10× longer after drying.
 
-  decayVariance     Float?
+  rotVariance       Float?
                     Overrides the source item's weightVariance field, which
-                    controls the spread of actual decay timing.
+                    controls the spread of daily rot rate.
                     null = inherit from source.
 
   effectivenessMultiplier Float?
@@ -416,11 +416,11 @@ recipe-specified modifications applied.
 
   PROPERTY COPY
     The app copies all scalar fields from the source Item:
-      averageWeight, weightVariance, decayDays, maxUses, fuelValue, etc.
+      averageWeight, weightVariance, rotCap, maxUses, fuelValue, etc.
     Then applies recipe modifiers in this order:
       outputMeasurementTypeId   replaces measurementTypeId if non-null.
-      decayDaysMultiplier       multiplied against copied decayDays; null = unchanged.
-      decayVariance             replaces copied weightVariance if non-null.
+      rotCapMultiplier          multiplied against copied rotCap; null = unchanged.
+      rotVariance               replaces copied weightVariance if non-null.
       effectivenessMultiplier   multiplied against all copied ItemEffect /
                                 ItemConditionEffect effectiveness values; null = unchanged.
       RecipeOutput_FoodOverride sparse patch of food profile fields; only
@@ -515,8 +515,8 @@ schema.
   "Does quality carry through processing?"            → RecipeOutput.craftBonusApplies
   "What item does this recipe output?"                → RecipeOutput.outputItemId (null = ephemeral)
   "What is the ephemeral item named?"                 → RecipeOutput.preName / postName + source Item.name
-  "Does processing change the item's decay timing?"  → RecipeOutput.decayDaysMultiplier
-  "Does processing change decay spread?"             → RecipeOutput.decayVariance
+  "Does processing change the item's rot rate?"      → RecipeOutput.rotCapMultiplier
+  "Does processing change rot spread?"              → RecipeOutput.rotVariance
   "Does processing change treatment potency?"        → RecipeOutput.effectivenessMultiplier
   "Does processing change nutritional values?"       → RecipeOutput_FoodOverride (sparse patch)
   "Does processing change how quantity is measured?" → RecipeOutput.outputMeasurementTypeId
@@ -527,10 +527,11 @@ schema.
   "Does a structure improve this specific recipe?"    → Recipe_CraftingRequirement (relationType = "improves")
   "What interactions does this structure support?"   → StructureDef_CraftingConfig_Interaction
   "Does this upgrade unlock a new interaction?"      → StructureDef_Upgrade_CraftingInteraction
+  "Is this item safe to delete normally?"            → yes; Item.isEphemeral only affects cleanup timing
 
 
 ─────────────────────────────────────────────
-8. CRAFTING STRUCTURES
+14. CRAFTING STRUCTURES
 ─────────────────────────────────────────────
 
 Crafting structures (StructureType = "crafting") provide a physical location
@@ -606,4 +607,3 @@ This allows guild-specific recipes to require structures, upgrades, disciplines,
 or specific skills independently of the interaction-level rules. Example: a
 guild's "Advanced Alloy" recipe always requires the blast furnace upgrade and
 Metalworking discipline level 5, regardless of broader smelt interaction rules.
-  "Is this item safe to delete normally?"            → yes; Item.isEphemeral only affects cleanup timing

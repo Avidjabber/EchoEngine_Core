@@ -19,8 +19,6 @@ model EchoDens {
   guildId   String
   channelId String
 
-  // Channel posting permissions — controls which bot message types can be posted here
-  // Multiple channels can share the same flags (e.g. two factions each with their own activity channel)
   allowWorldSim    Boolean @default(true)  // weather/env condition announcements
   allowConditions  Boolean @default(true)  // condition/medicine updates
   allowCombat      Boolean @default(true)  // combat messages
@@ -40,9 +38,6 @@ model EchoDens {
 model GuildSettings {
   id       Int    @id @default(autoincrement())
   guildId  String @unique
-  ownerId  String  // Discord user ID of the guild owner; checked against UserSettings.isPremium for cap increases
-
-  // Season: null = Default season
   seasonId Int?
   season   Season? @relation(fields: [seasonId], references: [id], onDelete: SetNull)
 
@@ -56,16 +51,9 @@ model GuildSettings {
   weatherCooldowns   Guild_WeatherPatternCooldown[]
   seasonDefaults     GuildSeason_DefaultWeather[]
 
-  // Hard caps (premium tiers may raise these in future)
-  maxFactions Int @default(10)
-  maxRanks  Int @default(100)
-
   defaultDailyEnergy Int @default(100)  // baseline energy for all users; premium override stored in UserSettings
-
   doubleAgeMaxThreshold Int @default(0)  // cats at or below this age (in moons) age up twice per daily tick; 0 = disabled
-
   maxCombatRounds Int @default(50)  // maximum rounds before a combat fight is forced to end in a draw
-
   defaultProficiencyBonus Int @default(2)  // flat bonus added to skill rolls when an entity is proficient in that skill
 
   // Feature flags — disable entire subsystems guild-wide; all default to true (fully enabled)
@@ -77,9 +65,6 @@ model GuildSettings {
   craftingEnabled    Boolean @default(true)  // items, storage, crafting recipes, ingredient processing, food/prey
   progressionEnabled Boolean @default(true)  // energy, aging, EXP, skill points, faction reputation
   socialEnabled      Boolean @default(true)  // faction standings, entity relationships, family trees
-
-  // One-time default data seed — null = never seeded; set by /data seed-defaults; blocks re-runs
-  defaultsSeededAt DateTime? @db.Timestamptz
 
   // Daily tick tracking — null = never ticked; updated by Worker after each daily processing run
   lastTickAt DateTime? @db.Timestamptz
@@ -109,6 +94,10 @@ model UserSettings {
   userId  String @id  // Discord user ID
 
   isPremium Boolean @default(false)
+  maxFactions   Int @default(10)
+  maxRanks      Int Default(30)
+  maxSpecies    Int @default(100) 
+  maxPlants     Int @default(100)
 
   // Premium feature toggles — only apply when isPremium = true
   premiumDoubleEnergy   Boolean @default(true)  // doubles daily energy cap from guild default
@@ -127,8 +116,6 @@ model UserSettings {
 // ============================================================
 
 // Seasons (static seed data — do not modify via application)
-// Options: Default, New-leaf, Green-leaf, Leaf-fall, Leaf-bare
-// null seasonId in GuildSettings = Default
 model Season {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -137,7 +124,6 @@ model Season {
   envConditions   Season_EnvCondition[]
   patternWeights  Season_WeatherPattern[]
   guildDefaults   GuildSeason_DefaultWeather[]
-  plantDefSeasons PlantDef_Season[]
 }
 
 // A discrete named weather state (global seed — guild-extensible).
@@ -167,13 +153,10 @@ model WeatherState {
 }
 
 // Named environmental conditions — discrete modifier labels applied by seasons, weather states, biomes, and locations.
-// e.g. Cold, Damp, Windy, Dry, Smoke. Intensity is determined by stack count:
-//   stackCount = (season contributes?) + (active weather state contributes?) + biome stacks + location stacks
-// Each active source adds 1. Modifiers and condition rules apply once per stack.
+
+
 model EnvCondition {
   id       Int    @id @default(autoincrement())
-  guildId  String @default("global") @db.VarChar(50)
-  codeName String @db.VarChar(200)  // snake_case slug; unique per guild
   name     String @db.VarChar(100)
 
   seasonEntries       Season_EnvCondition[]
@@ -184,19 +167,16 @@ model EnvCondition {
   proficiencyModifiers     EnvCondition_ProficiencyModifier[]
   worldModifiers     EnvCondition_Modifier[]
   eventWeights       EnvCondition_EventDef[]
-  conditionEnvRules     ConditionDef_EnvRule[]
-  plantDefRequiredEnvConditions PlantDef_RequiredEnvCondition[]
+  conditionEnvRules             ConditionDef_EnvRule[]
+  plantDefEffects               PlantDef_EnvConditionEffect[]
+  speciesEffects                Species_EnvConditionEffect[]
+  speciesTypeEffects            SpeciesType_EnvConditionEffect[]
   plotTypeEnvConditions         PlotType_EnvCondition[]
   structureUpgradeEffects       StructureDef_Upgrade_Effect[]
   passiveGeneratorConditions    StructureDef_FuelConfig_EnvCondition[]
-
-  @@unique([guildId, codeName])
-  @@index([guildId])
-  @@index([guildId, name])
 }
 
-// Environmental conditions active during a season (e.g. Leaf-bare → Cold, Dry)
-// Each active source contributes a stack of 1; totals are summed across season + weather + biomes + location.
+// Acts as a bridge to connect a season to it's specific environment condition
 model Season_EnvCondition {
   seasonId       Int
   envConditionId Int
@@ -244,13 +224,13 @@ model WeatherPattern {
 
 // An ordered step within a weather pattern.
 // weatherStateId null = use the current season's defaultWeatherStateId (calm/baseline day).
-// durationMinutes — how long this step lasts; Worker advances to the next step when elapsed.
+// durationHours — how long this step lasts in hours; Worker advances to the next step when elapsed.
 model WeatherPatternStep {
   id              Int  @id @default(autoincrement())
   patternId       Int
   stepOrder       Int
   weatherStateId  Int?
-  durationMinutes Int
+  durationHours Int
 
   pattern      WeatherPattern  @relation(fields: [patternId],      references: [id], onDelete: Cascade)
   weatherState WeatherState?   @relation(fields: [weatherStateId], references: [id], onDelete: Restrict)
@@ -318,20 +298,10 @@ model ItemInteraction {
   warningTriggers ItemWarning[]
 }
 
-// Location Status (global seed data — Owned, Disputed)
-// Shared = multiple Owned rows. Unclaimed = no Location_Faction rows.
-model LocationStatus {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
-
-  locationFactions Location_Faction[]
-}
-
 
 // Item Types (global seed data)
 // Classification tags for items — many-to-many via Item_Type.
 // Tags drive which systems query for an item and how it appears in UI filters.
-// Seeded: Weapon, Armor, Shield, Trait, Ability, Spell, Tool, Plant, Medicine, Fuel, Food, Ore, Ingot, Gem, Leather
 model ItemType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(100)
@@ -341,7 +311,6 @@ model ItemType {
   eventEffects         EventEffect[]
 }
 
-// Biological sex options (global seed data — Male, Female, Intersex, Other)
 model Sex {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -349,17 +318,12 @@ model Sex {
   entities Entity[]
 }
 
-// Gender identity options (global seed data — Female, Male, Any, Other)
 model Gender {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
   entities Entity[]
 }
-
-// High-level classification of what a condition is *for* — drives display and query filtering.
-// showInHealthPanel: shown on the entity health/conditions view with discovery and severity
-// isTrait:           shown in the separate traits view; always visible regardless of discoveryLevel
 
 // High-level classification of what a condition is *for* — drives display and query filtering.
 model ConditionContext {
@@ -391,35 +355,48 @@ model ConditionType {
 // Global seeded relation/effect type table. Developer-controlled — not user-editable.
 // Boolean flags indicate which systems each value is valid for, allowing the app to
 // filter valid options by context without hardcoding strings.
-//
-// Seeded values:
-//   requires     — isStructureSystem, isSkillSystem
-//   block        — isConditionSystem, isStructureSystem, isSkillSystem
-//   upgrades     — isStructureSystem, isSkillSystem
-//   treat        — isItemSystem
-//   worsen       — isConditionSystem, isItemSystem
-//   cure         — isItemSystem
-//   transform    — isItemSystem
-//   recover      — isConditionSystem
-//   spawn        — isConditionSystem
-//   spreads_as   — isConditionSystem
 model RelationType {
-  id                 Int     @id @default(autoincrement())
-  name               String  @unique @db.VarChar(50)
-  isConditionSystem  Boolean @default(false)
-  isStructureSystem  Boolean @default(false)
-  isSkillSystem      Boolean @default(false)
-  isItemSystem       Boolean @default(false)
-  isCraftingSystem   Boolean @default(false)
+  id                    Int     @id @default(autoincrement())
+  name                  String  @unique @db.VarChar(50)
+  isConditionSystem     Boolean @default(false)
+  isStructureSystem     Boolean @default(false)
+  isSkillSystem         Boolean @default(false)
+  isItemSystem          Boolean @default(false)
+  isCraftingSystem      Boolean @default(false)
+  isEnvConditionSystem  Boolean @default(false)
+  isOwnershipSystem     Boolean @default(false)
 
-  conditionLinks              ConditionDef_Link[]
-  itemEffects                 ItemEffect[]
-  itemConditionEffects        ItemConditionEffect[]
-  skillTreeRelations          SkillTreeNode_Relation[]
-  upgradeRelations            StructureDef_Upgrade_Relation[]
-  structureRelations          StructureDef_Relation[]
-  craftingInteractionRules    Guild_CraftingInteractionRule[]
-  recipeCraftingRequirements  Recipe_CraftingRequirement[]
+  conditionLinks                 ConditionDef_Link[]
+  itemEffects                    ItemEffect[]
+  skillTreeRelations             SkillTreeNode_Relation[]
+  upgradeRelations               StructureDef_Upgrade_Relation[]
+  structureRelations             StructureDef_Relation[]
+  craftingInteractionRules       Guild_CraftingInteractionRule[]
+  recipeCraftingRequirements     Recipe_CraftingRequirement[]
+  itemConditionEffects           ItemConditionEffect[]
+  itemTypeConditionEffects       ItemType_ConditionEffect[]
+  plantDefEnvConditionEffect     PlantDef_EnvConditionEffect[]
+  plantTypeEnvConditionEffect    PlantType_EnvConditionEffect[]
+  speciesEnvConditionEffect      Species_EnvConditionEffect[]
+  speciesTypeEnvConditionEffect  SpeciesType_EnvConditionEffect
+}
+
+model EffectType {
+  id              Int     @id @default(autoincrement())
+  name            String  @unique @db.Varchar(100)
+  isItem          Boolean @default(false)
+  isPlant         Boolean @default(false)
+  isSpecies       Boolean @default(false)
+  isAbility       Boolean @default(false)
+
+  itemConditionEffects            ItemConditionEffect[]
+  itemTypeConditionEffect         ItemType_ConditionEffect[]
+  plantDefEnvConditionEffect      PlantDef_EnvConditionEffect[]
+  plantTypeEnvConditionEffect     PlantType_EnvConditionEffect[]
+  speciesEnvConditionEffect       Species_EnvConditionEffect[]
+  speciesTypeEnvConditionEffect   SpeciesType_EnvConditionEffect[]
+
+  abilityActionTrigger            Ability_ActionTrigger[]
 }
 
 // Base stats (global seed — Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma)
@@ -455,25 +432,15 @@ model Symptom {
 // ============================================================
 
 // A reusable drop table owned by a species (loot on catch/kill) or a biome (gather yields).
-// Resolution: for each entry, roll d20 ≥ dropDC to drop; if success, quantity = avgQuantity × (1 ± quantityVariance).
-// For count-based items, the rolled quantity is rounded to the nearest integer by the app.
-// Seasonal/territory/weather multipliers are applied on top at the app layer.
-// Always guild-specific — there are no global drop tables.
 model DropTable {
   id          Int     @id @default(autoincrement())
   guildId     String  @db.VarChar(50)
-  codeName    String  @db.VarChar(200) // snake_case slug; unique per guild
-  name        String  @db.VarChar(200)
-  description String? @db.VarChar(500)
 
   entries             DropTable_Entry[]
   species             Species[]                  // species whose loot resolves from this table (catch/kill + NPC combat defeat)
   biomes              Biome[]                    // biomes whose gather yields resolve from this table
   combatParticipants  ActiveCombat_Participant[]  // snapshotted per-participant at combat spawn
   plantDefHarvests    PlantDef[]                 @relation("PlantDefHarvestDrop")
-  plantDefUproots     PlantDef[]                 @relation("PlantDefUprootDrop")
-
-  @@unique([guildId, codeName])
   @@index([guildId])
 }
 
@@ -481,13 +448,15 @@ model DropTable {
 model DropTable_Entry {
   id          Int   @id @default(autoincrement())
   dropTableId Int
-  itemId      Int
 
-  dropDC           Int   @default(1)     // minimum d20 roll needed to drop this item; 1 = always drops, 20 = only on a natural 20
-  avgQuantity      Float @default(1.0)  // average quantity dropped (in item's unit)
-  quantityVariance Float @default(0.0)  // ± fraction applied to avgQuantity; 0.2 = rolls between [0.8×, 1.2×] of avg
-  weightMultiplier Float @default(1.0)  // biome-specific weight modifier applied to Item.averageWeight at StoredItem creation
-                                        // stacks multiplicatively with active EnvCondition_Modifier prey_weight values
+  itemId           Int
+  dropChance       Int   @default(100)     // 100 = always drops, 0 = never drops. 
+  averageQuantity  Int?                // average quantity dropped (in item's unit), overwrites the item count
+  quantityVariance Float @default(0.3)   // ± fraction applied to averageQuantity;
+  averageWeight    Float?                // average weight dropped (in item units), overwrites the item weight
+  weightVariance   Float (@default(0.3)) // ± fraction applied to averageWeight;
+  averageVolume    Float?                 // average volume dropped (in item units), overwrites the item volume
+  volumeVariance   Float (@default(0.3))// ± fraction applied to averageVolume;
 
   dropTable DropTable @relation(fields: [dropTableId], references: [id], onDelete: Cascade)
   item      Item      @relation(fields: [itemId],      references: [id], onDelete: Restrict)
@@ -501,7 +470,6 @@ model DropTable_Entry {
 // ENTITIES
 // ============================================================
 
-// Entity Status (static seed data — active, hiatus)
 model EntityStatus {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -509,11 +477,6 @@ model EntityStatus {
   entities Entity[]
 }
 
-// Entity Type (static seed data — character, side_character, npc)
-// canModifyStats:        true = entity can spend stat/skill points after creation
-// canParticipateCombat:  true = entity can be added to combat encounters
-// canParticipateEvents:  true = entity can be assigned to event chains
-// adminOnly:             true = only users with ManageGuild permission can create this type
 model EntityType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -526,16 +489,15 @@ model EntityType {
   entities Entity[]
 }
 
-// Species Type (static seed data — Playable, Prey, Predator, Pet, Livestock)
 // A species can belong to multiple types; types connect to different gameplay systems.
 model SpeciesType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
   species Species_SpeciesType[]
+  speciesTypeEnvConditionEffect SpeciesType_EnvConditionEffect[]
 }
 
-// Fuel Type (static seed data — Burnable, Electric, Steam, Alchemical)
 // Used on both sides of the power system:
 //   Sources:   declare input types (what items they accept) and output types (what power they produce).
 //   Items:     carry a fuelTypeId matched against a source's input types on deposit.
@@ -633,8 +595,9 @@ model Species {
   combatBehavior      SpeciesCombatBehavior?
   defaultLoadout      SpeciesDefaultLoadout[]
   encounterDefs       CombatEncounterDef[]
-  biomes              Species_Biome[]
-  defaultAbilities    Species_DefaultAbility[]
+  biomes                Species_Biome[]
+  envConditionEffects   Species_EnvConditionEffect[]
+  defaultAbilities      Species_DefaultAbility[]
   equipmentLoadout    Species_EquipmentLoadout[]
   speciesTypes        Species_SpeciesType[]
   summonedByProfiles  ItemEquipmentProfile[]     @relation("ProfileSummonSpecies")
@@ -669,28 +632,53 @@ model Species_SpeciesType {
   @@index([speciesTypeId])
 }
 
-// Biomes a prey or predator species can inhabit — pure presence join, no spawn weight needed.
-//
-// Tracking (encounter phase):
-//   Entity rolls d20 + Tracking skill (+ any active EnvCondition_ProficiencyModifier bonuses for Tracking).
-//   All species present in the location's biomes whose passive stealth <= effective roll are candidates.
-//   Passive stealth is derived from the species' base stats at runtime — no per-biome override stored here.
-//   Env conditions (plentiful prey, season bonuses, etc.) apply flat Tracking bonuses via
-//   EnvCondition_ProficiencyModifier, which raises the effective roll and opens up higher-stealth candidates.
-//   One candidate is selected at random (quick hunt) or presented as choices (extended hunt flow).
-//
-// Catch (pursuit phase):
-//   Entity rolls Stealth vs prey's passive perception: 10 + floor((prey.baseWisdom - 10) / 2)
+// Biomes a prey or predator species can inhabit — pure presence join
 model Species_Biome {
   speciesId   Int
   biomeId     Int
-  spawnWeight Float @default(1.0) // relative frequency this species appears in this biome; higher = more common
+  spawnRate   Float @default(100)
 
   species Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
   biome   Biome   @relation(fields: [biomeId],   references: [id], onDelete: Restrict)
 
   @@id([speciesId, biomeId])
   @@index([biomeId])
+}
+
+model SpeciesType_EnvConditionEffect {
+  speciesTypeId    Int
+  envConditionId   Int
+  relationTypeId   Int
+  effectTypeId     Int? 
+  value            Float?
+
+  speciesType  SpeciesType  @relation(fields: [speciesTypeId], references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+  relationType RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
+  effectType   EffectType   @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([speciesId, envConditionId, effectTypeId])
+  @@index([speciesId])
+  @@index([envConditionId])
+}
+
+// Per-species response to an active env condition during encounter resolution. Overrides SpeciesType_EnvConditionEffect
+// No row = neutral (no effect). One species can have multiple rows for the same
+model Species_EnvConditionEffect {
+  speciesId        Int
+  envConditionId   Int
+  relationTypeId   Int
+  effectTypeId     Int? 
+  value            Float?
+
+  species      Species      @relation(fields: [speciesId],      references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+  relationType RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
+  effectType   EffectType    @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([speciesTypeId, envConditionId, effectTypeId])
+  @@index([speciesTypeId])
+  @@index([envConditionId])
 }
 
 // Named body part for a specific species — used to record injury location on EntityCondition
@@ -1156,41 +1144,32 @@ model Ability_ProficiencyModifier {
   @@index([proficiencyDefId])
 }
 
+model AbilityTargetType {
+  id    Int   @id @default(autoincrement())
+  name  String 
+
+  abilityMultiplierEffect Ability_MultiplierEffect[]
+}
+
 // Rate and yield multipliers, optionally gated by biome or weather.
-// targetType values:
-//   discipline_xp        — XP gain for a discipline         (targetId = disciplineId)
-//   drop_herb            — herb gather rate / quantity
-//   drop_prey            — prey hunt yield
-//   drop_forage          — general forage drop rate / quantity
-//   crafting_yield       — crafted item output quantity
-//   crafting_quality     — crafted item quality tier
-//   recovery_rate        — passive condition progression improvement per day (targetId = conditionTypeId?)
-//   energy_cost          — energy cost for an action type    (targetId = actionTypeId)
-//   treatment_given      — effectiveness when treating another entity
-//   treatment_received   — effectiveness of treatment received
-//   construction_speed   — construction progress per action  (targetId = structureTypeId?)
-//   faction_rep_gain     — rep earned from rep-granting actions (targetId = factionId?)
-//   scouting_range       — patrol and territory detection radius
-//   healing_received     — HP restored from all healing sources (actions, items, abilities)
-//   healing_given        — HP restored when healing other entities
 model Ability_MultiplierEffect {
-  id           Int    @id @default(autoincrement())
-  abilityDefId Int
-  targetType   String @db.VarChar(50)
-  targetId     Int?   // e.g. disciplineId for discipline_xp; null = applies to all of that type
-  multiplier   Float  // 1.2 = +20%, 0.8 = −20%
+  id                Int    @id @default(autoincrement())
+  abilityDefId      Int
+  targetTypeId      Int
+  targetId          Int?   // e.g. disciplineId for discipline_xp; null = applies to all of that type
+  multiplier        Float?  // 1.2 = +20%, 0.8 = −20%
+  flatRate          Int? 
+  valueThresholdMin Float?
+  valueThresholdMax Float?
 
   biomeId        Int?
   weatherStateId Int?
 
-  hpThresholdMin        Float?
-  hpThresholdMax        Float?
-  nutritionThresholdMax Float?
-  hydrationThresholdMax Float?
-
   abilityDef   AbilityDef    @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
   biome        Biome?        @relation(fields: [biomeId],        references: [id], onDelete: Restrict)
   weatherState WeatherState? @relation(fields: [weatherStateId], references: [id], onDelete: Restrict)
+  abilityTargetType AbilityTargetType @relation(fields: [targetTypeId], references: [id], onDelete: Restrict)
+
 
   @@index([abilityDefId])
 }
@@ -1273,10 +1252,8 @@ model Ability_DamageModifier {
   modifier     Float   @default(1.0)
   isImmune     Boolean @default(false)
 
-  hpThresholdMin        Float?
-  hpThresholdMax        Float?
-  nutritionThresholdMax Float?
-  hydrationThresholdMax Float?
+  valueThresholdMin        Float?
+  valueThresholdMax        Float?
 
   abilityDef AbilityDef @relation(fields: [abilityDefId], references: [id], onDelete: Cascade)
   damageType DamageType @relation(fields: [damageTypeId], references: [id], onDelete: Restrict)
@@ -1285,28 +1262,57 @@ model Ability_DamageModifier {
   @@index([damageTypeId])
 }
 
+model AbilityEffectType {
+  id    Int @id @default(autoincrement())
+  name  String @unique
+
+  abilityActionTrigger Ability_ActionTrigger[]
+}
+
+model AbilityThresholdType {
+  id    Int @id @default(autoincrement())
+  name  String @unique
+
+  abilityThresholdTriggers Ability_ThresholdTrigger[]
+}
+
+model TargetScope {
+  id    Int @id @default(autoincrement())
+  name  String @unique
+
+  abilityActionTrigger Ability_ActionTrigger[]
+}
+
+model TargetTrigger {
+  id    Int @id @default(autoincrement())
+  name  String @unique
+
+  abilityActionTrigger Ability_ActionTrigger[]
+}
+
+model StackBehavior {
+  id    Int @id @default(autoincrement())
+  name  String @unique
+
+  abilityThresholdTriggers  Ability_ThresholdTrigger[]
+  abilityActionTrigger      Ability_ActionTrigger[]
+}
+
 // Fires an effect when the entity performs a specific action system type.
 // Unlike passive ability effects, these are event-driven — activate on action resolution.
-// One ability can have multiple rows for different actions or different effects on the same action.
-//
-// effectType = "plot_buff":     buffEffectType / effectValue / durationHours set
-// effectType = "condition_grant": conditionDefId set
-// effectType = "energy_restore":  energyAmount set
-// effectType = "double_output":   no extra fields; duplicates full recipe output; crafting actions only
-// effectType = "xp_grant":        disciplineDefId / xpAmount set; triggerChance applies per action
 model Ability_ActionTrigger {
   id           Int    @id @default(autoincrement())
   abilityDefId Int
 
-  triggerSystemType String  @db.VarChar(50)  // FK → ActionSystemType
-  targetScope       String  @db.VarChar(50)  // "self" | "action_target" | "action_participants" | "area"
-  triggerOn         String  @db.VarChar(20)  // "completion" | "success" | "failure"
-  triggerChance     Float   @default(1.0)    // 0.0–1.0 probability the trigger fires
-  effectType        String  @db.VarChar(50)  // "plot_buff" | "condition_grant" | "energy_restore" | "double_output" | "xp_grant"
-  stackBehavior     String  @db.VarChar(20)  @default("refresh")  // "refresh" | "stack" | "ignore"
+  triggerSystemType       String  @db.VarChar(50)  // FK → ActionSystemType
+  targetScopeId           Int
+  triggerOnId             
+  triggerChance           Float   @default(1.0)    // 0.0–1.0 probability the trigger fires
+  abilityEffectTypeId     Int
+  stackBehaviorId         Int
 
   // effectType = "plot_buff"
-  buffEffectType String? @db.VarChar(50)  // growth_rate | yield | decay_resistance
+  effectTypeId   Int
   effectValue    Float?
   durationHours  Int?
 
@@ -1320,10 +1326,14 @@ model Ability_ActionTrigger {
   disciplineDefId Int?
   xpAmount        Int?
 
-  abilityDef           AbilityDef       @relation(fields: [abilityDefId],        references: [id], onDelete: Cascade)
-  triggerSystemTypeRel ActionSystemType @relation(fields: [triggerSystemType],    references: [id], onDelete: Restrict)
-  conditionDef         ConditionDef?    @relation(fields: [conditionDefId],       references: [id], onDelete: Restrict)
-  disciplineDef        DisciplineDef?   @relation(fields: [disciplineDefId],      references: [id], onDelete: Restrict)
+  abilityDef           AbilityDef       @relation(fields: [abilityDefId], references: [id], onDelete: Cascade)
+  triggerSystemTypeRel ActionSystemType @relation(fields: [triggerSystemType], references: [id], onDelete: Restrict)
+  conditionDef         ConditionDef?    @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
+  disciplineDef        DisciplineDef?   @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
+  abilityEffectType    AbilityEffectType @relation(fields: [abilityEffectTypeId], references: [id], onDelete: Restrict)
+  targetScope    TargetScope @relation(fields: [targetScopeId], references: [id], onDelete: Restrict)
+  targetTrigger    TargetTrigger @relation(fields: [triggerOnId], references: [id], onDelete: Restrict)
+  stackBehavior StackBehavior @relation(fields: [stackBehaviorId], references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
   @@index([triggerSystemType])
@@ -1332,33 +1342,26 @@ model Ability_ActionTrigger {
 // Grants a condition when a tracked entity value crosses a defined threshold.
 // Checked after any event that modifies the relevant value (damage, healing, eating, drinking).
 // Fires only when the threshold is newly crossed and the condition is not already active.
-// thresholdType: "hp" | "nutrition" | "hydration"  (all as fraction of max, 0.0–1.0)
-// direction:     "below" (default) | "above"
-// stackBehavior: "refresh" | "stack" | "ignore"
 model Ability_ThresholdTrigger {
   id           Int    @id @default(autoincrement())
   abilityDefId Int
 
-  thresholdType  String @db.VarChar(20)   // "hp" | "nutrition" | "hydration"
+  thresholdTypeId Int
   thresholdValue Float                    // 0.0–1.0 fraction of max
-  direction      String @db.VarChar(10)  @default("below")  // "below" | "above"
+  thresholdBelow Boolean @default(true)
+  thresholdAbove Boolean @default(false)
   conditionDefId Int
-  stackBehavior  String @db.VarChar(20)  @default("ignore")  // "refresh" | "stack" | "ignore"
+  stackBehaviorId Int
 
   abilityDef   AbilityDef   @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
+  abilitythresholdTypes AbilityThresholdType @relation(fields: [treshholdTypeId], references: [id], OnDelete: Restrict)
   conditionDef ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
+  stackBehavior StackBehavior @relation(fields: [stackBehaviorId], references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
 }
 
 // Always-on passive effect that activates based on the entity's housing assignment. Evaluated once per day per target.
-// presenceScope:
-//   "housing_structure"  — the structure the entity is housed in
-//   "housing_plots"      — each active plot in the housing structure
-//   "colocated_entities" — each entity sharing the same housing structure
-//   "colocated_patients" — each entity with an active condition in the same housing structure
-//   "camp_entities"      — each entity in the same camp
-//   "camp_structures"    — each filth-participating structure in the camp
 // triggerChance: per-target daily roll (1.0 = guaranteed; 0.5 = 50% per target)
 // effectType:
 //   "condition_grant" — applies a ConditionDef to target entity (scopes: colocated_entities, colocated_patients, camp_entities)
@@ -1370,28 +1373,33 @@ model Ability_PresenceEffect {
   id           Int    @id @default(autoincrement())
   abilityDefId Int
 
-  presenceScope String  @db.VarChar(50)   // see comment above
+  presenceScopeId Int  
   triggerChance Float   @default(1.0)     // 0.0–1.0 per-target daily roll
-  effectType    String  @db.VarChar(50)   // "condition_grant" | "multiplier" | "structure_buff" | "plot_buff"
-  stackBehavior String  @db.VarChar(20)  @default("refresh")  // "refresh" | "stack" | "ignore"
+  abilityEffectTypeId     Int
+  stackBehaviorId         Int
 
   // effectType = "condition_grant"
   conditionDefId Int?
 
   // effectType = "multiplier"
-  multiplierTarget String? @db.VarChar(50)  // targetType from Ability_MultiplierEffect vocabulary
+  multiplierTargetid Int
   multiplierValue  Float?
   multiplierId     Int?                      // narrows target (e.g. disciplineId); null = all
 
-  // effectType = "structure_buff" | "plot_buff"
-  buffEffectType String? @db.VarChar(50)  // growth_rate | rot_modifier | filth_reduction | damage_resistance | etc.
-  effectValue    Float?
+  abilityEffectTypeId    Int
+  effectValue            Float?
 
   // effectType = "plot_buff" only
   durationHours Int?
 
   abilityDef   AbilityDef   @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
+  targetScope TargetScope   @relation(fields: [presenceScopeId], references: [id], onDelete: Restrict)
+  abilityEffectType AbilityEffectType @relation(fields: [abilityEffectTypeId], references: [id], onDelete: Restrict)
+  stackBehavior StackBehavior @relation(fields: [stackBehaviorId], references: [id], onDelete: Restrict)
   conditionDef ConditionDef? @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
+  multiplierTargetId Ability_MultiplierEffect @relation(fields: [multiplierTargetId], references: [id], onDelete: Restrict)
+  disciplineDef   DisciplineDef  @relation(fields: [multiplierId], references: [id], onDelete: Restrict)
+  abilityEffectType AbilityEffectType @relation(fields: [abilityEffectTypeId], references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
 }
@@ -1564,18 +1572,24 @@ model ConditionDef_DamageModifier {
   @@index([damageTypeId])
 }
 
-// How a condition's progression is modified when an environmental condition is active.
-// e.g. "asthma" worsens faster when "Smoke" or "Cold" is active.
-// difficultyMod is added once per active stack of the env condition — the more sources applying
-// the condition (season + weather + biomes + location), the larger the total DC shift.
+// How a condition's progression is affected when an environmental condition is active.
+// relationshipType: "worsen" | "improve"
+//   worsen — env condition makes this illness harder to recover from (e.g. asthma + Smoke)
+//   improve — env condition aids recovery (e.g. a chest wound + Warm, Dry)
+// value: Float > 0.0, <= 2.0 (enforced app-side). Applied as a multiplier per active stack
+//   using the additive delta formula: effectiveMod = 1.0 + (value − 1.0) × stackCount
+//   For "worsen", this multiplier increases the daily roll DC (or worsening rate).
+//   For "improve", this multiplier decreases it (or accelerates recovery).
+//   A value of 1.0 has no effect; 2.0 is the maximum — a full doubling per stack.
 model ConditionDef_EnvRule {
-  conditionDefId Int
-  envConditionId Int
-
-  difficultyMod Int  // added to dailyRollDC per active stack; positive = harder to recover (DC goes up)
+  conditionDefId   Int
+  envConditionId   Int
+  relationTypeId   Int  
+  value            Float                    // > 0.0 and <= 2.0; enforced app-side
 
   condition    ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
   envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Cascade)
+  relationType RelationType  @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
 
   @@id([conditionDefId, envConditionId])
   @@index([envConditionId])
@@ -1695,12 +1709,12 @@ model ConditionDef_Link {
   id                Int   @id @default(autoincrement())
   parentConditionId Int
   childConditionId  Int
-  linkTypeId        Int
+  relationTypeId    Int
   weight            Float @default(1.0)
 
   parentCondition ConditionDef     @relation("ConditionLinkParent", fields: [parentConditionId], references: [id], onDelete: Cascade)
   childCondition  ConditionDef     @relation("ConditionLinkChild",  fields: [childConditionId],  references: [id], onDelete: Restrict)
-  linkType        RelationType      @relation(                      fields: [linkTypeId],         references: [id], onDelete: Restrict)
+  relationTypeId  RelationType      @relation(                      fields: [relationTypeId],    references: [id], onDelete: Restrict)
 
   @@unique([parentConditionId, childConditionId, linkTypeId])
   @@index([parentConditionId, linkTypeId])
@@ -1869,7 +1883,7 @@ model EntityRelationship {
 }
 
 // ============================================================
-// GROUPS
+// Factions
 // ============================================================
 
 // Seed table: "neutral" | "allied" | "hostile" | "truce" | "unknown"
@@ -1975,12 +1989,13 @@ model Camp {
 // Deleting the owner row does not cascade-delete the camp — app layer must handle ownership transfer
 // or camp archival before removing the owning faction's row.
 model Camp_Faction {
-  campId    Int
-  factionId Int
-  role      String @db.VarChar(20) // "owner" | "shared"
+  campId              Int
+  factionId           Int
+  relationTypeId  Int
 
   camp    Camp    @relation(fields: [campId],    references: [id], onDelete: Cascade)
   faction Faction @relation(fields: [factionId], references: [id], onDelete: Cascade)
+  relationType RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
 
   @@id([campId, factionId])
   @@index([factionId])
@@ -2001,7 +2016,7 @@ model Camp_StructureLimit {
 }
 
 // Seeded engine-level structure categories. Each type maps to a specific engine system.
-// Seeded: storage | farming | housing | medical | compost | crafting
+// Seeded: storage | farming | housing | medical | compost | crafting | power
 // Guilds reference these when defining their own StructureDefs — they cannot create new types.
 model StructureType {
   id   Int    @id @default(autoincrement())
@@ -2027,7 +2042,7 @@ model UpgradeEffectType {
   isMedical  Boolean @default(false)
   isCrafting Boolean @default(false)
   isCompost  Boolean @default(false)
-  isFuel     Boolean @default(false)
+  isPower    Boolean @default(false)  // valid for power-type structures (renamed from isFuel for consistency with StructureType name)
 
   requiresEnvTarget Boolean @default(false)
 
@@ -2196,7 +2211,7 @@ model StructureDef_FarmingConfig {
   structureDefId     Int   @id
   plotTypeId         Int
   basePlotCount      Int
-  defaultSoilQuality Float @default(1.0)
+  defaultSoilQuality Float @default(0.0)  // starting soilQuality delta for new plots; 0.0 = neutral
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
   plotType     PlotType     @relation(fields: [plotTypeId],     references: [id], onDelete: Restrict)
@@ -2245,7 +2260,7 @@ model StructureDef_Upgrade_CraftingInteraction {
 
 // Base config for compost-type StructureDefs.
 // Compost structures must also have the storage type — the output storage is where converted
-// items land. Items eligible for composting are those with a non-null decayDays on Item.
+// items land. Items eligible for composting are those with a non-null rotCap on Item.
 // On deposit, the item is consumed and a Structure_CompostDeposit row is created.
 //
 // conversionDays:  days before a deposit converts to output. Upgrades reduce this.
@@ -2274,7 +2289,10 @@ model StructureDef_CompostConfig {
 //                            conditions. Generation rate is defined per condition in
 //                            StructureDef_FuelConfig_EnvCondition. No item deposits; fuelTypeId unused.
 //
-// scope:        "structure" — only satisfies explicitly linked targets via Structure_FuelTarget.
+// scope:        "structure" — satisfies only the structure this power source is built into.
+//                             Requires the StructureDef to be a multi-type def that includes
+//                             the power type alongside the powered type(s). The power source
+//                             powers that structure and nothing else.
 //               "camp"      — satisfies all isPowered structures/upgrades in the same camp.
 //               "location"  — satisfies all isPowered structures/upgrades across all camps in
 //                             the same location. Useful for large installations (e.g. a reactor)
@@ -2298,13 +2316,14 @@ model StructureDef_CompostConfig {
 // ties broken by Structure.id. Structure-scope sources drain independently.
 model StructureDef_FuelConfig {
   structureDefId        Int    @id
-  generatorType         String @db.VarChar(20) // "active" | "passive"
-  scope                 String @db.VarChar(20) // "structure" | "camp" | "location" | "faction"
+  isActive              Boolean @default(false)
+  scopeId                 Int
   fuelCapacity          Float  @default(100)   // max fuel units the bank can hold; upgradeable via fuel_capacity effect
   baseGenerationPerHour Float?                 // passive sources only — base fuel units generated per hour before env condition bonuses;
                                                // null on active sources (gain only from item deposits)
 
   structureDef   StructureDef                               @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  targetScope TargetScope @relation(fields: [scopeId], references: [id], onDelete: Restrict);
   inputFuelTypes StructureDef_FuelConfig_InputFuelType[]
   outputFuelTypes StructureDef_FuelConfig_OutputFuelType[]
   envConditions  StructureDef_FuelConfig_EnvCondition[]
@@ -2364,31 +2383,17 @@ model Structure_CompostDeposit {
   id          Int      @id @default(autoincrement())
   structureId Int
   itemId      Int                      // which item was deposited — needed to resolve Item_CompostOutput
-  measurement String   @db.VarChar(10) // "weight" | "volume" — mirrors the item's measurementType
+  measurement Int   
   amount      Float
   depositedAt DateTime @default(now()) @db.Timestamptz
   convertsAt  DateTime @db.Timestamptz
 
   structure Structure @relation(fields: [structureId], references: [id], onDelete: Cascade)
   item      Item      @relation(fields: [itemId],      references: [id], onDelete: Restrict)
+  measurement MeasurementType @relation(fields: [measurement], references: [id], onDelete: Restrict);
 
   @@index([structureId])
   @@index([convertsAt])
-}
-
-// Links a fuel structure instance to the structure(s) it heats or cools.
-// One fuel source may serve multiple targets; one target may have multiple fuel sources
-// (effects stack at the app layer).
-// Created at guild config time (or by the player who installs the fuel structure).
-model Structure_FuelTarget {
-  fuelStructureId   Int
-  targetStructureId Int
-
-  fuelStructure   Structure @relation("FuelSource", fields: [fuelStructureId],   references: [id], onDelete: Cascade)
-  targetStructure Structure @relation("FuelTarget", fields: [targetStructureId], references: [id], onDelete: Cascade)
-
-  @@id([fuelStructureId, targetStructureId])
-  @@unique([targetStructureId]) // a structure may have at most one dedicated power source
 }
 
 // Fuel types a powered StructureDef will accept from power sources.
@@ -2502,8 +2507,6 @@ model StructureDef_Upgrade_BuildCost {
 }
 
 // A single built (or in-progress) installation within a camp.
-// status: active | under_construction | destroyed
-// name: optional custom label for this specific structure instance.
 // status: active | under_construction | broken | destroyed
 // broken — durability reached 0; storage protections suspended, farm plots locked.
 //          Counts against Camp_StructureLimit until cleared or rebuilt.
@@ -2512,17 +2515,18 @@ model Structure {
   id                 Int     @id @default(autoincrement())
   campId             Int
   structureDefId     Int
-  status             String  @db.VarChar(50)
+  statusId           Int
   currentDurability  Int
   filthLevel         Int     @default(0)
   name               String? @db.VarChar(200)
   currentFuel        Float?               // null = not a fuel structure; 0–fuelCapacity when fuel type
   isFuelActive       Boolean @default(false) // power SOURCE toggle — worker only drains/generates when true
   isPoweredOn        Boolean @default(false) // power CONSUMER toggle — when false, powered functionality disabled and no fuel drawn
-  powerSortOrder     Int?                 // null = not a camp-scope power source; lower = drained first by worker
+  powerSortOrder     Int?                 // camp-scope sources only; lower = drained first by worker. null = not a camp-scope source
 
   camp         Camp         @relation(fields: [campId],         references: [id], onDelete: Cascade)
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Restrict)
+  status       Status       @relation(fields: [statusId], references: [id], onDelete: Restrict)
 
   appliedUpgrades  Structure_AppliedUpgrade[]
   structureStorage Structure_Storage?
@@ -2530,8 +2534,6 @@ model Structure {
   plots            Plot[]
   residents        Entity_Housing[]
   compostDeposits  Structure_CompostDeposit[]
-  fuelTargets      Structure_FuelTarget[]     @relation("FuelSource")
-  fuelSources      Structure_FuelTarget[]     @relation("FuelTarget")
 
   @@index([campId])
   @@index([structureDefId])
@@ -2602,19 +2604,11 @@ model Construction_ItemRequirement {
 }
 
 // Seed table for world-effect modifier categories used by EnvCondition_Modifier.
-// Seeded values: filth, prey_weight, herb_chance, herb_amount,
-//               gather_chance, gather_amount, spoilage, predator, sickness, hazard_chance
-// All scaling formula: effectiveMod = 1.0 + (value − 1.0) × stackCount
-//   filth          — daily filth gain multiplier (e.g. Windy value=1.30 → +30% filth per stack)
-//   prey_weight    — prey yield / carcass size multiplier
-//   herb_chance    — herb find rate multiplier (healer/forager gathering)
-//   herb_amount    — herb yield / quantity per gather multiplier
-//   gather_chance  — general forage / drop table find rate multiplier (non-herb items from biome drop table)
-//   gather_amount  — general forage yield multiplier
-//   spoilage       — food spoilage rate multiplier
-//   predator       — predator encounter rate multiplier
-//   sickness       — illness spawn chance multiplier
-//   hazard_chance  — global multiplier on all hazard-type event weights at this location/biome
+// Only two global types
+// Seeded values: filth, spoilage
+// value is a signed delta: 0.3 = +30% per stack, -0.3 = -30% per stack.
+//   filth    — daily filth gain delta
+//   spoilage — food spoilage rate delta
 model EnvModifierType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -2672,11 +2666,11 @@ model Location {
 model Location_Faction {
   locationId Int
   factionId    Int
-  statusId   Int
+  relationTypeId   Int
 
   location Location        @relation(fields: [locationId], references: [id], onDelete: Cascade)
   faction    Faction           @relation(fields: [factionId],    references: [id], onDelete: Cascade)
-  status   LocationStatus  @relation(fields: [statusId],   references: [id], onDelete: Restrict)
+  relationType RelationType  @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
 
   @@id([locationId, factionId])
   @@index([factionId])
@@ -2851,7 +2845,7 @@ model Structure_Storage_ItemType {
 }
 
 // One physical instance of an item in a storage
-// One row per instance — items are not stacked, so each has its own quantity and storedAt for decay tracking
+// One row per instance — items are not stacked, so each has its own quantity and rotProgression for decay tracking
 // isEquipped: only meaningful for entity-owned storage; true = item is currently equipped by the owning entity
 // chosenProfileId + equippedAt are set together with isEquipped = true and cleared when unequipped
 model StoredItem {
@@ -2859,9 +2853,11 @@ model StoredItem {
   storageId Int
   itemId    Int
 
-  quantity   Float    // amount in item's unit (e.g. weight in grams, or 1.0 for count-based items)
-  storedAt   DateTime @default(now()) @db.Timestamptz  // used for decay; decay% = days elapsed / (item.decayDays * storage.expirationModifier * season modifier); only relevant when item.decayDays is not null
-  craftBonus Float    @default(0.0)     // flat bonus accumulated through crafting skill rolls; added to ItemEffect.effectiveness on use
+  quantity       Float  // amount in item's unit (e.g. weight in grams, or 1.0 for count-based items)
+  rotProgression Float  @default(0.0)  // accumulated rot points; increments by 1 per daily tick at base rate (modified by
+                                        // storage.expirationModifier and active spoilage env conditions). Null-safe:
+                                        // only relevant when item.rotCap is non-null. Rot% = rotProgression / item.rotCap.
+  craftBonus     Float  @default(0.0)  // flat bonus accumulated through crafting skill rolls; added to ItemEffect.effectiveness on use
                                         // carries forward to ephemeral outputs when RecipeOutput.craftBonusApplies = true
 
   currentDurability Int?  // null when item.maxDurability is null; initialized from maxDurability on creation
@@ -2877,7 +2873,6 @@ model StoredItem {
 
   @@index([storageId])
   @@index([itemId])
-  @@index([storedAt])
   @@index([chosenProfileId])
 }
 
@@ -2900,12 +2895,13 @@ model Item {
   weightVariance    Float @default(0.0) // ± fraction applied to averageWeight at StoredItem creation; 0 = static weight
                                         // e.g. 0.1 → actual weight rolls between 0.9× and 1.1× of averageWeight
   averageVolume     Float @default(0.0) // ml per unit; used by storage fluid calculations for Volume items; 0 = ignored
-  decayDays         Int?                // base days until fully decayed; null = does not decay
+  rotCap            Int?                // max rot points until fully decayed; null = does not decay.
+                                        // 1 point = 1 day at base rate. 60 = lasts 60 days with no modifiers.
   maxDurability Int?                 // max durability for equipment; null = indestructible
   maxUses       Int?                 // max uses before depletion; null = unlimited
-  fuelValue     Int?                 // fuel units added to a power source's bank on deposit; null = not a fuel item
-                                    // constraint: a single fuelValue applies regardless of which fuel type the item is deposited as —
-                                    // items that qualify as multiple fuel types yield the same point value in all cases
+  fuelValue     Int?                 // fuel units added to a power source's bank on deposit; null = not a fuel item.
+                                    // an item may carry multiple Fuel_* ItemType tags (for storage classification), but its
+                                    // fuelValue is the same regardless of which power source accepts it.
   fuelTypeId    Int?                 // fuel category of this item — matched against StructureDef_FuelConfig_InputFuelType on deposit; null = not a fuel item
 
   // Ephemeral items are created at craft time by the recipe system (e.g. Dried Yarrow Leaf, Yarrow Paste).
@@ -2972,7 +2968,7 @@ model Item_Type {
 }
 
 // Defines what an item produces when composted. One row per output per item.
-// An item with decayDays may have zero or more output rows — zero means it contributes
+// An item with rotCap may have zero or more output rows — zero means it contributes
 // mass to the compost queue but produces no output (still reduces pile, generates filth).
 //
 // inputMeasurement: "weight" | "volume" — must match the deposited item's measurementType.
@@ -2984,9 +2980,9 @@ model Item_Type {
 model Item_CompostOutput {
   id               Int    @id @default(autoincrement())
   structureDefId   Int                      // which compost StructureDef produces this output
-  itemId           Int                      // the input item (must have decayDays)
+  itemId           Int                      // the input item (must have rotCap)
   outputItemId     Int                      // the item produced
-  inputMeasurement String @db.VarChar(10)   // "weight" | "volume"
+  measurementTypeId Int
   amountPerUnit    Float
   outputQuantity   Float  @default(1.0)
   dropChance       Float  @default(1.0)
@@ -2994,6 +2990,7 @@ model Item_CompostOutput {
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
   item         Item         @relation("ItemCompostInputs",  fields: [itemId],       references: [id], onDelete: Cascade)
   outputItem   Item         @relation("ItemCompostOutputs", fields: [outputItemId], references: [id], onDelete: Restrict)
+  measurementType MeasurementType @relation(fields: [measurementTypeId], references: [id], onDelete: Restrict)
 
   @@unique([structureDefId, itemId, outputItemId])
   @@index([itemId])
@@ -3208,17 +3205,17 @@ model ItemAction {
 // Valid effectTypes for symptoms: treat, worsen
 // use ItemWarning instead for hard condition spawns (e.g. "kills kits", "lethal above dose")
 model ItemEffect {
-  id           Int @id @default(autoincrement())
-  itemActionId Int
-  symptomId    Int
-  effectTypeId Int
+  id              Int @id @default(autoincrement())
+  itemActionId    Int
+  symptomId       Int
+  relationTypeId  Int
 
-  effectiveness Float @default(1.0)  // base effectiveness for this item+action+symptom combo
+  effectiveness   Float @default(1.0)  // base effectiveness for this item+action+symptom combo
                                      // added to craftBonus when used as concoction ingredient
 
   itemAction ItemAction   @relation(fields: [itemActionId], references: [id], onDelete: Cascade)
   symptom    Symptom      @relation(fields: [symptomId],    references: [id], onDelete: Restrict)
-  effectType RelationType @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
+  relationTypeId RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
 
   @@unique([itemActionId, symptomId])
   @@index([itemActionId])
@@ -3233,18 +3230,18 @@ model ItemEffect {
 // transform — replaces the condition with outputConditionDef
 // App rule: treat/worsen require effectiveness; transform requires outputConditionDefId; cure needs neither.
 model ItemConditionEffect {
-  id           Int @id @default(autoincrement())
-  itemActionId Int
-  conditionDefId Int
-  effectTypeId   Int
+  id              Int @id @default(autoincrement())
+  itemActionId    Int
+  conditionDefId  Int
+  relationTypeId  Int
 
   effectiveness        Float?  // treat / worsen only
   outputConditionDefId Int?    // transform only
 
-  itemAction   ItemAction              @relation(fields: [itemActionId],   references: [id], onDelete: Cascade)
-  conditionDef ConditionDef            @relation("ItemConditionEffectTarget", fields: [conditionDefId],       references: [id], onDelete: Restrict)
-  effectType   RelationType            @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
-  outputCondition ConditionDef?        @relation("ItemConditionEffectOutput", fields: [outputConditionDefId], references: [id], onDelete: SetNull)
+  itemAction        ItemAction              @relation(fields: [itemActionId],   references: [id], onDelete: Cascade)
+  conditionDef      ConditionDef            @relation("ItemConditionEffectTarget", fields: [conditionDefId],       references: [id], onDelete: Restrict)
+  relationTypeId    RelationType        @relation(fields: [relationTypeId],   references: [id], onDelete: Restrict)
+  outputCondition   ConditionDef?        @relation("ItemConditionEffectOutput", fields: [outputConditionDefId], references: [id], onDelete: SetNull)
 
   @@unique([itemActionId, conditionDefId])
   @@index([itemActionId])
@@ -3611,7 +3608,7 @@ model RecipeSlotOption_ExcludedTag {
 // Ephemeral output: outputItemId null; app creates a new Item row at craft time:
 //   - name computed from preName/postName + source item name (e.g. "Dried Yarrow Leaf")
 //   - isEphemeral = true; child rows (ItemAction, ItemEffect, ItemFoodProfile, etc.) copied from source
-//   - decayDaysMultiplier applied to source item's decayDays
+//   - rotCapMultiplier applied to source item's rotCap
 //   - addTags/removeTags applied to the new Item_IngredientType rows
 //   - app deletes the Item row when the last StoredItem referencing it is consumed or removed
 //
@@ -3638,8 +3635,8 @@ model RecipeOutput {
   // Ephemeral output naming and modifiers (ignored for seeded outputs)
   preName                 String? @db.VarChar(100)  // prepended to source item display name: "Dried Yarrow Leaf"
   postName                String? @db.VarChar(100)  // appended to source item display name:  "Yarrow Paste"
-  decayDaysMultiplier     Float?                    // multiplied against source item's decayDays; null = unchanged
-  decayVariance           Float?                    // overrides source item's weightVariance for decay spread; null = inherit
+  rotCapMultiplier        Float?                    // multiplied against source item's rotCap; null = unchanged. e.g. 10.0 = lasts 10× longer after drying.
+  rotVariance             Float?                    // overrides source item's weightVariance for rot spread; null = inherit
   effectivenessMultiplier Float?                    // multiplied against all copied ItemEffect/ItemConditionEffect effectiveness values; null = unchanged
   outputMeasurementTypeId Int?                      // overrides measurementTypeId on the ephemeral item; null = inherit from source
                                                     // must be consistent with any addTags whose ingredient type implies a different unit (enforced app-side)
@@ -3786,7 +3783,7 @@ model ActionType {
   requiresCanMentor         Boolean @default(false)
   allowApprenticesWithAdult Boolean @default(false)
   requiresCanLeadEvents     Boolean @default(false)  // true = the entity initiating this action must have Rank.canLeadEvents
-  minAgeMoons               Int?
+  minAge               Int?
 
   // Resolution mode — null = pure reward action (auto-resolves, no subsystem invoked).
   // App rule: only guildId = "global" actions may have a non-null systemTypeId.
@@ -4041,7 +4038,7 @@ model EventCheckMode {
 //   requiresLeader            — at least one participant must have Rank.canLeadEvents = true
 //   requiresCanMentor         — all participants must have Rank.canMentor = true
 //   allowApprenticesWithAdult — non-mentor ranks OK if ≥1 canMentor entity is present
-//   minAgeMoons               — minimum entity age gate; null = no requirement
+//   minAge               — minimum entity age gate; null = no requirement
 model EventDef {
   id          Int     @id @default(autoincrement())
   guildId     String  @default("global") @db.VarChar(50)
@@ -4059,7 +4056,7 @@ model EventDef {
   requiresLeader            Boolean @default(false)
   requiresCanMentor         Boolean @default(false)
   allowApprenticesWithAdult Boolean @default(false)
-  minAgeMoons               Int?
+  minAge               Int?
 
   // Cooldown — days before this event can fire again for the same faction/guild
   cooldownDays Int @default(3)
@@ -5107,9 +5104,9 @@ model PlotType {
   name        String  @db.VarChar(100)
   description String? @db.VarChar(500)
 
-  // Maximum soilQuality this plot type can reach via composting. Prevents indefinite improvement.
-  // e.g. 2.0 = plots in this type can reach up to double base growth/yield from soil alone.
-  soilQualityCap Float @default(2.0)
+  // Maximum soilQuality delta achievable via composting. Prevents indefinite improvement.
+  // e.g. 1.0 = soil can contribute at most +100% to growth/yield. Rocky terrain might cap at 0.3.
+  soilQualityCap Float @default(1.0)
 
   plantDefPlotTypes PlantDef_PlotType[]
   farmingConfigs    StructureDef_FarmingConfig[]
@@ -5133,7 +5130,8 @@ model PlotType_EnvCondition {
   @@id([plotTypeId, envConditionId])
 }
 
-// Definition of a growable plant. Base plants are seeded globally.
+// Definition of a growable plant. All PlantDefs are guild-scoped — no PlantDef rows have guildId = "global".
+// Base plants are seeded at guild initialization time under the guild's own guildId, not as global records.
 // Mutated variants are ephemeral PlantDef rows created by the cross-breeding system.
 // Ephemeral rows are deleted when no PlotCrop.plantDefId and no Item.plantDefId references them.
 model PlantDef {
@@ -5146,11 +5144,10 @@ model PlantDef {
   isEphemeral    Boolean @default(false)    // false = seeded base plant; true = cross-breeding-created variant
   rootPlantDefId Int?                       // FK → PlantDef; null for base plants; always the original non-ephemeral ancestor
 
-  growthCycleDays    Int      // base days to advance one growth stage
+  growthCap          Int      // base growth points to advance one stage; 1 point = 1 day at base rate
   growthStages       Int      // stages from seedling to harvestable
   maxHarvests        Int      // harvests before only uproot_crop is available (~3 for most plants)
   harvestDropTableId Int      // FK → DropTable; used for harvest_crop and wild foraging
-  uprootDropTableId  Int      // FK → DropTable; used for uproot_crop; higher/different yield
   propagationItemId  Int?     // FK → Item; the seed/spore/cutting consumed on planting; null if not yet assigned
   mutationChance     Float    @default(0.7)    // controls mutations at cross-breeding; floor = guaranteed, decimal = chance of +1
 
@@ -5158,14 +5155,12 @@ model PlantDef {
   variants       PlantDef[] @relation("PlantDefLineage")
 
   harvestDropTable  DropTable @relation("PlantDefHarvestDrop", fields: [harvestDropTableId], references: [id], onDelete: Restrict)
-  uprootDropTable   DropTable @relation("PlantDefUprootDrop",  fields: [uprootDropTableId],  references: [id], onDelete: Restrict)
   propagationItem   Item?     @relation("PlantDefPropagationItem", fields: [propagationItemId], references: [id], onDelete: SetNull)
 
   seedItems             Item[]               @relation("ItemPlantDef")  // items whose Item.plantDefId points here
   plotTypes             PlantDef_PlotType[]
   biomes                PlantDef_Biome[]
-  requiredEnvConditions PlantDef_RequiredEnvCondition[]
-  seasons               PlantDef_Season[]
+  envConditionEffects   PlantDef_EnvConditionEffect[]
   traits                PlantDef_Trait[]
   plotCrops             PlotCrop[]
 
@@ -5173,13 +5168,13 @@ model PlantDef {
   @@index([guildId])
 }
 
-// Which plot types a plant can grow in and at what rate.
-// No rows = can grow in any plot type at growthRateModifier 100.
-// If rows exist, plant can only be placed in matching plot types.
+// Which plot types a plant can grow in and at what growth rate delta.
+// No rows = can grow in any plot type at 0.0 (neutral).
+// If rows exist, plant may only be placed in matching plot types.
 model PlantDef_PlotType {
   plantDefId          Int
   plotTypeId          Int
-  growthRateModifier  Int @default(100)   // percentage; 100 = no modifier; 150 = 50% faster
+  growthRateModifier  Float @default(0.0)  // signed delta; 0.0 = neutral; 0.3 = +30%; -0.2 = -20%
 
   plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
   plotType PlotType @relation(fields: [plotTypeId], references: [id], onDelete: Restrict)
@@ -5187,14 +5182,13 @@ model PlantDef_PlotType {
   @@id([plantDefId, plotTypeId])
 }
 
-// Biome affinities for a plant. Controls wild foraging find rates and cultivated growth rate modifiers.
-// No rows = grows in any biome at 100 but never found during wild foraging.
+// Biome affinities for a plant. Controls wild foraging find rates and cultivated growth rate deltas.
+// No rows = grows in any biome at 0.0 (neutral) but never found during wild foraging.
 // findChance is only read from the base (rootPlantDefId = null) PlantDef.
 model PlantDef_Biome {
   plantDefId          Int
   biomeId             Int
-  growthRateModifier  Int   @default(100)  // percentage applied to growth rate when cultivated in this biome
-  findChance          Float @default(0.0)  // base probability (0.0–1.0) per foraging attempt; multiplied by herb_chance env modifier
+  spawnRate           Float @default(0.0)  // base weight per foraging attempt; scaled by PlantDef_EnvConditionEffect spawn_rate rows
 
   plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
   biome    Biome    @relation(fields: [biomeId],    references: [id], onDelete: Restrict)
@@ -5202,35 +5196,50 @@ model PlantDef_Biome {
   @@id([plantDefId, biomeId])
 }
 
-// Env conditions required for a plant to be planted AND to grow each tick.
-// ALL listed conditions must be present in the combined active set
-// (location env conditions + PlotType_EnvCondition rows) for planting to be allowed
-// and for growth ticks to advance. If conditions are lost after planting, growth pauses.
-// No rows = no env condition restriction.
-model PlantDef_RequiredEnvCondition {
-  plantDefId     Int
-  envConditionId Int
+
+// Per-plant response to an active env condition. Consolidates all env-condition
+// relationships for a plant into one table, including hard planting requirements.
+//
+// effectType:       "cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival"
+// relationshipType: "requires" | "increase" | "decrease" | "block" | "kills"
+// value:            delta magnitude, > 0.0; null when relationshipType is "requires" or "block"
+//
+//   cultivation / requires — planting prerequisite. The condition must be present in the
+//                     combined active set (location + PlotType_EnvCondition + env_inject stacks)
+//                     for planting to be allowed AND for growth ticks to advance.
+//                     If lost after planting, growth pauses until restored.
+//                     No value. effectType must be "cultivation" for all "requires" rows.
+//
+//   spawn_rate   — wild foraging find chance (multiplies PlantDef_Biome.findChance)
+//   spawn_weight — quantity found per forage attempt
+//   growth_rate  — cultivated growth tick rate (farming only)
+//   survival     — per-tick death probability check. Used with "kills" relationshipType only.
+//                  value = probability (0.0–1.0) that the crop dies on each growth tick
+//                  while the condition is active. Structure env_override upgrades targeting
+//                  this condition reduce the effective probability:
+//                    effectiveKillChance = value × (1.0 − conditionOverride)
+//
+// Stacking formula (per effectType, across all active conditions):
+//   netModifier = 1.0 + Σ(increase.value × stackCount) − Σ(decrease.value × stackCount)
+//   "block" on any effectType excludes the entity entirely — takes precedence over all modifiers.
+//
+// A single env condition can have multiple rows for the same plant with different effectTypes.
+// e.g. Damp on Rice: requires(gate) + increase(growth_rate) — must be present AND boosts growth.
+model PlantDef_EnvConditionEffect {
+  id               Int     @id @default(autoincrement())
+  plantDefId       Int
+  envConditionId   Int
+  effectType       String?  @db.VarChar(20)  
+  relationTypeId   Int 
+  value            Float?                   // null when block; > 0.0 otherwise (enforced app-side)
 
   plantDef     PlantDef     @relation(fields: [plantDefId],     references: [id], onDelete: Cascade)
   envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+  relationType RelationType  @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
 
-  @@id([plantDefId, envConditionId])
-}
-
-// Per-season growth rates for a plant.
-// No row = plant does not grow in that season (dormant — tick skipped).
-// 1.0 = full base growth rate; 0.5 = half speed; 0.0 = effectively dormant.
-// 1.0 is the intended maximum — values above 1.0 are not meaningful.
-// Year-round plants require an explicit row per season at 1.0.
-model PlantDef_Season {
-  plantDefId         Int
-  seasonId           Int
-  growthRateModifier Float @default(1.0)  // 0.0–1.0 multiplier on growth rate; no row = dormant
-
-  plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
-  season   Season   @relation(fields: [seasonId],   references: [id], onDelete: Restrict)
-
-  @@id([plantDefId, seasonId])
+  @@unique([plantDefId, envConditionId, effectType])
+  @@index([plantDefId])
+  @@index([envConditionId])
 }
 
 // Trait values for a PlantDef. Ephemeral PlantDefs carry their own rows with mutated values.
@@ -5255,7 +5264,7 @@ model Plot {
   id          Int     @id @default(autoincrement())
   structureId Int                  // FK → Structure (farming-type)
   name        String? @db.VarChar(100)
-  soilQuality Float   @default(1.0)  // multiplier on growth rate and harvest yield; degrades via env conditions; restored by compost
+  soilQuality Float   @default(0.0)  // signed delta added to the growth/yield total; 0.0 = neutral; positive = enriched; negative = degraded
 
   createdAt DateTime @default(now()) @db.Timestamptz
 
@@ -5286,10 +5295,12 @@ model PlotCrop {
   id           Int      @id @default(autoincrement())
   plotId       Int      @unique   // one crop per plot at a time
   plantDefId   Int
-  plantedAt    DateTime @default(now()) @db.Timestamptz
-  currentStage Int      @default(0)    // 0 = seedling; PlantDef.growthStages = harvestable
-  harvestCount Int      @default(0)    // increments each harvest; blocks harvest_crop when >= PlantDef.maxHarvests
-  carePoints   Int      @default(0)    // accumulated tending care points; used at cross-breeding for mutation bias
+  plantedAt        DateTime @default(now()) @db.Timestamptz  // used for care percentage at cross-breeding time
+  currentStage     Int      @default(0)    // 0 = seedling; PlantDef.growthStages = harvestable
+  growthProgression Float   @default(0.0) // accumulated growth points this stage; increments each daily tick by
+                                           // dailyGrowthRate (see formula). When >= PlantDef.growthCap, stage advances and resets to 0.
+  harvestCount     Int      @default(0)    // increments each harvest; blocks harvest_crop when >= PlantDef.maxHarvests
+  carePoints       Int      @default(0)    // accumulated tending care points; used at cross-breeding for mutation bias
 
   plot        Plot            @relation(fields: [plotId],      references: [id], onDelete: Cascade)
   plantDef    PlantDef        @relation(fields: [plantDefId],  references: [id], onDelete: Restrict)

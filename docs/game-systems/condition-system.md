@@ -199,13 +199,34 @@ harder even when healthy and sick entities share the same structure.
 
 
 ─────────────────────────────────────────────
-8. ENV RULES (difficultyMod)
+8. ENV RULES
 ─────────────────────────────────────────────
 
-envRules add a flat mod to dailyRollDC when a matching env condition is active.
-Example: GreenCough + Cold env → effective DC becomes 13 + 3 = 16.
-This stacks against the same cat baseline, making cold weather genuinely deadly
-for sick cats.
+ConditionDef_EnvRule rows define how an illness responds to active env conditions.
+Each row has a relationshipType ("worsen" or "improve") and a value (Float, > 0.0
+and <= 2.0, enforced app-side).
+
+One ConditionDef can have multiple rules across different env conditions — some
+worsening progression, others aiding recovery.
+
+  worsen  — env condition makes the illness harder to recover from.
+            Increases the effective daily roll DC (or worsening rate).
+  improve — env condition aids recovery.
+            Decreases the effective daily roll DC (or accelerates recovery).
+
+Scaling formula (per active stack):
+  effectiveMod = 1.0 + value × stackCount
+  Value of 0.0 = no effect. Value of 1.0 = full doubling per stack (maximum).
+  value is a signed delta: positive = worsening amplifier; negative = recovery aid.
+
+Example — a respiratory illness:
+  Cold  + worsen  value=0.5  → each Cold stack increases worsening rate by 50%
+  Smoke + worsen  value=0.8  → each Smoke stack increases worsening rate by 80%
+  Warm  + improve value=0.3  → each Warm stack reduces difficulty by 30%
+
+Multiple active env conditions each apply their own modifier independently.
+A location with both Cold (2 stacks) and Smoke (1 stack) active would stack
+the Cold modifier twice and the Smoke modifier once, then both are applied.
 
 
 ─────────────────────────────────────────────

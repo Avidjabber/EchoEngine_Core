@@ -38,17 +38,28 @@ The work is in the structures built within it.
 
   Field       │ Purpose
   ────────────┼──────────────────────────────────────────────────────────────
-  factionId   │ FK → Faction. The owning faction.
-  locationId  │ FK → Location. A camp is always tied to exactly one location.
+  codeName    │ Snake_case machine identifier. Unique per guild.
   name        │ Display name (e.g. "Main Camp", "Northern Outpost")
+  locationId  │ FK → Location. A camp is always tied to exactly one location.
   description │ Optional flavour text.
-  filthLevel  │ Int. Current filth accumulation at this camp. Drives filth-trigger
-              │ events. Tracked per camp, not per faction or guild.
+  isActive    │ Boolean. When false, the Worker skips this camp entirely —
+              │ no events fire and no daily ticks run. Used for seasonal
+              │ camps, abandoned outposts, or any camp the faction is not
+              │ currently occupying.
+
+Faction ownership is managed via Camp_Faction (bridge table):
+  role "owner"  — the faction that owns and administrates this camp.
+                  Exactly one per camp; enforced at the app layer.
+  role "shared" — factions granted access to act on this camp (build,
+                  harvest, house entities, etc.).
+
+Filth is tracked per-structure (Structure.filthLevel). Camp-level filth
+is a runtime aggregate only — there is no filthLevel column on Camp.
 
 Key rules:
   - A faction may have zero camps (no home territory required).
   - A faction may have multiple camps at different locations.
-  - Multiple factions may have camps at the same location (contested territory).
+  - A camp may be shared with other factions via Camp_Faction "shared" rows.
 
 STRUCTURE LIMITS
 ─────────────────
@@ -93,21 +104,27 @@ their own StructureDefs.
             │ StructureDef_CraftingConfig_Interaction. Upgrades can unlock additional
             │ interactions via StructureDef_Upgrade_CraftingInteraction. Per-guild
             │ requirements and improvements defined in Guild_CraftingInteractionRule.
-  compost   │ Converts deposited organic items (those with decayDays) into outputs
+  compost   │ Converts deposited organic items (those with rotCap) into outputs
             │ defined per item on Item_CompostOutput. MUST also have storage type —
             │ converted outputs are written to the structure's storage. Config defined
             │ in StructureDef_CompostConfig. In-progress deposits tracked in
             │ Structure_CompostDeposit.
+  power     │ A power source that satisfies the power requirements of other structures
+            │ and upgrades within its scope. Config defined in StructureDef_FuelConfig.
+            │ Two generator types: active (fueled by item deposits) and passive (fueled
+            │ automatically by active env conditions). Four scopes: structure (explicit
+            │ linked targets), camp, location, faction. See section 4a for full detail.
 
 VALID EFFECT TYPES PER CATEGORY
 ─────────────────────────────────
-  storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating | damage_resistance | filth_reduction
-  farming:  plot_count | growth_rate | season_override | env_override | soil_quality | damage_resistance | filth_reduction
-  housing:  comfortable_capacity | max_capacity | damage_resistance | filth_reduction
-  medical:  treatment_bonus | exam_bonus | recovery_modifier | contagion_resist | damage_resistance | filth_reduction
-  crafting: crafting_roll_bonus | output_quantity_bonus | damage_resistance | filth_reduction
+  storage:  solid_capacity | liquid_capacity | rot_modifier | security_rating | env_override | env_inject | damage_resistance | filth_reduction
+  farming:  plot_count | growth_rate | env_override | env_inject | soil_quality | damage_resistance | filth_reduction
+  housing:  comfortable_capacity | max_capacity | env_override | env_inject | damage_resistance | filth_reduction
+  medical:  treatment_bonus | exam_bonus | recovery_modifier | contagion_resist | env_override | env_inject | damage_resistance | filth_reduction
+  crafting: crafting_roll_bonus | output_quantity_bonus | env_override | env_inject | damage_resistance | filth_reduction
             (interaction unlocks handled via StructureDef_Upgrade_CraftingInteraction, not effectType)
-  compost:  conversion_speed | weight_capacity | volume_capacity | damage_resistance | filth_reduction
+  compost:  conversion_speed | weight_capacity | volume_capacity | env_override | env_inject | damage_resistance | filth_reduction
+  power:    fuel_capacity | fuel_efficiency | passive_gen_rate | env_override | env_inject | damage_resistance | filth_reduction
 
 
 ─────────────────────────────────────────────
@@ -257,7 +274,7 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
   Scoped to both the input item AND the structure def — a herb composted in a basic pile
   and the same herb in a worm farm can produce entirely different outputs.
     structureDefId    FK → StructureDef (must be a compost-type def)
-    itemId            FK → Item (the input item; must have decayDays)
+    itemId            FK → Item (the input item; must have rotCap)
     outputItemId      FK → Item (the item produced)
     inputMeasurement  "weight" | "volume" — must match the deposited item's measurementType.
     amountPerUnit     Float. Grams or ml of input consumed to produce one batch.
@@ -279,6 +296,11 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
     entityId     FK → Entity (@id — one housing assignment per entity)
     structureId  FK → Structure (must be a housing-type structure; enforced at app layer)
     assignedAt   DateTime
+
+  StructureDef_FuelConfig  (for structureTypeId = power)
+    Power-source structures generate fuel units that satisfy other structures
+    and upgrades (StructureDef.isPowered / StructureDef_Upgrade.isPowered).
+    Full documentation in docs/game-systems/power-system.md.
 
 
 ─────────────────────────────────────────────
@@ -331,9 +353,11 @@ EXAMPLE — Guild-defined upgrades for a "Mossy Storage Den" (type: storage):
 EXAMPLE — Guild-defined upgrades for a "Bramble Garden" (type: farming):
   "extra_plots"      maxApplications: 6  effects: plot_count +3
   "irrigation"       maxApplications: 1  effects: growth_rate +0.15
-  "greenhouse_cover" maxApplications: 2  effects: season_override +0.5
+  "greenhouse_cover" maxApplications: 2  effects: env_override +0.5 → Winter, env_override +0.5 → Autumn
+  "heated_greenhouse" maxApplications: 1 effects: env_inject +1 → Warm      (adds 1 Warm stack to crops inside)
   "drought_shield"   maxApplications: 2  effects: env_override +0.5 → Drought
   "frost_cover"      maxApplications: 1  effects: env_override +1.0 → Cold
+  "misting_system"   maxApplications: 2  effects: env_inject +1 → Damp      (adds 1 Damp stack regardless of weather)
   "basic_compost"    maxApplications: 5  effects: soil_quality +0.1
   "rich_compost"     maxApplications: 2  effects: soil_quality +0.25, growth_rate +0.05
 
@@ -387,44 +411,72 @@ UPGRADE RELATIONS
     "rich_compost"     REQUIRES "basic_compost"    — must have composted first
     "greenhouse_cover" REQUIRES "irrigation"       — needs water infrastructure first
     "frost_cover"      BLOCKS   "drought_shield"   — can't insulate for both extremes
-    "drought_shield"   BLOCKS   "frost_cover"
+    "drought_shield"   BLOCKS   "frost_cover"      — symmetric exclusion
     "rich_compost"     UPGRADES "basic_compost"    — advanced compost supersedes basic
 
-SEASON AND ENV OVERRIDE EFFECTS
+ENV OVERRIDE AND INJECT EFFECTS
 ──────────────────────────────────
-  season_override and env_override pull modifiers toward 1.0 (neutral) rather than
-  adding a flat delta. The effective value is capped at 1.0 (full override).
+  Two upgrade types control the env condition environment experienced inside a structure.
+  Both require an env condition target (requiresEnvTarget). For farming structures, these
+  target the env conditions used in crop tick calculations. For other structure types
+  (housing, medical, etc.), they adjust the env conditions experienced within the
+  structure — affecting any system that reads env stacks for entities operating there,
+  such as illness progression and recovery rates for housed entities.
 
-  structure_season_override = MIN(1.0, SUM of season_override effectValues applied)
-  structure_env_override    = MIN(1.0, SUM of env_override effectValues applied)
+ENV OVERRIDE — suppress an existing condition
+  Pulls the per-condition growth_rate and survival deltas toward 0.0 (neutral).
+  Does not remove the condition — only reduces its effect on crops inside this structure.
+  effectValue range: 0.0–1.0. Multiple applications sum, capped at 1.0.
 
-  effectiveSeasonMod (per crop tick) =
-    seasonMod + (1.0 − seasonMod) × structure_season_override
+  conditionOverride(c) = MIN(1.0, SUM of effectValues of env_override upgrades
+                         targeting env condition c on this structure)
 
-    seasonMod is the PlantDef_Season.growthRateModifier for the current season (0.0–1.0).
-    A greenhouse (env_override = 1.0) means a dormant season becomes full speed.
-    A season at 0.5 + 0.5 override → 0.75 effective (half way to neutral).
+  growth_rate suppression:
+    rawDelta(c)       = Σ(increase.value × stackCount) − Σ(decrease.value × stackCount)
+    effectiveDelta(c) = rawDelta(c) × (1.0 − conditionOverride(c))
+    override 0 = full delta. override 1 = delta cancelled.
 
-  effective_plant_growth_mod (per crop tick) =
-    PRODUCT over all active env conditions that have a plant_growth modifier:
-      effectiveCondMod(c) = condPlantGrowthMod(c) + (1.0 − condPlantGrowthMod(c))
-                            × conditionOverride(c)
-      where conditionOverride(c) = MIN(1.0, SUM of effectValues of all env_override
-            upgrades applied to this structure with targetEnvConditionId = c)
+  survival / kills suppression:
+    effectiveKillChance(c) = baseKillChance(c) × (1.0 − conditionOverride(c))
+    override 0 = full kill probability. override 1 = kill chance zeroed.
 
-    Each env condition is overridden independently. A Drought Shield upgrade only
-    counteracts Drought's plant_growth reduction — Cold, Toxic, etc. are unaffected.
-    env_override does not affect per-plant required env conditions — only the
-    plant_growth modifier that each location/biome condition contributes.
-    Override pulls each condition's modifier toward 1.0; cannot boost above neutral.
+  env_override does NOT affect cultivation/requires rows, block rows, or
+  spawn-related effect types — only growth_rate and survival rows.
+  Each targeted condition is overridden independently.
+
+ENV INJECT — add a condition
+  Adds stacks of a specific env condition to the combined active env set for crops
+  inside this structure. The condition is active for growth calculations even if
+  not present in the location's natural environment.
+  effectValue = number of stacks contributed per upgrade application (integer).
+  Multiple applications on the same condition sum their stacks.
+
+  Structure-injected stacks are included alongside location conditions and
+  PlotType_EnvCondition rows when computing the combined active set for a
+  crop tick.
+
+  injectedStacks(c) = SUM of effectValues of env_inject upgrades targeting c
+
+  These stacks feed into PlantDef_EnvConditionEffect as normal — including
+  growth_rate increases/decreases, cultivation/requires gates, block rows,
+  and kills survival rolls.
 
   Examples:
-    season dormant (0.0) + 0.5 season_override → 0.5 effective (half speed, not stopped)
-    season dormant (0.0) + 1.0 season_override → 1.0 effective (full greenhouse, season ignored)
-    Drought reduces plant_growth to 0.4; Drought env_override 0.5 → 0.7 effective for Drought only
-    Drought reduces plant_growth to 0.4; Drought env_override 1.0 → 1.0 effective (fully counteracted)
-    Cold also active at 0.6; no Cold env_override → 0.6 still applies; combined = 0.7 × 0.6 = 0.42
-    Cultivated boosts plant_growth to 1.5; any env_override on Cultivated → unchanged (only pulls toward 1.0)
+    "heated_greenhouse" env_inject +1 → Warm
+      → crops inside always have 1 Warm stack, regardless of season or weather.
+         Plants with increase(growth_rate) on Warm grow faster year-round.
+    "misting_system" env_inject +1 → Damp
+      → crops always see 1 Damp stack. A plant requiring Damp can grow here
+         even in dry seasons.
+
+  env_inject is structure-local — it does not affect the location's env
+  stack for other systems (wildlife encounters, illness, etc.).
+
+Combined examples:
+  Winter: decrease growth_rate 0.3 → rawDelta=-0.3; env_override 0.5 → -0.15 effective
+  Winter: decrease growth_rate 0.3 → rawDelta=-0.3; env_override 1.0 →  0.0 (fully counteracted)
+  Winter kills 0.05: env_override 0.5 → 0.025 effective kill chance per tick
+  Warm (injected 1 stack): plant with increase growth_rate 0.2 → +0.2 effective growth boost
 
 
 ─────────────────────────────────────────────
@@ -626,10 +678,11 @@ selects one and the action resolves immediately with no further tracking needed.
 8. RELATIONSHIP TO OTHER SYSTEMS
 ─────────────────────────────────────────────
 
-  Factions   — Camp.factionId links a camp to its owning faction. A faction with
-               no camps has no fixed territory, no structures, and no faction
-               storage — campless factions rely on personal entity inventories.
-               Faction.activeCampId points to the faction's currently active camp.
+  Factions   — Faction ownership is tracked via Camp_Faction (role = "owner").
+               A faction with no camps has no fixed territory, no structures,
+               and no faction storage — campless factions rely on personal
+               entity inventories. Camp.isActive controls whether the Worker
+               processes a camp; inactive camps receive no ticks or events.
 
   Locations  — Camp.locationId places the camp in the world. Farming structures
                inherit their location's biome and env conditions for crop growth.
@@ -657,36 +710,14 @@ selects one and the action resolves immediately with no further tracking needed.
                Construction initiation.
 
 
-─────────────────────────────────────────────
-9. OPEN QUESTIONS
-─────────────────────────────────────────────
-
-  1. StructureType list — RESOLVED. Seeded types are: storage, farming, housing.
-     No "other" type. Additional types may be added when new engine systems are built.
-
-  2. Housing base config — RESOLVED. See StructureDef_HousingConfig in section 4a.
-     Strict vs. soft capacity controlled by maxCapacity nullability. Overcrowding
-     applies a multiplier bonus (default 0.5) to each overcrowded entity's daily
-     filth contribution. Valid upgrade effectTypes: comfortable_capacity, max_capacity,
-     damage_resistance, filth_reduction.
-
-  3. Storage table definition — RESOLVED. See item-definitions.md section 7.
-     Storage is a pure item container. Capacity, rot modifier, and type
-     restrictions live on Structure_Storage (for structures) and Entity_Storage
-     (for personal inventories).
-
-  4. Raid / security system — RESOLVED. security_rating feeds into event weight
-     for camp-level events. Low security increases the weight of theft/raid
-     events (e.g. rats raiding food). The event system reads effective
-     security_rating from Structure_Storage at event selection time.
 
 
 ─────────────────────────────────────────────
-10. SCHEMA SUMMARY
+9. SCHEMA SUMMARY
 ─────────────────────────────────────────────
 
-  StructureType                  — seeded category: storage | farming | housing
-  Camp                           — faction + location pairing; zero or more per faction; filthLevel removed (runtime aggregate)
+  StructureType                  — seeded category: storage | farming | housing | medical | crafting | compost | power
+  Camp                           — faction + location pairing; ownership via Camp_Faction; isActive controls worker inclusion
   Camp_StructureLimit            — per-camp cap on how many structures of each type may be built
   StructureDef                   — guild-defined named structure; types assigned via StructureDef_StructureType
   StructureDef_StructureType     — assigns one or more StructureTypes to a def; most defs have exactly one
@@ -705,6 +736,12 @@ selects one and the action resolves immediately with no further tracking needed.
   StructureDef_CompostConfig                 — conversion timer and capacity for compost-type defs (must pair with storage type)
   Item_CompostOutput             — per-item-per-structureDef compost output rules; same item can produce different outputs in different structure types
   Structure_CompostDeposit       — in-progress compost queue; one row per deposited batch
+  StructureDef_FuelConfig                    — generator type, scope, and fuel capacity for power-type defs
+  StructureDef_FuelConfig_InputFuelType      — fuel item types a power source accepts as deposits
+  StructureDef_FuelConfig_OutputFuelType     — fuel types a power source produces (matched against by consumers)
+  StructureDef_FuelConfig_EnvCondition       — env conditions that drive generation for passive power sources
+  StructureDef_AcceptedFuelType              — fuel output types a powered StructureDef accepts; empty = any
+  StructureDef_Upgrade_AcceptedFuelType      — same, for powered upgrades
   StructureDef_Upgrade           — guild-defined modular upgrade for a StructureDef
   StructureDef_Upgrade_Effect    — individual effects of an upgrade (one row per effect; upgrades may have many)
   StructureDef_Upgrade_BuildCost — items required to apply an upgrade

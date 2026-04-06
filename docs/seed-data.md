@@ -21,19 +21,23 @@ Season                                  [ DONE ]
 Season_EnvCondition contributes 1 stack of each linked condition (no stacks field — always 1).
 
   name    envConditions (Season_EnvCondition)
-  Spring  newleaf_bloom
-  Summer  greenleaf_heat
-  Fall    leaffall_plenty
-  Winter  leafbare_lean
+  Spring  spring
+  Summer  summer
+  Autumn  autumn
+  Winter  winter
 
 
 ──────────────────────────────────────────────
-EntityStatus                            [ DONE ]
+Status                            [ DONE ]
 ──────────────────────────────────────────────
-Values:
-  Active
-  Inactive
-  Hiatus
+Values:                isEntity     isStructure
+  Active               true         true
+  Inactive             true         true
+  Hiatus               true         false
+  Broken               false        true
+  Destroyed            false        true
+  Under_Construction   false        true
+
 
 
 ──────────────────────────────────────────────
@@ -43,6 +47,7 @@ EntityType                              [ DONE ]
   NPC              false           true                  false                 true
   Side Character   false           true                  true                  false
   Main Character   true            true                  true                  false
+  Ephemeral        false           true                  true                  true
 
 
 ──────────────────────────────────────────────
@@ -125,10 +130,6 @@ Values:
   Tool
   Plant
   Medicine
-  Fuel_Burnable
-  Fuel_Electric
-  Fuel_Steam
-  Fuel_Alchemical
   Food
   Ore
   Ingot
@@ -148,7 +149,7 @@ ItemInteraction                         [ DONE ]
 
 
 ──────────────────────────────────────────────
-ItemActionType                          [ DONE ]
+ItemActionType
 ──────────────────────────────────────────────
   name    dealsDamage  restoresHealth  appliesCondition  isHarmful
   attack  true         false           false             true
@@ -159,41 +160,149 @@ ItemActionType                          [ DONE ]
 
 
 ──────────────────────────────────────────────
-RelationType                            [ DONE ]
+RelationType
 ──────────────────────────────────────────────
-Replaces: ItemEffectType, ConditionLinkType
 Developer-seeded only. Boolean flags control which systems each value is valid for.
 
-  name        isConditionSystem  isStructureSystem  isSkillSystem  isItemSystem  isCraftingSystem
-  ──────────  ─────────────────  ─────────────────  ─────────────  ────────────  ────────────────
-  requires    false              true               true           false         true
-  block       true               true               true           false         false
-  upgrades    false              true               true           false         false
-  treat       false              false              false          true          false
-  worsen      true               false              false          true          false
-  cure        false              false              false          true          false
-  transform   false              false              false          true          false
-  recover     true               false              false          false         false
-  spawn       true               false              false          false         false
-  spreads_as  true               false              false          false         false
-  improves    false              false              true           false         true
+  name        isConditionSystem  isStructureSystem  isSkillSystem  isItemSystem  isCraftingSystem   isEnvConditionSystem  isOwnershipSystem
+  ──────────  ─────────────────  ─────────────────  ─────────────  ────────────  ────────────────   ────────────────────  ────────────────────
+  requires    false              true               true           false         true               true                  false
+  block       true               true               true           false         false              true                  false
+  upgrades    false              true               true           false         false              false                 false
+  treat       false              false              false          true          false              false                 false
+  worsen      true               false              false          true          false              false                 false
+  cure        false              false              false          true          false              false                 false
+  transform   false              false              false          true          false              false                 false
+  recover     true               false              false          false         false              false                 false
+  spawn       true               false              false          false         false              false                 false
+  spreads_as  true               false              false          false         false              false                 false
+  improves    false              false              true           false         true               false                 false
+  increase    false              false              true           false         true               true                  false
+  decrease    false              false              true           false         true               true                  false
+  kills       false              false              true           false         true               true                  false
+  owns        false              false              false          false         false              false                 true
+  contesting  false              false              false          false         false              false                 true
 
+
+──────────────────────────────────────────────
+EffectType
+──────────────────────────────────────────────
+Developer-seeded only. Boolean flags control which systems each value is valid for.
+
+  name              isItem             isPlant            isSpecies          isAbility
+  ──────────        ─────────────────  ─────────────────  ─────────────────  ─────────────────
+  spawn_rate        true                true              true               false
+  spawn_weight      true                true              true               false
+  growth_rate       false               true              true               true
+  harvest_yeild     false               true              false              true 
+  rot_rate          true                true              false              true
+  damage_resistance false               false             false              true
+  
+
+  ──────────────────────────────────────────────
+  AbilityEffectType
+  ──────────────────────────────────────────────
+  name 
+  ──────────  
+  plot_buff
+  condition_grant
+  energy_restore
+  multiply_output
+  xp_grant
+
+──────────────────────────────────────────────
+AbilityTargetType
+──────────────────────────────────────────────
+  name              
+  ──────────        
+  discipline_xp
+  drop_plant
+  drop_species
+  drop_forage
+  drop_item
+  crafting_yield
+  crafting_quantity
+  recovery_rate
+  energy_cost
+  treatment_given
+  treatment_recieved
+  constuction_speed
+  faction_rep
+  scouting_range
+  healing_recieved
+  healing_given
+
+──────────────────────────────────────────────
+AbilityThresholdType
+──────────────────────────────────────────────
+  name              
+  ──────────
+  hp
+  nutrition
+  hydration
+
+──────────────────────────────────────────────
+TargetScope
+──────────────────────────────────────────────
+  name                 isAbilityTarget    isPresenceScope    isPowerScope
+  ──────────           ─────────────────  ─────────────────  ─────────────────
+  self                 true               false              false
+  action_target        true               false              false
+  action_participant   true               false              false
+  area                 true               false              false
+  housing_structure    false              true               false
+  housing_plot         false              true               false
+  colocated_entities   false              true               false
+  camp_entities        false              true               false
+  camp_structures      false              true               false
+  structure            false              false              true
+  camp                 false              false              true
+  location             false              false              true
+  faction              false              false              true
+
+
+ ──────────────────────────────────────────────
+ TargetTrigger
+ ──────────────────────────────────────────────
+  name              
+  ──────────        
+  completion
+  success
+  failure
+
+──────────────────────────────────────────────
+ StackBehavior
+ ──────────────────────────────────────────────
+  name              
+  ──────────        
+  refresh
+  stack
+  ignore
 
 ──────────────────────────────────────────────
 FuelType                                [ DONE ]
 ──────────────────────────────────────────────
-Static seed values. Declares what category of fuel a power source structure accepts.
-Items carry a matching fuelTypeId. Power consumers (isPowered = true) do not filter by
-fuel type — matching only applies between items and the source that accepts them.
+Static seed values. Declares the category of energy a power source produces or accepts
+as item deposits. Items carry a fuelTypeId — when deposited into an active source, the
+item is consumed if its fuelTypeId matches one of the source's input types, and its
+fuelValue is added to the source's fuel pool.
 
-Constraint: each item has a single fuelValue. If an item qualifies as multiple fuel types,
-it yields the same point value regardless of which source it is deposited into.
+Consumers (StructureDef.isPowered / StructureDef_Upgrade.isPowered) declare which output
+FuelTypes satisfy them via StructureDef_AcceptedFuelType and
+StructureDef_Upgrade_AcceptedFuelType. A source satisfies a consumer when at least one of
+the source's output types is in the consumer's accepted set. Empty accepted set = any
+output type satisfies it.
+
+Examples: a bonfire consumer has AcceptedFuelType = Burnable — only a Burnable-output
+source powers it. An air conditioner has AcceptedFuelType = Electric — only an
+Electric-output source powers it.
 
 Values:
   Burnable
   Electric
   Steam
   Alchemical
+  Renewable
 
 
 ──────────────────────────────────────────────
@@ -210,10 +319,10 @@ Each type has a corresponding config table (except storage, which uses Structure
   medical   StructureDef_MedicalConfig      treatment/exam roll bonus, recovery modifier, contagion resist
   compost   StructureDef_CompostConfig      conversion days, weight/volume capacity; MUST pair with storage
   crafting  StructureDef_CraftingConfig     crafting roll bonus, output quantity bonus, supported interactions
-  fuel      StructureDef_FuelConfig         generatorType (active|passive), scope (structure|camp|location|faction), capacity, burn rate;
+  power     StructureDef_FuelConfig         generatorType (active|passive), scope (structure|camp|location|faction), capacity, burn rate;
             —                               active: accepts item deposits matching fuelTypeId
             —                               passive: generates from env conditions via StructureDef_FuelConfig_EnvCondition
-            —                               structure: explicit targets via Structure_FuelTarget (one per target)
+            —                               structure: satisfies only the structure this source is built into (multi-type def)
             —                               camp: satisfies all isPowered in the same camp
             —                               location: satisfies all isPowered across all camps in the location
             —                               faction: satisfies all isPowered across the entire faction
@@ -224,18 +333,29 @@ UpgradeEffectType                       [ DONE ]
 ──────────────────────────────────────────────
 Developer-seeded only. Each row names an upgrade effect and declares which
 StructureType categories accept it. The worker switches on name to apply logic.
-validFor = comma-separated list; "all" = every structure type.
 
-  name                  validFor                                    requiresEnvTarget  isFuel
-  ────────────────────  ──────────────────────────────────────────  ─────────────────  ──────
+Column meanings:
+  validFor          — which structure type categories accept this effect; "all" = every type.
+                      The app validates this at upgrade definition time.
+  requiresEnvTarget — when true, the upgrade effect row must specify a targetEnvConditionId
+                      (which env condition to target). Required for env_override (condition to
+                      suppress) and env_inject (condition to add). Null targetEnvConditionId
+                      is a misconfiguration when this is true — flagged at app layer.
+  isPower           — whether this effect is valid for power-type structures. Stored as a
+                      separate boolean (isPower) in the schema alongside isStorage, isFarming,
+                      etc. because each structure type has its own flag column. For "all"
+                      effects this is true; for type-specific effects it matches the type.
+
+  name                  validFor                                    requiresEnvTarget  isPower
+  ────────────────────  ──────────────────────────────────────────  ─────────────────  ───────
   solid_capacity        storage                                     false              false
   liquid_capacity       storage                                     false              false
   rot_modifier          storage                                     false              false
   security_rating       storage                                     false              false
   plot_count            farming                                     false              false
   growth_rate           farming                                     false              false
-  season_override       all                                         false              false
-  env_override          all                                         true               false
+  env_override          all                                         true               true
+  env_inject            all                                         true               true
   soil_quality          farming                                     false              false
   comfortable_capacity  housing                                     false              false
   max_capacity          housing                                     false              false
@@ -246,13 +366,13 @@ validFor = comma-separated list; "all" = every structure type.
   crafting_roll_bonus   crafting                                    false              false
   output_quantity_bonus crafting                                    false              false
   conversion_speed      compost                                     false              false
-  fuel_capacity         fuel                                        false              true
-  fuel_efficiency       fuel                                        false              true
-  passive_gen_rate      fuel                                        false              true
-  weight_capacity       compost                                     false
-  volume_capacity       compost                                     false
-  damage_resistance     all                                         false
-  filth_reduction       all                                         false
+  fuel_capacity         power                                       false              true
+  fuel_efficiency       power                                       false              true
+  passive_gen_rate      power                                       false              true
+  weight_capacity       compost                                     false              false
+  volume_capacity       compost                                     false              false
+  damage_resistance     all                                         false              true
+  filth_reduction       all                                         false              true
 
 
 ──────────────────────────────────────────────
@@ -368,7 +488,7 @@ Values:
 EquipmentSlotType                       [ DONE ]
 ──────────────────────────────────────────────
   name   defaultCapacity  isUnlimited
-  Hand   1                false
+  Hand   2                false
   Chest  1                false
   Head   1                false
   Innate 1                true
@@ -684,18 +804,16 @@ BehaviorRedirectTarget                  [ DONE ]
 ──────────────────────────────────────────────
 EnvModifierType                         [ DONE ]
 ──────────────────────────────────────────────
+Global world-effect multipliers. Only two types remain — all other effects
+(plant growth, foraging rates, encounter rates, illness progression) are now
+per-entity via PlantDef_EnvConditionEffect, Species_EnvConditionEffect, and
+ConditionDef_EnvRule.
+
 Values:
-  filth
-  prey_weight
-  herb_chance
-  herb_amount
-  gather_chance
-  gather_amount
-  spoilage
-  predator
-  sickness
-  hazard_chance
-  plant_growth    — crop / cultivated-plant growth rate multiplier (farming system)
+  filth    daily filth gain multiplier
+  spoilage food spoilage rate multiplier
+
+Event weight boosting is handled per-condition via EnvCondition_EventDef rows, not here.
 
 
 ──────────────────────────────────────────────
@@ -925,73 +1043,78 @@ Removed from original list as redundant:
 ──────────────────────────────────────────────
 EnvCondition                            [ DONE ]
 ──────────────────────────────────────────────
-World modifier values are multipliers: 1.0 = no effect, 1.30 = +30% per stack, 0.70 = -30% per stack.
-Formula: effectiveMod = 1.0 + (value − 1.0) × stackCount
-Stat and proficiency modifiers are left to guild customization (not globally seeded).
-Conditions with no world modifiers are baseline states (marked with —).
-NEW entries added to fill gradient gaps; originals are unchanged.
+Only two global modifier types remain: filth, spoilage.
+Values are signed deltas: 0.3 = +30% per stack, -0.3 = -30% per stack.
+Formula: effectiveMod = 1.0 + value × stackCount
+Conditions with no global modifiers are marked with —. Their effects on plants,
+species, and illnesses are expressed via per-entity tables (PlantDef_EnvConditionEffect,
+Species_EnvConditionEffect, ConditionDef_EnvRule) seeded separately.
 
   TEMPERATURE / PRECIPITATION
-  codeName       name       modifiers
-  cold           Cold       spoilage=0.7  sickness=1.3  herb_chance=0.8  herb_amount=0.8  prey_weight=0.9  gather_chance=0.8  gather_amount=0.8  plant_growth=0.7
-  frost          Frost      spoilage=0.5  sickness=1.5  herb_chance=0.6  herb_amount=0.6  prey_weight=0.8  gather_chance=0.6  gather_amount=0.6  predator=0.8  hazard_chance=1.2  plant_growth=0.5
-  snow           Snow       spoilage=0.5  sickness=1.4  herb_chance=0.5  herb_amount=0.5  prey_weight=0.8  gather_chance=0.6  gather_amount=0.5  hazard_chance=1.2  plant_growth=0.4
-  freezing       Freezing   spoilage=0.4  sickness=1.6  herb_chance=0.4  herb_amount=0.4  prey_weight=0.7  gather_chance=0.5  gather_amount=0.4  predator=0.7  hazard_chance=1.5  plant_growth=0.2   [NEW]
-  warm           Warm       spoilage=1.2  herb_chance=1.05  gather_chance=1.05  plant_growth=1.2                                                                                                       [NEW]
-  heat           Heat       spoilage=1.5  sickness=1.2  herb_chance=0.9  herb_amount=0.9  predator=0.9  plant_growth=1.1
-  scorching      Scorching  spoilage=1.8  sickness=1.4  herb_chance=0.7  herb_amount=0.7  predator=0.8  hazard_chance=1.5  plant_growth=0.7                                                            [NEW]
-  icy            Icy        hazard_chance=1.4  plant_growth=0.3
+  codeName       name           modifiers
+  cold           Cold           spoilage=-0.3
+  frost          Frost          spoilage=-0.5
+  snow           Snow           spoilage=-0.5
+  freezing       Freezing       spoilage=-0.6                                   [NEW]
+  warm           Warm           spoilage=0.2                                    [NEW]
+  heat           Heat           spoilage=0.5
+  scorching      Scorching      spoilage=0.8                                    [NEW]
+  icy            Icy            —
 
   MOISTURE
   codeName  name   modifiers
-  humid     Humid  filth=1.2  spoilage=1.6  sickness=1.3  plant_growth=1.3
-  damp      Damp   filth=1.2  spoilage=1.3  sickness=1.1  herb_chance=1.1  herb_amount=1.1  plant_growth=1.2
-  rain      Rain   filth=1.3  spoilage=1.2  sickness=1.2  gather_chance=0.8  gather_amount=0.8  predator=0.9  plant_growth=1.2
-  storm     Storm  filth=1.5  spoilage=1.2  sickness=1.3  gather_chance=0.4  gather_amount=0.4  predator=0.6  hazard_chance=1.8  plant_growth=0.8
-  flood     Flood  filth=1.5  gather_chance=0.5  gather_amount=0.5  predator=0.7  hazard_chance=1.5  plant_growth=0.6
-  dry       Dry    herb_chance=0.8  herb_amount=0.8  gather_chance=0.8  gather_amount=0.8  plant_growth=0.8
-  arid      Arid   herb_chance=0.6  herb_amount=0.6  gather_chance=0.6  gather_amount=0.6  spoilage=0.5  plant_growth=0.5                                                            [NEW]
+  humid     Humid  filth=0.2  spoilage=0.6
+  damp      Damp   filth=0.2  spoilage=0.3
+  rain      Rain   filth=0.3  spoilage=0.2
+  storm     Storm  filth=0.5  spoilage=0.2
+  flood     Flood  filth=0.5
+  dry       Dry    —
+  arid      Arid   spoilage=-0.5                                                [NEW]
 
   WIND
   codeName  name     modifiers
-  still     Still    —                                                                                                                                                                [NEW]
-  breezy    Breezy   filth=1.1                                                                                                                                                        [NEW]
-  windy     Windy    filth=1.3  sickness=1.1  predator=0.8  plant_growth=0.9
-  gusting   Gusting  filth=1.4  sickness=1.1  predator=0.7  hazard_chance=1.3  plant_growth=0.8                                                                                      [NEW]
+  still     Still    —                                                          [NEW]
+  breezy    Breezy   filth=0.1                                                  [NEW]
+  windy     Windy    filth=0.3
+  gusting   Gusting  filth=0.4                                                   [NEW]
 
   AIR / GROUND CONDITIONS
-  codeName  name     modifiers
-  fog       Fog      gather_chance=0.9  gather_amount=0.9  predator=1.2  hazard_chance=1.2
-  misty     Misty    predator=1.1  gather_chance=0.95  hazard_chance=1.1  plant_growth=1.05                                                                                          [NEW]
-  hazy      Hazy     gather_chance=0.9  gather_amount=0.9                                                                                                                            [NEW]
-  dusty     Dusty    filth=1.2  sickness=1.1  plant_growth=0.9
-  filth     Filth    filth=1.5  sickness=1.4  plant_growth=0.8
-  muddy     Muddy    filth=1.3  gather_chance=0.9  gather_amount=0.9  hazard_chance=1.1  plant_growth=0.9
-  pollen    Pollen   sickness=1.2
-  smoke     Smoke    sickness=1.4  gather_chance=0.7  gather_amount=0.7  predator=0.7  hazard_chance=1.5  plant_growth=0.8
-  toxic     Toxic    sickness=1.6  herb_chance=0.5  herb_amount=0.5  gather_chance=0.6  predator=0.7  hazard_chance=1.4  plant_growth=0.4
+  codeName  name    modifiers
+  fog       Fog     —
+  misty     Misty   —                                                           [NEW]
+  hazy      Hazy    —                                                           [NEW]
+  dusty     Dusty   filth=0.2
+  filth     Filth   filth=0.5
+  muddy     Muddy   filth=0.3
+  pollen    Pollen  —
+  smoke     Smoke   —
+  toxic     Toxic   —
 
   LIGHT / SKY
   codeName       name           modifiers
-  overcast       Overcast       plant_growth=0.9
-  sunny          Sunny          spoilage=1.2  herb_chance=1.1  herb_amount=1.1  gather_chance=1.1  gather_amount=1.1  plant_growth=1.2
-  harsh_sunlight Harsh Sunlight spoilage=1.3  sickness=1.2  hazard_chance=1.3  herb_amount=0.9  plant_growth=0.8                                                                     [NEW]
-  bright         Bright         plant_growth=1.1                                                                                                                                     [NEW]
-  dappled_light  Dappled Light  herb_chance=1.05  herb_amount=1.05  plant_growth=1.1                                                                                                 [NEW]
-  shaded         Shaded         plant_growth=0.85                                                                                                                                    [NEW]
-  dim            Dim            predator=1.2  gather_chance=0.8  gather_amount=0.8  herb_chance=0.8  plant_growth=0.7                                                                [NEW]
-  dark           Dark           predator=1.4  gather_chance=0.6  gather_amount=0.6  herb_chance=0.6  plant_growth=0.5                                                                [NEW]
+  overcast       Overcast       —
+  sunny          Sunny          spoilage=0.2
+  harsh_sunlight Harsh Sunlight spoilage=0.3                                   [NEW]
+  bright         Bright         —                                               [NEW]
+  dappled_light  Dappled Light  —                                               [NEW]
+  shaded         Shaded         —                                               [NEW]
+  dim            Dim            —                                               [NEW]
+  dark           Dark           —                                               [NEW]
 
   LAND USE
-  codeName    name        modifiers
-  cultivated  Cultivated  herb_chance=2.5  herb_amount=2.5  gather_chance=1.4  gather_amount=1.3  predator=1.5  hazard_chance=1.5  plant_growth=2.0
+  codeName   name       modifiers
+  cultivated Cultivated —
+  (No global modifiers. Effects on plants/species seeded via per-entity tables.)
 
-  SEASONAL (applied by season rows — represent the ambient feel of the period)
-  codeName         name             modifiers
-  leafbare_lean    Leaf-bare Lean   prey_weight=0.4  herb_chance=0.4  herb_amount=0.5  gather_chance=0.6  gather_amount=0.5  spoilage=0.35  sickness=1.4  predator=0.7  hazard_chance=1.2  plant_growth=0.3
-  newleaf_bloom    New-leaf Bloom   prey_weight=1.1  herb_chance=1.4  herb_amount=1.3  gather_chance=1.2  gather_amount=1.2  spoilage=1.1   sickness=1.3  predator=1.2  hazard_chance=1.2  plant_growth=1.4
-  greenleaf_heat   Green-leaf Heat  prey_weight=1.3  herb_chance=1.2  herb_amount=1.2  gather_chance=1.2  gather_amount=1.2  spoilage=1.6   sickness=0.8  predator=1.3  filth=1.2  plant_growth=1.3
-  leaffall_plenty  Leaf-fall Plenty prey_weight=1.3  herb_chance=0.9  herb_amount=0.9  sickness=1.1  predator=1.2  plant_growth=0.8
+  SEASONAL (contributed by season rows only — one condition per season)
+  Per-plant and per-species seasonal effects are seeded via PlantDef_EnvConditionEffect
+  and Species_EnvConditionEffect rows referencing these codeNames directly.
+
+  codeName  name    modifiers
+  spring    Spring  filth=0.1
+  summer    Summer  spoilage=0.6  filth=0.2
+  autumn    Autumn  —
+  winter    Winter  spoilage=-0.65
 
 ──────────────────────────────────────────────
 ActionSystemType                        [ DONE ]
@@ -1016,13 +1139,13 @@ ActionType                              [ DONE ]
 All rows: guildId = "global"
 
 Seeded fields: name · displayName · systemTypeId · isInteractive
-               requiresCanMentor · allowApprenticesWithAdult · requiresCanLeadEvents · minAgeMoons
+               requiresCanMentor · allowApprenticesWithAdult · requiresCanLeadEvents · minAge
 
 Costs and rewards (energyCost, dailyLimit, minEntities, maxEntities, durationMinutes, baseFactionReward,
 DisciplineRewards) are NOT seeded globally — each guild configures these via Guild_ActionConfig
 and ActionType_DisciplineReward.
 
-  name           displayName          systemTypeId  isInteractive  requiresCanMentor  allowApprenticesWithAdult  requiresCanLeadEvents  minAgeMoons  notes
+  name           displayName          systemTypeId  isInteractive  requiresCanMentor  allowApprenticesWithAdult  requiresCanLeadEvents  minAge  notes
   ─────────────  ───────────────────  ────────────  ─────────────  ─────────────────  ─────────────────────────  ─────────────────────  ───────────  ─────────────────────────────────────────────────────────────
   border_patrol  Border Patrol        patrol        false          false              true                       false                  null
   hunting        Hunting Run          hunting       false          false              true                       false                  null         Combat XP distributed by engine, not DisciplineReward

@@ -77,7 +77,8 @@ Every item has exactly one Item row.
                              Only meaningful for Volume items; feeds storage
                              fluidCapacity. Ignored for Count and Weight items.
 
-  decayDays         Int?     Base days until fully decayed. Null = never decays.
+  rotCap            Int?     Max rot points until fully decayed. Null = never decays.
+                             1 point = 1 day at base rate. 60 = lasts 60 days with no modifiers.
   maxDurability     Int?     Max durability for equipment. Null = indestructible.
   maxUses           Int?     Max uses before the item is depleted. Null = unlimited.
   fuelValue         Int?     Fuel units provided when used as a heat/cooking source.
@@ -140,7 +141,10 @@ Seeded types:
   Tool      non-combat usable tool
   Plant     flora — gathered, used in medicine and processing
   Medicine  usable in the medicine/treatment system (herbs, bandages, splints)
-  Fuel      can be used as a heat/cooking fuel source
+  Fuel_Burnable   conventional combustible fuel (wood, coal, tallow)
+  Fuel_Electric   electrical energy source (batteries, charged cells)
+  Fuel_Steam      pressurised steam (boilers, steam canisters)
+  Fuel_Alchemical alchemical or magical energy source (reagent canisters, mana cells)
   Food      consumable item
   Ore       raw unrefined ore; drives smelting system participation
   Ingot     smelted metal bar; drives forging system participation
@@ -285,7 +289,10 @@ expiration modifiers live on the owner join table, not on Storage itself.
                         Count  → number of units (e.g. 5 leaves)
                         Weight → grams (e.g. 80g of paste)
                         Volume → millilitres (e.g. 150ml of oil)
-    storedAt          Timestamp used to calculate decay progress.
+    rotProgression    Accumulated rot points. Increments each daily tick by the effective
+                      rot rate (1.0 at base, modified by storage.expirationModifier and
+                      active spoilage env conditions). Rot% = rotProgression / item.rotCap.
+                      Only relevant when item.rotCap is non-null.
     craftBonus        Flat bonus accumulated through crafting skill rolls. Carried
                       forward to recipe outputs when RecipeOutput.craftBonusApplies = true.
     currentDurability Tracks remaining durability. Null when maxDurability is null.
@@ -294,10 +301,12 @@ expiration modifiers live on the owner join table, not on Storage itself.
     chosenProfileId   Which ItemEquipmentProfile was selected at equip time.
     equippedAt        Timestamp set when equipped; null when not equipped.
 
-  Decay formula (app-side):
-    Structure storage:  decay% = days_elapsed / (item.decayDays × structure_storage.expirationModifier × season_modifier)
-    Entity storage:     decay% = days_elapsed / (item.decayDays × season_modifier)
-    Only relevant when item.decayDays is non-null.
+  Rot formula (app-side, per daily tick):
+    Structure storage:  rotProgression += 1.0 × structure_storage.expirationModifier × spoilage_mod
+    Entity storage:     rotProgression += 1.0 × spoilage_mod
+    spoilage_mod = effectiveMod from active spoilage EnvCondition_Modifier at the location.
+    rot% = rotProgression / item.rotCap. Item is fully rotten when rotProgression >= item.rotCap.
+    Only relevant when item.rotCap is non-null.
 
   RULE: currentDurability and usesRemaining must always be null if their respective
         Item.maxDurability / Item.maxUses are null, and non-null otherwise.
@@ -408,7 +417,7 @@ those systems use ItemType instead.
   "How much can a structure storage hold by weight?" → Structure_Storage.weightCapacity
   "How much can a structure storage hold by fluid?"  → Structure_Storage.fluidCapacity
   "How much can an entity inventory hold?"           → Entity_Storage.weightCapacity / fluidCapacity
-  "Does this item decay?"                            → Item.decayDays (null = never decays)
+  "Does this item decay?"                            → Item.rotCap (null = never decays)
   "Is this item dangerous to use?"                   → ItemWarning + Item_Warning
   "Does this item spawn a condition on use?"         → ItemWarning (conditionDefId + triggeredByInteractionId)
   "What does eating/applying this herb do?"          → ItemAction → ItemEffect (symptoms)
