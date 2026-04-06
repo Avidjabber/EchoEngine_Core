@@ -4868,8 +4868,9 @@ model SpeciesDefaultLoadout {
 // currentTurnOrder: the turnOrder value of the participant currently taking their turn.
 //   Participants and NPC entities each have a unique turnOrder set at combat start.
 //
-// outcome: null = ongoing; "completed" = one ally faction remains; "draw" = all factions eliminated simultaneously.
-// winningAllyFactionId: the allyFactionId of the surviving faction; null if draw or ongoing.
+// outcome: null = ongoing; "win" = one ally faction remains; "lose" = all player-side participants defeated or fled;
+//   "draw" = all factions eliminated simultaneously; "completed" = inactivity timeout (isExpired = true).
+// winningAllyFactionId: the allyFactionId of the surviving faction; null if draw, completed, or ongoing.
 model ActiveCombat {
   id                   Int     @id @default(autoincrement())
   guildId              String

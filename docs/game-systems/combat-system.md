@@ -1,6 +1,6 @@
 COMBAT SYSTEM — DESIGN REFERENCE
 ==================================
-Last updated: 2026-04-03
+Last updated: 2026-04-06
 
 This file is the authoritative reference for how combat works in EchoPaw.
 Read this before touching combat resolution, encounter definitions, NPC AI,
@@ -64,8 +64,8 @@ OUTCOME TYPES
   win       — one ally faction survives; triggers loot, positive morale, XP
   lose      — all player-side participants defeated or fled
   draw      — all factions eliminated simultaneously; partial consequences
-  completed — used by event-chain combats to signal the chain can advance
-  expired   — round/time limit reached; mutual retreat; minimal consequences
+  completed — inactivity timeout (isExpired = true); no participant took action
+              in too long; mutual retreat with minimal consequences
 
 On completion, if spawned by an event chain, the event system reads
 winningAllyFactionId and advances to winStepId or loseStepId on the event step.
@@ -143,6 +143,10 @@ Strategy values: "lowest_health" | "highest_health" | "lowest_strength" | "rando
 ActiveCombat_BehaviorEffect tracks persistent multi-round effects (guard, taunt,
 parry, absorb, etc.). Rows are decremented at round start and deleted at 0.
 
+  effectTypeId  — FK → CombatEffectType; the name field holds the behavior key
+                  (e.g. "guard", "taunt", "parry", "absorb"). CombatEffectType
+                  flags describe what the effect does (redirectsDamage, forcesTargeting, etc.)
+
 Directional semantics:
   guard:  affectedParticipantId = guarding entity;  linkedParticipantId = guarded ally
   taunt:  affectedParticipantId = taunted entity;   linkedParticipantId = taunter
@@ -165,10 +169,10 @@ Used to reconstruct the Discord message narrative after each turn resolves.
   equipmentProfileId       — which item profile was used
   actionCategoryId         — Main Action or Bonus Action
   targetEntityId           — null for self-targeted or AoE actions
-  hitRoll / hit            — attack roll result and whether it connected
-  damageRoll / damageDealt — damage roll and final damage applied
-  healDealt                — HP restored (heal actions)
-  secondWindTriggered      — true if this action caused a second wind
+  hitRoll / hitModifier / hit            — attack roll, modifier applied, and whether it connected
+  damageRoll / damageModifier / damageDealt — damage roll, modifier applied, and final damage
+  healDealt                               — HP restored (heal actions)
+  secondWindTriggered                     — true if this action caused a second wind
 
 
 ─────────────────────────────────────────────
@@ -198,10 +202,12 @@ Entities that fled (hasFled = true) or were defeated earn no combat XP.
   CombatEncounterDef                   — scripted encounter definition; guild-extensible
   CombatEncounterDef_NamedEntity       — pre-pinned named entities for an encounter
   CombatInitiationType                 — spar | event | patrol | boss (seed)
-  CombatOutcome                        — win | lose | draw | completed | expired (seed)
+  CombatOutcome                        — win | lose | draw | completed (seed); completed = isExpired
   CombatActionCategory                 — Main Action | Bonus Action (seed)
   CombatTargetStrategy                 — lowest_health | highest_health | etc. (seed)
-  CombatEffectType                     — guard | taunt | parry | absorb | etc. (seed)
+  CombatEffectType                     — guard | taunt | parry | absorb | etc. (seed); flags describe behavior
+  DamageCategory                       — Physical | Magical | True (seed)
+  DamageType                           — guild-extensible; FK → DamageCategory
   CombatTargetScope                    — targetsAllies / targetsEnemies scope (seed)
   SpeciesCombatBehavior                — NPC AI action weights and target strategies
   SpeciesDefaultLoadout                — items granted to all entities of a species
