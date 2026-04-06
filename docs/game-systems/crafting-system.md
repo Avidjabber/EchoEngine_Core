@@ -1,6 +1,6 @@
 CRAFTING SYSTEM — DESIGN REFERENCE
 ===================================
-Last updated: 2026-04-03
+Last updated: 2026-04-06
 
 This file is the authoritative reference for how the crafting and ingredient
 processing systems work in EchoPaw. Read this before writing recipe seeding
@@ -149,7 +149,9 @@ convert on a timer — no recipe or crafting action is involved.
 Recipe is the root table. One row per distinct crafting operation.
 
   guildId               "global" for seeded recipes; guild snowflake for custom.
-  name                  Unique within a guild.
+  codeName              snake_case slug; unique per guild. Used as the stable reference
+                        key in seed files and bulk uploads.
+  name                  Display name; unique within a guild.
   craftingInteractionId The verb used to trigger this recipe.
   requiresDiscovery     true = hidden until the entity discovers it via
                         experimentation or an admin grants it directly.
@@ -521,10 +523,10 @@ schema.
   "Does processing change nutritional values?"       → RecipeOutput_FoodOverride (sparse patch)
   "Does processing change how quantity is measured?" → RecipeOutput.outputMeasurementTypeId
   "What tags does the output item have?"             → source Item_IngredientType + AddTag - RemoveTag
-  "Does this interaction require a structure/skill?"  → Guild_CraftingInteractionRule (relationType = "requires")
-  "Does this structure improve my output?"            → Guild_CraftingInteractionRule (relationType = "improves")
-  "Does this specific recipe require a structure/skill?" → Recipe_CraftingRequirement (relationType = "requires")
-  "Does a structure improve this specific recipe?"    → Recipe_CraftingRequirement (relationType = "improves")
+  "Does this interaction require a structure/skill?"  → Guild_CraftingInteractionRule WHERE relationTypeId → "requires"
+  "Does this structure improve my output?"            → Guild_CraftingInteractionRule WHERE relationTypeId → "improves"
+  "Does this specific recipe require a structure/skill?" → Recipe_CraftingRequirement WHERE relationTypeId → "requires"
+  "Does a structure improve this specific recipe?"    → Recipe_CraftingRequirement WHERE relationTypeId → "improves"
   "What interactions does this structure support?"   → StructureDef_CraftingConfig_Interaction
   "Does this upgrade unlock a new interaction?"      → StructureDef_Upgrade_CraftingInteraction
   "Is this item safe to delete normally?"            → yes; Item.isEphemeral only affects cleanup timing
@@ -558,13 +560,13 @@ GUILD RULES (Guild_CraftingInteractionRule)
 Per-guild rules control whether an interaction requires a structure and what improves it.
 If no rules exist for a guild+interaction, the interaction is available anywhere with no bonuses.
 
-  relationType  "requires" — the target must be present in the faction's active camp.
+  relationTypeId  Int   FK → RelationType ("requires" | "improves")
+                "requires" — the target must be present in the faction's active camp.
                 "improves" — the target is present and contributing bonuses. The bonus
                              amounts are NOT stored on the rule row — the worker reads them
                              from StructureDef_CraftingConfig (for structure targets) or
-                             StructureDef_Upgrade_Effect rows with effectType
-                             "crafting_roll_bonus" / "output_quantity_bonus" (for upgrade
-                             targets). The rule is purely a pointer.
+                             StructureDef_Upgrade_Effect rows (for upgrade targets).
+                             The rule is purely a pointer.
 
   orGroup       null    — standalone rule (AND logic). All null-group requires rows must be satisfied.
                 non-null — OR group. At least one row with the same orGroup must be satisfied.
@@ -592,7 +594,7 @@ Example — smelt requires a workshop AND (a forge OR an anvil), improved by a b
 RECIPE-LEVEL REQUIREMENTS (Recipe_CraftingRequirement)
 ─────────────────────────────────────────────────────────
 Individual recipes can also carry their own requirements using the same
-relationType / orGroup pattern. Both recipe-level and interaction-level
+relationTypeId / orGroup pattern. Both recipe-level and interaction-level
 rules are evaluated at craft time — all must pass.
 
 The same four target types are available: structureDefId, upgradeId,
