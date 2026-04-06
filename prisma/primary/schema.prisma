@@ -458,8 +458,11 @@ model Symptom {
 // Resolution: for each entry, roll d20 ≥ dropDC to drop; if success, quantity = avgQuantity × (1 ± quantityVariance).
 // For count-based items, the rolled quantity is rounded to the nearest integer by the app.
 // Seasonal/territory/weather multipliers are applied on top at the app layer.
+// Always guild-specific — there are no global drop tables.
 model DropTable {
   id          Int     @id @default(autoincrement())
+  guildId     String  @db.VarChar(50)
+  codeName    String  @db.VarChar(200) // snake_case slug; unique per guild
   name        String  @db.VarChar(200)
   description String? @db.VarChar(500)
 
@@ -469,6 +472,9 @@ model DropTable {
   combatParticipants  ActiveCombat_Participant[]  // snapshotted per-participant at combat spawn
   plantDefHarvests    PlantDef[]                 @relation("PlantDefHarvestDrop")
   plantDefUproots     PlantDef[]                 @relation("PlantDefUprootDrop")
+
+  @@unique([guildId, codeName])
+  @@index([guildId])
 }
 
 // One item entry within a drop table
@@ -1899,9 +1905,6 @@ model Faction {
 
   type String @db.VarChar(100)
 
-  // The faction's currently active camp. null = faction has no camps (campless factions rely on personal entity inventories).
-  activeCampId Int?
-
   // Faction-level event cooldown — null = no event has ever fired for this faction; updated whenever any event fires.
   // Worker skips firing any new event for this faction if now() < lastEventAt + EventDef.cooldownDays.
   lastEventAt DateTime? @db.Timestamptz
@@ -1914,12 +1917,10 @@ model Faction {
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
 
-  activeCamp Camp? @relation("FactionActiveCamp", fields: [activeCampId], references: [id], onDelete: SetNull)
-
   members                  Entity[]
   locations                Location_Faction[]
   borders                  LocationBorder[]
-  camps                    Camp[]             @relation("FactionCamps")
+  camps                    Camp_Faction[]
   ranks                    Rank_Faction[]
   activeEvents             ActiveEvent[]
   actionInstances          ActionInstance[]
@@ -1935,28 +1936,54 @@ model Faction {
 // CAMP & STRUCTURE SYSTEM
 // ============================================================
 
-// A faction's physical presence at a location. Admin-created; not built via Construction.
+// A physical camp installation at a location. Admin-created; not built via Construction.
 // Filth is tracked per-structure (Structure.filthLevel); camp-level filth is a runtime aggregate only.
 // See filth-system.md for generation formula, caps, and event trigger rules.
+//
+// Faction membership is managed via Camp_Faction (bridge table):
+//   owner  — the faction that owns and administrates this camp (exactly one; enforced at app layer)
+//   shared — factions granted access to act on this camp (e.g. a border garden shared between two factions)
+//
+// isActive: when false the worker skips this camp entirely — no events fire, no daily ticks run.
+//           Used for camps a faction is not currently occupying (e.g. seasonal camps, abandoned outposts).
 model Camp {
   id          Int     @id @default(autoincrement())
-  factionId   Int
+  guildId     String  @db.VarChar(50)
   locationId  Int
-  name        String  @db.VarChar(200)
+  codeName    String  @db.VarChar(200) // snake_case slug; unique per guild
+  name        String  @db.VarChar(200) // display name; not unique
   description String? @db.VarChar(500)
+  isActive    Boolean @default(false)  // true = included in world sim ticks; false = dormant
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt @db.Timestamptz
 
-  faction    Faction  @relation("FactionCamps",     fields: [factionId],  references: [id], onDelete: Cascade)
-  location   Location @relation(                    fields: [locationId], references: [id], onDelete: Restrict)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
+  factions        Camp_Faction[]
   structureLimits Camp_StructureLimit[]
   structures      Structure[]
-  activeFactionsHere Faction[] @relation("FactionActiveCamp")
 
-  @@index([factionId])
+  @@unique([guildId, codeName])
+  @@index([guildId])
   @@index([locationId])
+}
+
+// Faction membership for a camp.
+// role: "owner"  — administrating faction; exactly one per camp (enforced at app layer).
+//       "shared" — faction has access to act on this camp (build, harvest, house entities, etc.)
+// Deleting the owner row does not cascade-delete the camp — app layer must handle ownership transfer
+// or camp archival before removing the owning faction's row.
+model Camp_Faction {
+  campId    Int
+  factionId Int
+  role      String @db.VarChar(20) // "owner" | "shared"
+
+  camp    Camp    @relation(fields: [campId],    references: [id], onDelete: Cascade)
+  faction Faction @relation(fields: [factionId], references: [id], onDelete: Cascade)
+
+  @@id([campId, factionId])
+  @@index([factionId])
 }
 
 // Per-camp cap on how many structures of each type may be built.
