@@ -188,6 +188,7 @@ model EnvCondition {
   plantDefRequiredEnvConditions PlantDef_RequiredEnvCondition[]
   plotTypeEnvConditions         PlotType_EnvCondition[]
   structureUpgradeEffects       StructureDef_Upgrade_Effect[]
+  passiveGeneratorConditions    StructureDef_FuelConfig_EnvCondition[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -519,6 +520,32 @@ model EntityType {
   entities Entity[]
 }
 
+// Species Type (static seed data — Playable, Prey, Predator, Pet, Livestock)
+// A species can belong to multiple types; types connect to different gameplay systems.
+model SpeciesType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  species Species_SpeciesType[]
+}
+
+// Fuel Type (static seed data — Burnable, Electric, Steam, Alchemical)
+// Used on both sides of the power system:
+//   Sources:   declare input types (what items they accept) and output types (what power they produce).
+//   Items:     carry a fuelTypeId matched against a source's input types on deposit.
+//   Consumers: optionally declare accepted output types via StructureDef_AcceptedFuelType /
+//              StructureDef_Upgrade_AcceptedFuelType; empty = satisfied by any output type.
+model FuelType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  fuelConfigInputs      StructureDef_FuelConfig_InputFuelType[]       @relation("FuelConfigInput")
+  fuelConfigOutputs     StructureDef_FuelConfig_OutputFuelType[]      @relation("FuelConfigOutput")
+  items                 Item[]
+  acceptedByStructures  StructureDef_AcceptedFuelType[]
+  acceptedByUpgrades    StructureDef_Upgrade_AcceptedFuelType[]
+}
+
 // Species (guild-extensible; guildId = "global" for pre-seeded options e.g. Cat, Fox, Badger)
 // Age brackets are universal (child / teen / adult / elder); thresholds are species-specific (in moons for Cat).
 // App resolves bracket: age <= childMaxAge → child; <= teenMaxAge → teen; <= adultMaxAge → adult; else → elder.
@@ -539,8 +566,6 @@ model Species {
   guildId  String @default("global") @db.VarChar(50)
   codeName String @db.VarChar(200)  // snake_case slug; unique per guild
   name     String @db.VarChar(100)
-
-  isPlayerCreatable  Boolean @default(false)  // true = players can select this species during character creation; admins bypass this flag
 
   // Stat allocation rules — enforced at app layer on character creation and stat point spending
   initialStatMinimum Int @default(1)   // minimum value any stat can be set to during character creation
@@ -605,6 +630,7 @@ model Species {
   biomes              Species_Biome[]
   defaultAbilities    Species_DefaultAbility[]
   equipmentLoadout    Species_EquipmentLoadout[]
+  speciesTypes        Species_SpeciesType[]
   summonedByProfiles  ItemEquipmentProfile[]     @relation("ProfileSummonSpecies")
 
   @@unique([guildId, codeName])
@@ -624,6 +650,17 @@ model Species_EquipmentLoadout {
 
   @@id([speciesId, slotTypeId])
   @@index([slotTypeId])
+}
+
+model Species_SpeciesType {
+  speciesId     Int
+  speciesTypeId Int
+
+  species     Species     @relation(fields: [speciesId],     references: [id], onDelete: Cascade)
+  speciesType SpeciesType @relation(fields: [speciesTypeId], references: [id], onDelete: Restrict)
+
+  @@id([speciesId, speciesTypeId])
+  @@index([speciesTypeId])
 }
 
 // Biomes a prey or predator species can inhabit — pure presence join, no spawn weight needed.
@@ -1963,6 +2000,7 @@ model UpgradeEffectType {
   isMedical  Boolean @default(false)
   isCrafting Boolean @default(false)
   isCompost  Boolean @default(false)
+  isFuel     Boolean @default(false)
 
   requiresEnvTarget Boolean @default(false)
 
@@ -1999,10 +2037,13 @@ model StructureDef {
   dailyFilthAverage  Int?
   filthPerActivePlot Int?
   filthCap           Int?
+  isPowered          Boolean @default(false) // true = structure requires an active power source to function
+  fuelCostPerHour    Float?                  // fuel units deducted from the satisfying power source each worker tick; null if not powered
 
   structureTypes   StructureDef_StructureType[]
   buildCosts       StructureDef_BuildCost[]
   campRequirements StructureDef_CampRequirement[]
+  acceptedFuelTypes StructureDef_AcceptedFuelType[]
   relations        StructureDef_Relation[] @relation("StructureDefRelations")
   relatedTo        StructureDef_Relation[] @relation("StructureDefRelationTarget")
   storageConfig    StructureDef_StorageConfig?
@@ -2011,6 +2052,7 @@ model StructureDef {
   medicalConfig    StructureDef_MedicalConfig?
   compostConfig    StructureDef_CompostConfig?
   craftingConfig   StructureDef_CraftingConfig?
+  fuelConfig       StructureDef_FuelConfig?
   compostOutputs           Item_CompostOutput[]
   craftingInteractionRules   Guild_CraftingInteractionRule[]
   recipeCraftingRequirements Recipe_CraftingRequirement[]
@@ -2197,6 +2239,93 @@ model StructureDef_CompostConfig {
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
 }
 
+// Base config for fuel-type StructureDefs (power sources).
+//
+// generatorType: "active"  — fueled by item deposits. Items with a matching fuelTypeId are
+//                            destroyed on deposit and their fuelValue added to Structure.currentFuel.
+//               "passive"  — fueled automatically by the worker each tick based on active env
+//                            conditions. Generation rate is defined per condition in
+//                            StructureDef_FuelConfig_EnvCondition. No item deposits; fuelTypeId unused.
+//
+// scope:        "structure" — only satisfies explicitly linked targets via Structure_FuelTarget.
+//               "camp"      — satisfies all isPowered structures/upgrades in the same camp.
+//               "location"  — satisfies all isPowered structures/upgrades across all camps in
+//                             the same location. Useful for large installations (e.g. a reactor)
+//                             that sit outside a camp but serve the surrounding area.
+//               "faction"   — satisfies all isPowered structures/upgrades across the entire faction
+//                             regardless of location. Reserved for high-tier infrastructure.
+//
+// Input fuel types:  defined via StructureDef_FuelConfig_InputFuelType (join table).
+//                   Items deposited must match one of the input types.
+//                   No rows = accepts no item deposits (passive-only or input-free sources).
+// Output fuel types: defined via StructureDef_FuelConfig_OutputFuelType (join table).
+//                   What power type(s) this source produces — what consumers match against.
+//
+// fuelCapacity: max fuel units (1 unit = 1 hour) the structure can hold.
+//               Drain is driven entirely by consumers (StructureDef.fuelCostPerHour /
+//               StructureDef_Upgrade.fuelCostPerHour); the source itself has no idle drain.
+//               The worker deducts each active consumer's cost from the satisfying source's
+//               currentFuel once per tick (hourly).
+//
+// Camp-scope drain order: worker drains the lowest Structure.powerSortOrder source first;
+// ties broken by Structure.id. Structure-scope sources drain independently.
+model StructureDef_FuelConfig {
+  structureDefId        Int    @id
+  generatorType         String @db.VarChar(20) // "active" | "passive"
+  scope                 String @db.VarChar(20) // "structure" | "camp" | "location" | "faction"
+  fuelCapacity          Float  @default(100)   // max fuel units the bank can hold; upgradeable via fuel_capacity effect
+  baseGenerationPerHour Float?                 // passive sources only — base fuel units generated per hour before env condition bonuses;
+                                               // null on active sources (gain only from item deposits)
+
+  structureDef   StructureDef                               @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  inputFuelTypes StructureDef_FuelConfig_InputFuelType[]
+  outputFuelTypes StructureDef_FuelConfig_OutputFuelType[]
+  envConditions  StructureDef_FuelConfig_EnvCondition[]
+}
+
+// Fuel types a power source accepts as item inputs.
+// Each deposited item's fuelTypeId must match one of these rows.
+// No rows = source accepts no deposits (passive generators, or intentional input-free designs).
+model StructureDef_FuelConfig_InputFuelType {
+  structureDefId Int
+  fuelTypeId     Int
+
+  fuelConfig StructureDef_FuelConfig @relation(fields: [structureDefId], references: [structureDefId], onDelete: Cascade)
+  fuelType   FuelType                @relation("FuelConfigInput",        fields: [fuelTypeId],          references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, fuelTypeId])
+  @@index([fuelTypeId])
+}
+
+// Fuel types a power source produces — what consumers match against when resolving power.
+// A source may output multiple types (e.g. a multi-output generator producing both Burnable heat and Electric).
+model StructureDef_FuelConfig_OutputFuelType {
+  structureDefId Int
+  fuelTypeId     Int
+
+  fuelConfig StructureDef_FuelConfig @relation(fields: [structureDefId], references: [structureDefId], onDelete: Cascade)
+  fuelType   FuelType                @relation("FuelConfigOutput",       fields: [fuelTypeId],          references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, fuelTypeId])
+  @@index([fuelTypeId])
+}
+
+// Env conditions that drive generation for a passive power source.
+// Each tick the worker sums (stack count × generationRatePerStack) across all active conditions
+// linked here and adds the result to Structure.currentFuel, capped at fuelCapacity.
+// A passive source with no rows generates nothing (misconfigured — flagged at app layer).
+model StructureDef_FuelConfig_EnvCondition {
+  structureDefId         Int
+  envConditionId         Int
+  generationRatePerStack Float @default(1.0) // fuel units added per hour per stack of this condition
+
+  fuelConfig   StructureDef_FuelConfig @relation(fields: [structureDefId], references: [structureDefId], onDelete: Cascade)
+  envCondition EnvCondition            @relation(fields: [envConditionId], references: [id],             onDelete: Restrict)
+
+  @@id([structureDefId, envConditionId])
+  @@index([envConditionId])
+}
+
 // A single in-progress compost batch. Created when an eligible item is deposited;
 // the item is consumed immediately (removed from inventory). On convertsAt, the worker:
 //   1. Looks up Item_CompostOutput rows for deposit.itemId.
@@ -2220,6 +2349,47 @@ model Structure_CompostDeposit {
   @@index([convertsAt])
 }
 
+// Links a fuel structure instance to the structure(s) it heats or cools.
+// One fuel source may serve multiple targets; one target may have multiple fuel sources
+// (effects stack at the app layer).
+// Created at guild config time (or by the player who installs the fuel structure).
+model Structure_FuelTarget {
+  fuelStructureId   Int
+  targetStructureId Int
+
+  fuelStructure   Structure @relation("FuelSource", fields: [fuelStructureId],   references: [id], onDelete: Cascade)
+  targetStructure Structure @relation("FuelTarget", fields: [targetStructureId], references: [id], onDelete: Cascade)
+
+  @@id([fuelStructureId, targetStructureId])
+  @@unique([targetStructureId]) // a structure may have at most one dedicated power source
+}
+
+// Fuel types a powered StructureDef will accept from power sources.
+// Empty = accepts any fuel type. Populated = only matched fuel types satisfy this structure's power requirement.
+model StructureDef_AcceptedFuelType {
+  structureDefId Int
+  fuelTypeId     Int
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  fuelType     FuelType     @relation(fields: [fuelTypeId],     references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, fuelTypeId])
+  @@index([fuelTypeId])
+}
+
+// Fuel types a powered upgrade will accept from power sources.
+// Empty = accepts any fuel type. Populated = only matched fuel types satisfy this upgrade's power requirement.
+model StructureDef_Upgrade_AcceptedFuelType {
+  upgradeId  Int
+  fuelTypeId Int
+
+  upgrade  StructureDef_Upgrade @relation(fields: [upgradeId],  references: [id], onDelete: Cascade)
+  fuelType FuelType             @relation(fields: [fuelTypeId], references: [id], onDelete: Restrict)
+
+  @@id([upgradeId, fuelTypeId])
+  @@index([fuelTypeId])
+}
+
 // A discrete, independently applicable upgrade for a StructureDef.
 // maxApplications: 1 = one-time only; > 1 = stackable up to this limit.
 // constructionPoints: progress points required to apply this upgrade.
@@ -2232,6 +2402,8 @@ model StructureDef_Upgrade {
   description        String? @db.VarChar(1000)
   maxApplications    Int
   constructionPoints Int
+  isPowered          Boolean @default(false) // true = upgrade's effects are suspended when no active power source satisfies it
+  fuelCostPerHour    Float?                  // fuel units deducted from the satisfying power source each worker tick; null if not powered
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
 
@@ -2244,6 +2416,7 @@ model StructureDef_Upgrade {
   recipeCraftingRequirements Recipe_CraftingRequirement[]
   appliedUpgrades            Structure_AppliedUpgrade[]
   constructions        Construction[]
+  acceptedFuelTypes    StructureDef_Upgrade_AcceptedFuelType[]
 
   @@index([structureDefId])
 }
@@ -2316,6 +2489,10 @@ model Structure {
   currentDurability  Int
   filthLevel         Int     @default(0)
   name               String? @db.VarChar(200)
+  currentFuel        Float?               // null = not a fuel structure; 0–fuelCapacity when fuel type
+  isFuelActive       Boolean @default(false) // power SOURCE toggle — worker only drains/generates when true
+  isPoweredOn        Boolean @default(false) // power CONSUMER toggle — when false, powered functionality disabled and no fuel drawn
+  powerSortOrder     Int?                 // null = not a camp-scope power source; lower = drained first by worker
 
   camp         Camp         @relation(fields: [campId],         references: [id], onDelete: Cascade)
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Restrict)
@@ -2326,6 +2503,8 @@ model Structure {
   plots            Plot[]
   residents        Entity_Housing[]
   compostDeposits  Structure_CompostDeposit[]
+  fuelTargets      Structure_FuelTarget[]     @relation("FuelSource")
+  fuelSources      Structure_FuelTarget[]     @relation("FuelTarget")
 
   @@index([campId])
   @@index([structureDefId])
@@ -2337,6 +2516,7 @@ model Structure_AppliedUpgrade {
   structureId Int
   upgradeId   Int
   appliedAt   DateTime @default(now()) @db.Timestamptz
+  isPoweredOn Boolean  @default(false) // power CONSUMER toggle for powered upgrades — when false, upgrade effects suspended and no fuel drawn
 
   structure Structure            @relation(fields: [structureId], references: [id], onDelete: Cascade)
   upgrade   StructureDef_Upgrade @relation(fields: [upgradeId],   references: [id], onDelete: Restrict)
@@ -2696,7 +2876,10 @@ model Item {
   decayDays         Int?                // base days until fully decayed; null = does not decay
   maxDurability Int?                 // max durability for equipment; null = indestructible
   maxUses       Int?                 // max uses before depletion; null = unlimited
-  fuelValue     Int?                 // fuel units provided when used as a heat/cooking source; null = not a fuel item
+  fuelValue     Int?                 // fuel units added to a power source's bank on deposit; null = not a fuel item
+                                    // constraint: a single fuelValue applies regardless of which fuel type the item is deposited as —
+                                    // items that qualify as multiple fuel types yield the same point value in all cases
+  fuelTypeId    Int?                 // fuel category of this item — matched against StructureDef_FuelConfig_InputFuelType on deposit; null = not a fuel item
 
   // Ephemeral items are created at craft time by the recipe system (e.g. Dried Yarrow Leaf, Yarrow Paste).
   // App deletes the Item row when the last StoredItem referencing it is consumed or removed.
@@ -2711,6 +2894,7 @@ model Item {
   updatedAt DateTime @updatedAt @db.Timestamptz
 
   measurementType MeasurementType? @relation(fields: [measurementTypeId], references: [id], onDelete: Restrict)
+  fuelType        FuelType?        @relation(fields: [fuelTypeId],        references: [id], onDelete: Restrict)
 
   types           Item_Type[]
   warnings        Item_Warning[]

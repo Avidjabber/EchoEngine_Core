@@ -46,6 +46,33 @@ EntityType                              [ DONE ]
 
 
 ──────────────────────────────────────────────
+SpeciesType                             [ DONE ]
+──────────────────────────────────────────────
+Role types (connect to gameplay systems):
+  Playable
+  Prey
+  Predator
+  Pet
+  Livestock
+  Vermin
+
+Biological types (taxonomy; a species can carry both a role and a biological type):
+  Mammal
+  Bird
+  Reptile
+  Amphibian
+  Fish
+  Insect
+  Arachnid
+  Crustacean
+
+Habitat types (environment; orthogonal to biology — e.g. a whale is Mammal + Aquatic):
+  Aquatic
+  Aerial
+  Subterranean
+
+
+──────────────────────────────────────────────
 Sex                                     [ DONE ]
 ──────────────────────────────────────────────
 Values:
@@ -98,7 +125,10 @@ Values:
   Tool
   Plant
   Medicine
-  Fuel
+  Fuel_Burnable
+  Fuel_Electric
+  Fuel_Steam
+  Fuel_Alchemical
   Food
   Ore
   Ingot
@@ -150,6 +180,23 @@ Developer-seeded only. Boolean flags control which systems each value is valid f
 
 
 ──────────────────────────────────────────────
+FuelType                                [ DONE ]
+──────────────────────────────────────────────
+Static seed values. Declares what category of fuel a power source structure accepts.
+Items carry a matching fuelTypeId. Power consumers (isPowered = true) do not filter by
+fuel type — matching only applies between items and the source that accepts them.
+
+Constraint: each item has a single fuelValue. If an item qualifies as multiple fuel types,
+it yields the same point value regardless of which source it is deposited into.
+
+Values:
+  Burnable
+  Electric
+  Steam
+  Alchemical
+
+
+──────────────────────────────────────────────
 StructureType                           [ DONE ]
 ──────────────────────────────────────────────
 Developer-seeded only. Guilds reference these when defining their own StructureDefs.
@@ -163,6 +210,13 @@ Each type has a corresponding config table (except storage, which uses Structure
   medical   StructureDef_MedicalConfig      treatment/exam roll bonus, recovery modifier, contagion resist
   compost   StructureDef_CompostConfig      conversion days, weight/volume capacity; MUST pair with storage
   crafting  StructureDef_CraftingConfig     crafting roll bonus, output quantity bonus, supported interactions
+  fuel      StructureDef_FuelConfig         generatorType (active|passive), scope (structure|camp|location|faction), capacity, burn rate;
+            —                               active: accepts item deposits matching fuelTypeId
+            —                               passive: generates from env conditions via StructureDef_FuelConfig_EnvCondition
+            —                               structure: explicit targets via Structure_FuelTarget (one per target)
+            —                               camp: satisfies all isPowered in the same camp
+            —                               location: satisfies all isPowered across all camps in the location
+            —                               faction: satisfies all isPowered across the entire faction
 
 
 ──────────────────────────────────────────────
@@ -172,26 +226,29 @@ Developer-seeded only. Each row names an upgrade effect and declares which
 StructureType categories accept it. The worker switches on name to apply logic.
 validFor = comma-separated list; "all" = every structure type.
 
-  name                  validFor                                    requiresEnvTarget
-  ────────────────────  ──────────────────────────────────────────  ─────────────────
-  solid_capacity        storage                                     false
-  liquid_capacity       storage                                     false
-  rot_modifier          storage                                     false
-  security_rating       storage                                     false
-  plot_count            farming                                     false
-  growth_rate           farming                                     false
-  season_override       farming                                     false
-  env_override          farming                                     true
-  soil_quality          farming                                     false
-  comfortable_capacity  housing                                     false
-  max_capacity          housing                                     false
-  treatment_bonus       medical                                     false
-  exam_bonus            medical                                     false
-  recovery_modifier     medical                                     false
-  contagion_resist      medical                                     false
-  crafting_roll_bonus   crafting                                    false
-  output_quantity_bonus crafting                                    false
-  conversion_speed      compost                                     false
+  name                  validFor                                    requiresEnvTarget  isFuel
+  ────────────────────  ──────────────────────────────────────────  ─────────────────  ──────
+  solid_capacity        storage                                     false              false
+  liquid_capacity       storage                                     false              false
+  rot_modifier          storage                                     false              false
+  security_rating       storage                                     false              false
+  plot_count            farming                                     false              false
+  growth_rate           farming                                     false              false
+  season_override       all                                         false              false
+  env_override          all                                         true               false
+  soil_quality          farming                                     false              false
+  comfortable_capacity  housing                                     false              false
+  max_capacity          housing                                     false              false
+  treatment_bonus       medical                                     false              false
+  exam_bonus            medical                                     false              false
+  recovery_modifier     medical                                     false              false
+  contagion_resist      medical                                     false              false
+  crafting_roll_bonus   crafting                                    false              false
+  output_quantity_bonus crafting                                    false              false
+  conversion_speed      compost                                     false              false
+  fuel_capacity         fuel                                        false              true
+  fuel_efficiency       fuel                                        false              true
+  passive_gen_rate      fuel                                        false              true
   weight_capacity       compost                                     false
   volume_capacity       compost                                     false
   damage_resistance     all                                         false
