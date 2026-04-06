@@ -1,6 +1,6 @@
 GLOBAL SEED DATA — REFERENCE
 ==============================
-Last updated: 2026-04-03
+Last updated: 2026-04-06
 
 This file defines all global seed values for EchoPaw. Work through each
 table one at a time. Mark a table as DONE when its values are finalised.
@@ -78,6 +78,48 @@ Habitat types (environment; orthogonal to biology — e.g. a whale is Mammal + A
 
 
 ──────────────────────────────────────────────
+PlantType                               [ DONE ]
+──────────────────────────────────────────────
+Classification tags for plant defs — many-to-many via PlantDef_PlantType.
+A plant def can carry multiple tags from different groups (e.g. a pine = Tree + Coniferous + Forest).
+Type-level env condition responses set via PlantType_EnvConditionEffect apply to all member
+plants, overridden per-plant by PlantDef_EnvConditionEffect.
+
+Growth Form (physical structure):
+  Herb       Soft-stemmed, low-growing; annual or perennial.
+  Shrub      Woody, multi-stemmed; knee- to chest-height.
+  Bush       Dense, rounded branching; commonly fruiting or flowering.
+  Tree       Single woody trunk; tall-growing.
+  Vine       Climbing or trailing stems; requires support or ground-spreads.
+  Grass      Narrow-leaved; includes sedges and reeds.
+  Fern       Frond-bearing; reproduces by spores, not seeds.
+  Moss       Low mat-forming, non-vascular; grows on surfaces.
+  Fungus     Mushrooms and toadstools; game-treated as a plant category.
+  Succulent  Water-storing; thick fleshy leaves or stems.
+
+Botanical Group (natural classification; orthogonal to growth form):
+  Coniferous  Cone-bearing; needle or scale leaves; typically evergreen.
+  Deciduous   Sheds leaves seasonally.
+  Evergreen   Retains foliage year-round (broadleaf evergreens not tagged Coniferous).
+  Flowering   Produces visible flowers; angiosperms.
+
+Habitat (primary growing environment; orthogonal to both above):
+  Aquatic   Grows in or on water.
+  Wetland   Boggy, swampy, or riparian margins.
+  Alpine    High-altitude; cold-adapted.
+  Arid      Desert or scrubland; drought-adapted.
+  Forest    Shaded woodland understory or canopy.
+  Meadow    Open, sun-exposed grassland or plains.
+  Coastal   Salt-tolerant; seaside or tidal margins.
+  Cave      Low-light or underground; includes cave fungi.
+
+Lifecycle / Cultivation (orthogonal to all above):
+  Annual      Completes its lifecycle in one growing season; must be replanted each year.
+  Perennial   Regrows from established roots each season; persists across years.
+  Cultivated  Grown intentionally in plots; tag drives farming-context filtering and interactions.
+
+
+──────────────────────────────────────────────
 Sex                                     [ DONE ]
 ──────────────────────────────────────────────
 Values:
@@ -108,13 +150,18 @@ Values:
 
 
 ──────────────────────────────────────────────
-LocationStatus                          [ DONE ]
+Location ownership (no separate table)
 ──────────────────────────────────────────────
-Values:
-  Owned
-  Disputed
+There is no LocationStatus model. Ownership is expressed via Location_Faction.relationTypeId,
+using RelationType rows with isOwnershipSystem = true:
 
-  Note: Shared = multiple Owned rows. Unclaimed = no Location_Faction rows.
+  RelationType  Meaning
+  ──────────    ─────────────────────────────────────────────────────────
+  owns          Faction owns this territory
+  contesting    Faction is contesting this territory
+
+  Shared   = multiple Location_Faction rows with relationType = owns
+  Unclaimed = no Location_Faction rows for this location
 
 
 ──────────────────────────────────────────────
@@ -149,7 +196,7 @@ ItemInteraction                         [ DONE ]
 
 
 ──────────────────────────────────────────────
-ItemActionType
+ItemActionType                          [ DONE ]
 ──────────────────────────────────────────────
   name    dealsDamage  restoresHealth  appliesCondition  isHarmful
   attack  true         false           false             true
@@ -185,36 +232,38 @@ Developer-seeded only. Boolean flags control which systems each value is valid f
 
 
 ──────────────────────────────────────────────
-EffectType
+EffectType                              [ DONE ]
 ──────────────────────────────────────────────
 Developer-seeded only. Boolean flags control which systems each value is valid for.
+Also used for Plot_Buff.effectTypeId — valid plot buff types are those with isPlant = true.
 
-  name              isItem             isPlant            isSpecies          isAbility
-  ──────────        ─────────────────  ─────────────────  ─────────────────  ─────────────────
-  spawn_rate        true                true              true               false
-  spawn_weight      true                true              true               false
-  growth_rate       false               true              true               true
-  harvest_yeild     false               true              false              true 
-  rot_rate          true                true              false              true
-  damage_resistance false               false             false              true
-  
+  name              isItem  isPlant  isSpecies  isAbility
+  ──────────        ──────  ───────  ─────────  ─────────
+  spawn_rate        true    true     true       false
+  spawn_weight      true    true     true       false
+  growth_rate       false   true     true       true
+  harvest_yeild     false   true     false      true
+  rot_rate          true    true     false      true
+  damage_resistance false   false    false      true
 
-  ──────────────────────────────────────────────
-  AbilityEffectType
-  ──────────────────────────────────────────────
-  name 
-  ──────────  
-  plot_buff
-  condition_grant
-  energy_restore
-  multiply_output
-  xp_grant
 
 ──────────────────────────────────────────────
-AbilityTargetType
+AbilityEffectType                       [ DONE ]
 ──────────────────────────────────────────────
-  name              
-  ──────────        
+  name
+  ──────────────
+  condition_grant   applies a ConditionDef to target entity
+  multiplier        applies a rate/yield multiplier to target entity
+  structure_buff    modifies a structure property (e.g. rot modifier, capacity)
+  plot_buff         writes a Plot_Buff on a target plot (uses EffectType + effectValue + durationHours)
+  energy_restore    restores energy to the ability holder
+  xp_grant          grants discipline XP to the ability holder
+
+──────────────────────────────────────────────
+AbilityTargetType                       [ DONE ]
+──────────────────────────────────────────────
+  name
+  ──────────
   discipline_xp
   drop_plant
   drop_species
@@ -233,48 +282,52 @@ AbilityTargetType
   healing_given
 
 ──────────────────────────────────────────────
-AbilityThresholdType
+AbilityThresholdType                    [ DONE ]
 ──────────────────────────────────────────────
-  name              
+  name
   ──────────
   hp
   nutrition
   hydration
 
 ──────────────────────────────────────────────
-TargetScope
+TargetScope                             [ DONE ]
 ──────────────────────────────────────────────
-  name                 isAbilityTarget    isPresenceScope    isPowerScope
-  ──────────           ─────────────────  ─────────────────  ─────────────────
-  self                 true               false              false
-  action_target        true               false              false
-  action_participant   true               false              false
-  area                 true               false              false
-  housing_structure    false              true               false
-  housing_plot         false              true               false
-  colocated_entities   false              true               false
-  camp_entities        false              true               false
-  camp_structures      false              true               false
-  structure            false              false              true
-  camp                 false              false              true
-  location             false              false              true
-  faction              false              false              true
+  isAbilityTarget — valid for Ability_ActionTrigger.targetScopeId
+  isPresenceScope — valid for Ability_PresenceEffect.presenceScopeId
+  isPowerScope    — valid for StructureDef_FuelConfig.scopeId
+
+  name                 isAbilityTarget  isPresenceScope  isPowerScope
+  ──────────           ───────────────  ───────────────  ────────────
+  self                 true             false            false
+  action_target        true             false            false
+  action_participant   true             false            false
+  area                 true             false            false
+  housing_structure    false            true             false
+  housing_plot         false            true             false
+  colocated_entities   false            true             false
+  camp_entities        false            true             false
+  camp_structures      false            true             false
+  structure            false            false            true
+  camp                 false            false            true
+  location             false            false            true
+  faction              false            false            true
 
 
- ──────────────────────────────────────────────
- TargetTrigger
- ──────────────────────────────────────────────
-  name              
-  ──────────        
+──────────────────────────────────────────────
+TargetTrigger                           [ DONE ]
+──────────────────────────────────────────────
+  name
+  ──────────
   completion
   success
   failure
 
 ──────────────────────────────────────────────
- StackBehavior
- ──────────────────────────────────────────────
-  name              
-  ──────────        
+StackBehavior                           [ DONE ]
+──────────────────────────────────────────────
+  name
+  ──────────
   refresh
   stack
   ignore
@@ -848,7 +901,7 @@ Values:
 
 
 ──────────────────────────────────────────────
-EventScopeType                          [ DONE ]
+EventScope                              [ DONE ]
 ──────────────────────────────────────────────
 Values:
   global
@@ -876,7 +929,7 @@ EventParticipantScope                   [ DONE ]
 
 
 ──────────────────────────────────────────────
-EventGrantType                          [ DONE ]
+EventEffectType                         [ DONE ]
 ──────────────────────────────────────────────
 Values:
   condition
@@ -884,11 +937,11 @@ Values:
 
 
 ──────────────────────────────────────────────
-EventChoiceResolutionType               [ DONE ]
+EventCheckMode                          [ DONE ]
 ──────────────────────────────────────────────
 Values:
-  individual
-  group_average     — average across all event participants
+  individual        — each participant rolls independently
+  faction_average   — average roll across all event participants
   leader_designates — the group leader makes the choice on behalf of everyone
 
 

@@ -95,7 +95,7 @@ model UserSettings {
 
   isPremium Boolean @default(false)
   maxFactions   Int @default(10)
-  maxRanks      Int Default(30)
+  maxRanks      Int @default(30)
   maxSpecies    Int @default(100) 
   maxPlants     Int @default(100)
 
@@ -169,6 +169,7 @@ model EnvCondition {
   eventWeights       EnvCondition_EventDef[]
   conditionEnvRules             ConditionDef_EnvRule[]
   plantDefEffects               PlantDef_EnvConditionEffect[]
+  plantTypeEffects              PlantType_EnvConditionEffect[]
   speciesEffects                Species_EnvConditionEffect[]
   speciesTypeEffects            SpeciesType_EnvConditionEffect[]
   plotTypeEnvConditions         PlotType_EnvCondition[]
@@ -367,36 +368,38 @@ model RelationType {
   isOwnershipSystem     Boolean @default(false)
 
   conditionLinks                 ConditionDef_Link[]
+  conditionEnvRules              ConditionDef_EnvRule[]
   itemEffects                    ItemEffect[]
+  itemConditionEffects           ItemConditionEffect[]
   skillTreeRelations             SkillTreeNode_Relation[]
   upgradeRelations               StructureDef_Upgrade_Relation[]
   structureRelations             StructureDef_Relation[]
   craftingInteractionRules       Guild_CraftingInteractionRule[]
   recipeCraftingRequirements     Recipe_CraftingRequirement[]
-  itemConditionEffects           ItemConditionEffect[]
-  itemTypeConditionEffects       ItemType_ConditionEffect[]
   plantDefEnvConditionEffect     PlantDef_EnvConditionEffect[]
   plantTypeEnvConditionEffect    PlantType_EnvConditionEffect[]
   speciesEnvConditionEffect      Species_EnvConditionEffect[]
-  speciesTypeEnvConditionEffect  SpeciesType_EnvConditionEffect
+  speciesTypeEnvConditionEffect  SpeciesType_EnvConditionEffect[]
+  campFactions                   Camp_Faction[]
+  locationFactions               Location_Faction[]
 }
 
 model EffectType {
   id              Int     @id @default(autoincrement())
-  name            String  @unique @db.Varchar(100)
+  name            String  @unique @db.VarChar(100)
   isItem          Boolean @default(false)
   isPlant         Boolean @default(false)
   isSpecies       Boolean @default(false)
   isAbility       Boolean @default(false)
 
-  itemConditionEffects            ItemConditionEffect[]
-  itemTypeConditionEffect         ItemType_ConditionEffect[]
   plantDefEnvConditionEffect      PlantDef_EnvConditionEffect[]
   plantTypeEnvConditionEffect     PlantType_EnvConditionEffect[]
   speciesEnvConditionEffect       Species_EnvConditionEffect[]
   speciesTypeEnvConditionEffect   SpeciesType_EnvConditionEffect[]
 
   abilityActionTrigger            Ability_ActionTrigger[]
+  abilityPresenceEffects          Ability_PresenceEffect[]
+  plotBuffs                       Plot_Buff[]
 }
 
 // Base stats (global seed — Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma)
@@ -454,9 +457,9 @@ model DropTable_Entry {
   averageQuantity  Int?                // average quantity dropped (in item's unit), overwrites the item count
   quantityVariance Float @default(0.3)   // ± fraction applied to averageQuantity;
   averageWeight    Float?                // average weight dropped (in item units), overwrites the item weight
-  weightVariance   Float (@default(0.3)) // ± fraction applied to averageWeight;
+  weightVariance   Float @default(0.3)   // ± fraction applied to averageWeight;
   averageVolume    Float?                 // average volume dropped (in item units), overwrites the item volume
-  volumeVariance   Float (@default(0.3))// ± fraction applied to averageVolume;
+  volumeVariance   Float @default(0.3)   // ± fraction applied to averageVolume;
 
   dropTable DropTable @relation(fields: [dropTableId], references: [id], onDelete: Cascade)
   item      Item      @relation(fields: [itemId],      references: [id], onDelete: Restrict)
@@ -470,11 +473,18 @@ model DropTable_Entry {
 // ENTITIES
 // ============================================================
 
-model EntityStatus {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
+// Unified status table for entities and structures.
+// isEntity / isStructure flags indicate which systems each value applies to.
+// Entity values: Active, Inactive, Hiatus
+// Structure values: Active, Inactive, Broken, Destroyed, Under_Construction
+model Status {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique @db.VarChar(50)
+  isEntity    Boolean @default(false)
+  isStructure Boolean @default(false)
 
-  entities Entity[]
+  entities   Entity[]
+  structures Structure[]
 }
 
 model EntityType {
@@ -494,8 +504,16 @@ model SpeciesType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
-  species Species_SpeciesType[]
+  species                       Species_SpeciesType[]
   speciesTypeEnvConditionEffect SpeciesType_EnvConditionEffect[]
+}
+
+model PlantType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  plantDefs                   PlantDef_PlantType[]
+  plantTypeEnvConditionEffect PlantType_EnvConditionEffect[]
 }
 
 // Used on both sides of the power system:
@@ -646,38 +664,40 @@ model Species_Biome {
 }
 
 model SpeciesType_EnvConditionEffect {
-  speciesTypeId    Int
-  envConditionId   Int
-  relationTypeId   Int
-  effectTypeId     Int? 
-  value            Float?
+  id             Int  @id @default(autoincrement())
+  speciesTypeId  Int
+  envConditionId Int
+  relationTypeId Int
+  effectTypeId   Int?
+  value          Float?
 
-  speciesType  SpeciesType  @relation(fields: [speciesTypeId], references: [id], onDelete: Cascade)
-  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
-  relationType RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
-  effectType   EffectType   @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
+  speciesType  SpeciesType   @relation(fields: [speciesTypeId],  references: [id], onDelete: Cascade)
+  envCondition EnvCondition  @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+  relationType RelationType  @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
+  effectType   EffectType?   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
 
-  @@unique([speciesId, envConditionId, effectTypeId])
-  @@index([speciesId])
+  @@unique([speciesTypeId, envConditionId, relationTypeId, effectTypeId])
+  @@index([speciesTypeId])
   @@index([envConditionId])
 }
 
 // Per-species response to an active env condition during encounter resolution. Overrides SpeciesType_EnvConditionEffect
 // No row = neutral (no effect). One species can have multiple rows for the same
 model Species_EnvConditionEffect {
-  speciesId        Int
-  envConditionId   Int
-  relationTypeId   Int
-  effectTypeId     Int? 
-  value            Float?
+  id             Int  @id @default(autoincrement())
+  speciesId      Int
+  envConditionId Int
+  relationTypeId Int
+  effectTypeId   Int?
+  value          Float?
 
-  species      Species      @relation(fields: [speciesId],      references: [id], onDelete: Cascade)
-  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
-  relationType RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
-  effectType   EffectType    @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
+  species      Species       @relation(fields: [speciesId],      references: [id], onDelete: Cascade)
+  envCondition EnvCondition  @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+  relationType RelationType  @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
+  effectType   EffectType?   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
 
-  @@unique([speciesTypeId, envConditionId, effectTypeId])
-  @@index([speciesTypeId])
+  @@unique([speciesId, envConditionId, relationTypeId, effectTypeId])
+  @@index([speciesId])
   @@index([envConditionId])
 }
 
@@ -703,7 +723,7 @@ model Entity {
   name String @db.VarChar(200)
 
   statusId Int
-  status   EntityStatus @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  status   Status       @relation(fields: [statusId], references: [id], onDelete: Restrict)
 
   typeId Int
   type   EntityType @relation(fields: [typeId], references: [id], onDelete: Restrict)
@@ -923,6 +943,7 @@ model DisciplineDef {
   actionInstanceXp              ActionInstance_Entity_DisciplineXp[]
   recipeRewards                 Recipe_DisciplineReward[]
   abilityActionTriggerXpGrants  Ability_ActionTrigger[]
+  abilityPresenceEffects        Ability_PresenceEffect[]
   craftingInteractionRules      Guild_CraftingInteractionRule[]
   recipeCraftingRequirements    Recipe_CraftingRequirement[]
 }
@@ -1145,10 +1166,11 @@ model Ability_ProficiencyModifier {
 }
 
 model AbilityTargetType {
-  id    Int   @id @default(autoincrement())
-  name  String 
+  id    Int    @id @default(autoincrement())
+  name  String @unique @db.VarChar(100)
 
   abilityMultiplierEffect Ability_MultiplierEffect[]
+  abilityPresenceEffects  Ability_PresenceEffect[]
 }
 
 // Rate and yield multipliers, optionally gated by biome or weather.
@@ -1266,7 +1288,8 @@ model AbilityEffectType {
   id    Int @id @default(autoincrement())
   name  String @unique
 
-  abilityActionTrigger Ability_ActionTrigger[]
+  abilityActionTrigger   Ability_ActionTrigger[]
+  abilityPresenceEffects Ability_PresenceEffect[]
 }
 
 model AbilityThresholdType {
@@ -1277,10 +1300,16 @@ model AbilityThresholdType {
 }
 
 model TargetScope {
-  id    Int @id @default(autoincrement())
+  id    Int    @id @default(autoincrement())
   name  String @unique
 
-  abilityActionTrigger Ability_ActionTrigger[]
+  isAbilityTarget Boolean @default(false)  // valid for Ability_ActionTrigger.targetScopeId
+  isPresenceScope Boolean @default(false)  // valid for Ability_PresenceEffect.presenceScopeId
+  isPowerScope    Boolean @default(false)  // valid for StructureDef_FuelConfig.scopeId
+
+  abilityActionTrigger   Ability_ActionTrigger[]
+  abilityPresenceEffects Ability_PresenceEffect[]
+  fuelConfigs            StructureDef_FuelConfig[]
 }
 
 model TargetTrigger {
@@ -1294,8 +1323,9 @@ model StackBehavior {
   id    Int @id @default(autoincrement())
   name  String @unique
 
-  abilityThresholdTriggers  Ability_ThresholdTrigger[]
-  abilityActionTrigger      Ability_ActionTrigger[]
+  abilityThresholdTriggers Ability_ThresholdTrigger[]
+  abilityActionTrigger     Ability_ActionTrigger[]
+  abilityPresenceEffects   Ability_PresenceEffect[]
 }
 
 // Fires an effect when the entity performs a specific action system type.
@@ -1306,7 +1336,7 @@ model Ability_ActionTrigger {
 
   triggerSystemType       String  @db.VarChar(50)  // FK → ActionSystemType
   targetScopeId           Int
-  triggerOnId             
+  triggerOnId             Int
   triggerChance           Float   @default(1.0)    // 0.0–1.0 probability the trigger fires
   abilityEffectTypeId     Int
   stackBehaviorId         Int
@@ -1331,9 +1361,10 @@ model Ability_ActionTrigger {
   conditionDef         ConditionDef?    @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
   disciplineDef        DisciplineDef?   @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
   abilityEffectType    AbilityEffectType @relation(fields: [abilityEffectTypeId], references: [id], onDelete: Restrict)
-  targetScope    TargetScope @relation(fields: [targetScopeId], references: [id], onDelete: Restrict)
-  targetTrigger    TargetTrigger @relation(fields: [triggerOnId], references: [id], onDelete: Restrict)
-  stackBehavior StackBehavior @relation(fields: [stackBehaviorId], references: [id], onDelete: Restrict)
+  targetScope          TargetScope       @relation(fields: [targetScopeId],       references: [id], onDelete: Restrict)
+  targetTrigger        TargetTrigger     @relation(fields: [triggerOnId],          references: [id], onDelete: Restrict)
+  stackBehavior        StackBehavior     @relation(fields: [stackBehaviorId],      references: [id], onDelete: Restrict)
+  effectType           EffectType        @relation(fields: [effectTypeId],         references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
   @@index([triggerSystemType])
@@ -1354,7 +1385,7 @@ model Ability_ThresholdTrigger {
   stackBehaviorId Int
 
   abilityDef   AbilityDef   @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
-  abilitythresholdTypes AbilityThresholdType @relation(fields: [treshholdTypeId], references: [id], OnDelete: Restrict)
+  abilitythresholdTypes AbilityThresholdType @relation(fields: [thresholdTypeId], references: [id], onDelete: Restrict)
   conditionDef ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
   stackBehavior StackBehavior @relation(fields: [stackBehaviorId], references: [id], onDelete: Restrict)
 
@@ -1363,7 +1394,7 @@ model Ability_ThresholdTrigger {
 
 // Always-on passive effect that activates based on the entity's housing assignment. Evaluated once per day per target.
 // triggerChance: per-target daily roll (1.0 = guaranteed; 0.5 = 50% per target)
-// effectType:
+// abilityEffectType (AbilityEffectType):
 //   "condition_grant" — applies a ConditionDef to target entity (scopes: colocated_entities, colocated_patients, camp_entities)
 //   "multiplier"      — applies a rate/yield multiplier to target entity (same scopes as condition_grant)
 //   "structure_buff"  — modifies a structure property (scopes: housing_structure, camp_structures)
@@ -1373,35 +1404,35 @@ model Ability_PresenceEffect {
   id           Int    @id @default(autoincrement())
   abilityDefId Int
 
-  presenceScopeId Int  
-  triggerChance Float   @default(1.0)     // 0.0–1.0 per-target daily roll
-  abilityEffectTypeId     Int
-  stackBehaviorId         Int
+  presenceScopeId     Int
+  triggerChance       Float @default(1.0)  // 0.0–1.0 per-target daily roll
+  abilityEffectTypeId Int
+  stackBehaviorId     Int
 
-  // effectType = "condition_grant"
+  // abilityEffectType = "condition_grant"
   conditionDefId Int?
 
-  // effectType = "multiplier"
-  multiplierTargetid Int
-  multiplierValue  Float?
-  multiplierId     Int?                      // narrows target (e.g. disciplineId); null = all
+  // abilityEffectType = "multiplier"
+  multiplierTargetTypeId Int?   // FK → AbilityTargetType (e.g. discipline_xp, drop_plant); null = not a multiplier effect
+  multiplierValue        Float?
+  multiplierId           Int?   // narrows target (e.g. disciplineId); null = all
 
-  abilityEffectTypeId    Int
-  effectValue            Float?
-
-  // effectType = "plot_buff" only
+  // abilityEffectType = "plot_buff"
+  effectTypeId  Int?   // FK → EffectType (growth_rate, harvest_yeild, rot_rate, etc.)
+  effectValue   Float?
   durationHours Int?
 
-  abilityDef   AbilityDef   @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
-  targetScope TargetScope   @relation(fields: [presenceScopeId], references: [id], onDelete: Restrict)
-  abilityEffectType AbilityEffectType @relation(fields: [abilityEffectTypeId], references: [id], onDelete: Restrict)
-  stackBehavior StackBehavior @relation(fields: [stackBehaviorId], references: [id], onDelete: Restrict)
-  conditionDef ConditionDef? @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
-  multiplierTargetId Ability_MultiplierEffect @relation(fields: [multiplierTargetId], references: [id], onDelete: Restrict)
-  disciplineDef   DisciplineDef  @relation(fields: [multiplierId], references: [id], onDelete: Restrict)
-  abilityEffectType AbilityEffectType @relation(fields: [abilityEffectTypeId], references: [id], onDelete: Restrict)
+  abilityDef           AbilityDef         @relation(fields: [abilityDefId],           references: [id], onDelete: Cascade)
+  targetScope          TargetScope        @relation(fields: [presenceScopeId],         references: [id], onDelete: Restrict)
+  abilityEffectType    AbilityEffectType  @relation(fields: [abilityEffectTypeId],     references: [id], onDelete: Restrict)
+  stackBehavior        StackBehavior      @relation(fields: [stackBehaviorId],         references: [id], onDelete: Restrict)
+  conditionDef         ConditionDef?      @relation(fields: [conditionDefId],          references: [id], onDelete: Restrict)
+  multiplierTargetType AbilityTargetType? @relation(fields: [multiplierTargetTypeId],  references: [id], onDelete: Restrict)
+  disciplineDef        DisciplineDef?     @relation(fields: [multiplierId],            references: [id], onDelete: Restrict)
+  effectType           EffectType?        @relation(fields: [effectTypeId],            references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
+  @@index([presenceScopeId])
 }
 
 // ============================================================
@@ -1712,14 +1743,14 @@ model ConditionDef_Link {
   relationTypeId    Int
   weight            Float @default(1.0)
 
-  parentCondition ConditionDef     @relation("ConditionLinkParent", fields: [parentConditionId], references: [id], onDelete: Cascade)
-  childCondition  ConditionDef     @relation("ConditionLinkChild",  fields: [childConditionId],  references: [id], onDelete: Restrict)
-  relationTypeId  RelationType      @relation(                      fields: [relationTypeId],    references: [id], onDelete: Restrict)
+  parentCondition ConditionDef @relation("ConditionLinkParent", fields: [parentConditionId], references: [id], onDelete: Cascade)
+  childCondition  ConditionDef @relation("ConditionLinkChild",  fields: [childConditionId],  references: [id], onDelete: Restrict)
+  relationType    RelationType @relation(                        fields: [relationTypeId],    references: [id], onDelete: Restrict)
 
-  @@unique([parentConditionId, childConditionId, linkTypeId])
-  @@index([parentConditionId, linkTypeId])
+  @@unique([parentConditionId, childConditionId, relationTypeId])
+  @@index([parentConditionId, relationTypeId])
   @@index([childConditionId])
-  @@index([linkTypeId])
+  @@index([relationTypeId])
 }
 
 // Symptom labels attached to a condition definition
@@ -2323,7 +2354,7 @@ model StructureDef_FuelConfig {
                                                // null on active sources (gain only from item deposits)
 
   structureDef   StructureDef                               @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
-  targetScope TargetScope @relation(fields: [scopeId], references: [id], onDelete: Restrict);
+  targetScope TargetScope @relation(fields: [scopeId], references: [id], onDelete: Restrict)
   inputFuelTypes StructureDef_FuelConfig_InputFuelType[]
   outputFuelTypes StructureDef_FuelConfig_OutputFuelType[]
   envConditions  StructureDef_FuelConfig_EnvCondition[]
@@ -2381,16 +2412,16 @@ model StructureDef_FuelConfig_EnvCondition {
 // Remainders below the amountPerUnit threshold are lost (composting is not perfectly efficient).
 model Structure_CompostDeposit {
   id          Int      @id @default(autoincrement())
-  structureId Int
-  itemId      Int                      // which item was deposited — needed to resolve Item_CompostOutput
-  measurement Int   
-  amount      Float
+  structureId       Int
+  itemId            Int                      // which item was deposited — needed to resolve Item_CompostOutput
+  measurementTypeId Int
+  amount            Float
   depositedAt DateTime @default(now()) @db.Timestamptz
   convertsAt  DateTime @db.Timestamptz
 
-  structure Structure @relation(fields: [structureId], references: [id], onDelete: Cascade)
-  item      Item      @relation(fields: [itemId],      references: [id], onDelete: Restrict)
-  measurement MeasurementType @relation(fields: [measurement], references: [id], onDelete: Restrict);
+  structure       Structure       @relation(fields: [structureId],       references: [id], onDelete: Cascade)
+  item            Item            @relation(fields: [itemId],            references: [id], onDelete: Restrict)
+  measurementType MeasurementType @relation(fields: [measurementTypeId], references: [id], onDelete: Restrict)
 
   @@index([structureId])
   @@index([convertsAt])
@@ -2674,7 +2705,7 @@ model Location_Faction {
 
   @@id([locationId, factionId])
   @@index([factionId])
-  @@index([statusId])
+  @@index([relationTypeId])
 }
 
 // A neighboring faction that borders this location from outside the owning faction's territory
@@ -3213,14 +3244,13 @@ model ItemEffect {
   effectiveness   Float @default(1.0)  // base effectiveness for this item+action+symptom combo
                                      // added to craftBonus when used as concoction ingredient
 
-  itemAction ItemAction   @relation(fields: [itemActionId], references: [id], onDelete: Cascade)
-  symptom    Symptom      @relation(fields: [symptomId],    references: [id], onDelete: Restrict)
-  relationTypeId RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
+  itemAction   ItemAction   @relation(fields: [itemActionId], references: [id], onDelete: Cascade)
+  symptom      Symptom      @relation(fields: [symptomId],    references: [id], onDelete: Restrict)
+  relationType RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
 
   @@unique([itemActionId, symptomId])
   @@index([itemActionId])
   @@index([symptomId])
-  @@index([effectTypeId])
 }
 
 // Direct condition-level effect for an item action — separate from symptom-level ItemEffect.
@@ -3238,15 +3268,14 @@ model ItemConditionEffect {
   effectiveness        Float?  // treat / worsen only
   outputConditionDefId Int?    // transform only
 
-  itemAction        ItemAction              @relation(fields: [itemActionId],   references: [id], onDelete: Cascade)
-  conditionDef      ConditionDef            @relation("ItemConditionEffectTarget", fields: [conditionDefId],       references: [id], onDelete: Restrict)
-  relationTypeId    RelationType        @relation(fields: [relationTypeId],   references: [id], onDelete: Restrict)
-  outputCondition   ConditionDef?        @relation("ItemConditionEffectOutput", fields: [outputConditionDefId], references: [id], onDelete: SetNull)
+  itemAction        ItemAction   @relation(fields: [itemActionId],          references: [id], onDelete: Cascade)
+  conditionDef      ConditionDef @relation("ItemConditionEffectTarget",    fields: [conditionDefId],       references: [id], onDelete: Restrict)
+  relationType      RelationType @relation(fields: [relationTypeId],        references: [id], onDelete: Restrict)
+  outputCondition   ConditionDef? @relation("ItemConditionEffectOutput",   fields: [outputConditionDefId], references: [id], onDelete: SetNull)
 
   @@unique([itemActionId, conditionDefId])
   @@index([itemActionId])
   @@index([conditionDefId])
-  @@index([effectTypeId])
   @@index([outputConditionDefId])
 }
 
@@ -3318,6 +3347,8 @@ model MeasurementType {
   recipeSlots      RecipeSlot[]
   items            Item[]
   recipeOutputs    RecipeOutput[]
+  compostDeposits  Structure_CompostDeposit[]
+  compostOutputs   Item_CompostOutput[]
 }
 
 // Ingredient classification labels — internal to the crafting system (global seed, no guildId).
@@ -5158,6 +5189,7 @@ model PlantDef {
   propagationItem   Item?     @relation("PlantDefPropagationItem", fields: [propagationItemId], references: [id], onDelete: SetNull)
 
   seedItems             Item[]               @relation("ItemPlantDef")  // items whose Item.plantDefId points here
+  plantTypes            PlantDef_PlantType[]
   plotTypes             PlantDef_PlotType[]
   biomes                PlantDef_Biome[]
   envConditionEffects   PlantDef_EnvConditionEffect[]
@@ -5226,19 +5258,55 @@ model PlantDef_Biome {
 // A single env condition can have multiple rows for the same plant with different effectTypes.
 // e.g. Damp on Rice: requires(gate) + increase(growth_rate) — must be present AND boosts growth.
 model PlantDef_EnvConditionEffect {
-  id               Int     @id @default(autoincrement())
-  plantDefId       Int
-  envConditionId   Int
-  effectType       String?  @db.VarChar(20)  
-  relationTypeId   Int 
-  value            Float?                   // null when block; > 0.0 otherwise (enforced app-side)
+  id             Int  @id @default(autoincrement())
+  plantDefId     Int
+  envConditionId Int
+  relationTypeId Int
+  effectTypeId   Int?
+  value          Float?                   // null when block; > 0.0 otherwise (enforced app-side)
 
   plantDef     PlantDef     @relation(fields: [plantDefId],     references: [id], onDelete: Cascade)
   envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
-  relationType RelationType  @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
+  relationType RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
+  effectType   EffectType?  @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
 
-  @@unique([plantDefId, envConditionId, effectType])
+  @@unique([plantDefId, envConditionId, relationTypeId, effectTypeId])
   @@index([plantDefId])
+  @@index([envConditionId])
+}
+
+// Classification tags for a plant def — many-to-many.
+// Drives PlantType_EnvConditionEffect lookups: type-level responses apply to all member plants
+// unless overridden by a PlantDef_EnvConditionEffect row on the specific plant.
+model PlantDef_PlantType {
+  plantDefId  Int
+  plantTypeId Int
+
+  plantDef  PlantDef  @relation(fields: [plantDefId],  references: [id], onDelete: Cascade)
+  plantType PlantType @relation(fields: [plantTypeId], references: [id], onDelete: Restrict)
+
+  @@id([plantDefId, plantTypeId])
+  @@index([plantTypeId])
+}
+
+// Type-level env condition response — applies to all PlantDefs carrying this PlantType.
+// Overridden per-plant by PlantDef_EnvConditionEffect.
+// Mirrors SpeciesType_EnvConditionEffect.
+model PlantType_EnvConditionEffect {
+  id             Int   @id @default(autoincrement())
+  plantTypeId    Int
+  envConditionId Int
+  relationTypeId Int
+  effectTypeId   Int?
+  value          Float?
+
+  plantType    PlantType    @relation(fields: [plantTypeId],    references: [id], onDelete: Cascade)
+  envCondition EnvCondition @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+  relationType RelationType @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
+  effectType   EffectType?  @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+
+  @@unique([plantTypeId, envConditionId, relationTypeId, effectTypeId])
+  @@index([plantTypeId])
   @@index([envConditionId])
 }
 
@@ -5274,20 +5342,20 @@ model Plot {
 }
 
 // Active timed buffs on a plot, written when a skilled farmer tends and has a matching Ability_ActionTrigger.
-// PK is (plotId, sourceEntityId, effectType) — one active buff per effect type per entity per plot.
-// effectType: growth_rate | yield | decay_resistance
+// PK is (plotId, sourceEntityId, effectTypeId) — one active buff per effect type per entity per plot.
 model Plot_Buff {
   plotId         Int
   sourceEntityId Int
-  effectType     String   @db.VarChar(50)
+  effectTypeId   Int
   effectValue    Float
   appliedAt      DateTime @default(now()) @db.Timestamptz
   expiresAt      DateTime @db.Timestamptz
 
-  plot   Plot   @relation(fields: [plotId],         references: [id], onDelete: Cascade)
-  entity Entity @relation(fields: [sourceEntityId], references: [id], onDelete: Cascade)
+  plot       Plot       @relation(fields: [plotId],         references: [id], onDelete: Cascade)
+  entity     Entity     @relation(fields: [sourceEntityId], references: [id], onDelete: Cascade)
+  effectType EffectType @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
 
-  @@id([plotId, sourceEntityId, effectType])
+  @@id([plotId, sourceEntityId, effectTypeId])
 }
 
 // A live instance of a plant growing at a plot. One PlotCrop per plot at a time (enforced via Plot).
