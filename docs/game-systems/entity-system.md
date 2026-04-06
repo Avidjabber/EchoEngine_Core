@@ -1,6 +1,6 @@
 ENTITY SYSTEM — DESIGN REFERENCE
 ==================================
-Last updated: 2026-04-03
+Last updated: 2026-04-06
 
 [PLACEHOLDER — Schema is fully built. This document captures current known design.
 Expand as implementation begins.]
@@ -43,11 +43,11 @@ Key Entity fields:
 
   guildId       — owning guild
   factionId     — owning faction
-  entityTypeId  — NPC | Side Character | Main Character
+  typeId        — FK → EntityType (NPC | Side Character | Main Character)
   speciesId     — FK → Species
-  statusId      — FK → EntityStatus (Active | Inactive | Hiatus)
+  statusId      — FK → Status (Active | Inactive | Hiatus)
   name          — display name
-  ageMoons      — age in moons (in-world calendar unit)
+  age           — age in moons (in-world calendar unit)
   sexId         — FK → Sex
   genderId      — FK → Gender
   userId        — Discord user ID of the player (null for NPCs / side characters)
@@ -59,12 +59,14 @@ Key Entity fields:
 
 EntityStats holds the entity's live numeric state.
 
-  currentHp       — current hit points (read by combat)
-  maxHp           — max HP (derived from CON; app-maintained)
-  currentAc       — current armor class (derived from DEX + equipped armor)
-  currentEnergy   — energy remaining for actions this day
-  statPoints      — unspent stat points available to allocate
-  str/dex/con/int/wis/cha  — the six core stats (current values)
+  currentHp     — current hit points (read by combat)
+  maxHp         — max HP (set at character creation via Species HP dice + CON modifier)
+  currentEnergy — energy remaining for actions this day
+  skillPoints   — unspent stat points available to allocate
+  strength / dexterity / constitution / intelligence / wisdom / charisma — the six core stats
+
+AC is NOT stored on EntityStats. It is computed at resolution time from:
+  Species.baseAc + equipment modifiers + active condition effects (CombatEffectType.modifiesAC)
 
 Stat values are modified by spending stat points (Main Character only).
 EntityStats is a 1:1 extension of Entity.
@@ -113,8 +115,8 @@ See stats-proficiencies-disciplines.md for the full reference.
 
 Entity_Relationship records named connections between entities.
 
-  entityId         — the entity holding this relationship
-  relatedEntityId  — the other entity
+  entityId           — the entity holding this relationship
+  targetEntityId     — the other entity
   relationshipTypeId — FK → RelationshipType
 
 Seeded RelationshipTypes:
@@ -130,7 +132,7 @@ that type at a time (app-enforced at creation).
 8. ENTITY STATUS
 ─────────────────────────────────────────────
 
-EntityStatus tracks an entity's participation state:
+Status (model name: Status) tracks an entity's participation state:
 
   Active   — normal; participates in all systems
   Inactive — not currently active; excluded from daily ticks and actions
@@ -146,7 +148,7 @@ Status is managed by admins or players depending on EntityType.
   Entity                     — core character record
   EntityStats                — live numeric state (HP, AC, energy, stats)
   EntityType                 — NPC | Side Character | Main Character (seed)
-  EntityStatus               — Active | Inactive | Hiatus (seed)
+  Status                     — Active | Inactive | Hiatus (seed)
   Sex                        — Male | Female | Intersex (seed)
   Gender                     — Male | Female | Non-binary | Other (seed)
   Species                    — biological type; guild-extensible
