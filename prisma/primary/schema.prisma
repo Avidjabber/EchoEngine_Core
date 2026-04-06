@@ -1495,10 +1495,8 @@ model Ability_StatModifier {
   biomeId        Int?
   weatherStateId Int?
 
-  hpThresholdMin        Float?  // only active when HP fraction >= this value
-  hpThresholdMax        Float?  // only active when HP fraction <= this value
-  nutritionThresholdMax Float?  // only active when nutrition fraction <= this value
-  hydrationThresholdMax Float?  // only active when hydration fraction <= this value
+  valueThresholdMin Float?  // only active when the relevant tracked value fraction >= this (0.0–1.0)
+  valueThresholdMax Float?  // only active when the relevant tracked value fraction <= this (0.0–1.0)
 
   abilityDef   AbilityDef    @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
   stat         Stat          @relation(fields: [statId],         references: [id], onDelete: Restrict)
@@ -1521,10 +1519,8 @@ model Ability_ProficiencyModifier {
   biomeId        Int?
   weatherStateId Int?
 
-  hpThresholdMin        Float?
-  hpThresholdMax        Float?
-  nutritionThresholdMax Float?
-  hydrationThresholdMax Float?
+  valueThresholdMin Float?  // only active when the relevant tracked value fraction >= this (0.0–1.0)
+  valueThresholdMax Float?  // only active when the relevant tracked value fraction <= this (0.0–1.0)
 
   abilityDef     AbilityDef     @relation(fields: [abilityDefId],     references: [id], onDelete: Cascade)
   proficiencyDef ProficiencyDef @relation(fields: [proficiencyDefId], references: [id], onDelete: Restrict)
@@ -1603,10 +1599,8 @@ model Ability_CombatBehavior {
   restrictActionTypeId Int?
   restrictIsBlock      Boolean @default(false)  // false = may ONLY use; true = may NOT use
 
-  hpThresholdMin        Float?
-  hpThresholdMax        Float?
-  nutritionThresholdMax Float?
-  hydrationThresholdMax Float?
+  valueThresholdMin Float?  // only active when the relevant tracked value fraction >= this (0.0–1.0)
+  valueThresholdMax Float?  // only active when the relevant tracked value fraction <= this (0.0–1.0)
 
   abilityDef     AbilityDef              @relation(fields: [abilityDefId],          references: [id], onDelete: Cascade)
   behaviorType   ConditionBehaviorType   @relation(fields: [behaviorTypeId],         references: [id], onDelete: Restrict)
@@ -1682,7 +1676,7 @@ model TargetScope {
   fuelConfigs            StructureDef_FuelConfig[]
 }
 
-model TargetTrigger {
+model TriggerTiming {
   id    Int @id @default(autoincrement())
   name  String @unique
 
@@ -1712,7 +1706,7 @@ model Ability_ActionTrigger {
   stackBehaviorId         Int
 
   // effectType = "plot_buff"
-  effectTypeId   Int
+  effectTypeId   Int?
   effectValue    Float?
   durationHours  Int?
 
@@ -1732,9 +1726,9 @@ model Ability_ActionTrigger {
   disciplineDef        DisciplineDef?   @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
   abilityEffectType    AbilityEffectType @relation(fields: [abilityEffectTypeId], references: [id], onDelete: Restrict)
   targetScope          TargetScope       @relation(fields: [targetScopeId],       references: [id], onDelete: Restrict)
-  targetTrigger        TargetTrigger     @relation(fields: [triggerOnId],          references: [id], onDelete: Restrict)
+  triggerTiming        TriggerTiming     @relation(fields: [triggerOnId],          references: [id], onDelete: Restrict)
   stackBehavior        StackBehavior     @relation(fields: [stackBehaviorId],      references: [id], onDelete: Restrict)
-  effectType           EffectType        @relation(fields: [effectTypeId],         references: [id], onDelete: Restrict)
+  effectType           EffectType?       @relation(fields: [effectTypeId],         references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
   @@index([triggerSystemType])
