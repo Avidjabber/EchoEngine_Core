@@ -10,7 +10,10 @@
       "Bash(grep -n \"maxCats\\\\|minCats\" /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)",
       "Bash(grep -n \"baseClanRepReward\\\\|clanRep\" /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)",
       "Bash(grep -n \"Clan rep\\\\|clan reputation\" /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)",
-      "Bash(wc -l /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)"
+      "Bash(wc -l /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)",
+      "Bash(python scripts/reorganize_schema.py)",
+      "Bash(git checkout:*)",
+      "Bash(python scripts/strip_seed_comments.py)"
     ],
     "additionalDirectories": [
       "\\tmp"
