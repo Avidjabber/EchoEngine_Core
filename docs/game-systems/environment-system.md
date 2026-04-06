@@ -1,6 +1,6 @@
 ENVIRONMENT SYSTEM — DESIGN REFERENCE
 ======================================
-Last updated: 2026-04-05
+Last updated: 2026-04-06
 
 This file is the authoritative reference for how environmental conditions are
 stacked and applied in EchoPaw. Read this before touching biome seeding,
@@ -123,6 +123,8 @@ All scaling formula: effectiveMod = 1.0 + value × stackCount
   Modifier convention: value is a signed delta where 0.0 = no effect.
   (e.g. −0.3 = −30% per stack; 0.3 = +30% per stack)
 
+EnvCondition_Modifier tracks these via `modTypeId FK → EnvModifierType`.
+
 ACTIVE TYPES (two global env modifiers):
 
   filth          Daily filth gain multiplier. Applies globally to all entities
@@ -147,6 +149,7 @@ Combat hazard rates are set directly on Location. None of these are global env m
 ─────────────────────────────────────────────
 
   EnvCondition                     — named condition; global-default extensible
+  EnvModifierType                  — filth | spoilage (seed); defines valid modTypeId values
   EnvCondition_Modifier            — global world modifiers per condition (filth and spoilage only)
   EnvCondition_StatModifier        — flat stat modifier per stack
   EnvCondition_ProficiencyModifier — proficiency roll modifier per stack
@@ -159,9 +162,17 @@ Combat hazard rates are set directly on Location. None of these are global env m
   Location_Faction                 — ownership records
   LocationStatus                   — Owned | Disputed (seed)
   Season_EnvCondition              — condition contributed by a season (1 stack)
+  WeatherState                     — a named weather state (guild-extensible); contributes env conditions
   WeatherState_EnvCondition        — condition contributed by a weather state (1 stack)
+  WeatherPattern                   — ordered sequence of weather states; guild-extensible
+  WeatherPatternStep               — one step in a pattern (weatherStateId, durationHours, order)
+  Season_WeatherPattern            — spawn weight for a pattern within a season
+  GuildSeason_DefaultWeather       — fallback weather state per season when no pattern step specifies one
+  Guild_WeatherPatternCooldown     — per-guild cooldown tracking; Worker skips patterns on cooldown
   PlantDef_EnvConditionEffect      — per-plant spawn/growth responses (see section 7)
+  PlantType_EnvConditionEffect     — type-level plant responses; overridden by PlantDef_EnvConditionEffect
   Species_EnvConditionEffect       — per-species encounter responses (see section 8)
+  SpeciesType_EnvConditionEffect   — type-level species responses; overridden by Species_EnvConditionEffect
 
 
 ─────────────────────────────────────────────
@@ -174,8 +185,8 @@ growth rate, and survival — including seasonal behaviour via the seasonal env 
 (spring/summer/autumn/winter).
 
 Each row specifies:
-  effectType       "cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival"
-  relationshipType "requires" | "increase" | "decrease" | "block" | "kills"
+  effectTypeId     Int? FK → EffectType   ("cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival")
+  relationTypeId   Int  FK → RelationType ("requires" | "increase" | "decrease" | "block" | "kills")
   value            Delta magnitude > 0.0; null when "requires" or "block"
 
   cultivation / requires — hard planting prerequisite; condition must be present
@@ -222,9 +233,9 @@ Species_EnvConditionEffect defines how a species' encounter rate and yield respo
 to an active env condition. No row = neutral (no effect).
 
 Each row specifies:
-  effectType       "spawn_rate" | "spawn_weight"
-  relationshipType "increase" | "decrease" | "block"
-  value            Delta magnitude > 0.0; null when relationshipType = "block"
+  effectTypeId     Int? FK → EffectType   ("spawn_rate" | "spawn_weight")
+  relationTypeId   Int  FK → RelationType ("increase" | "decrease" | "block")
+  value            Delta magnitude > 0.0; null when relationTypeId = "block"
 
   spawn_rate   — encounter rate (applied as multiplier to Species_Biome.spawnWeight
                  during candidate selection)
