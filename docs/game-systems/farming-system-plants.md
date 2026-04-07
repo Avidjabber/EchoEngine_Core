@@ -147,6 +147,46 @@ The planting action reads Item.plantDefId to determine which PlantDef to
 instantiate as a new PlotCrop. No other lookup is needed.
 
 ──────────────────────
+PlantType
+──────────────────────
+
+Globally seeded lookup table of classification tags for PlantDefs (e.g. "Herb",
+"Flower", "Mushroom", "Root Vegetable"). Static — never altered via the app.
+Drives PlantType_EnvConditionEffect lookups: type-level responses apply to all
+member plants unless overridden by a PlantDef_EnvConditionEffect row on the
+specific plant.
+
+  name   String   Unique display name / machine identifier.
+
+──────────────────────
+PlantDef_PlantType
+──────────────────────
+
+Classification tags on a PlantDef — many-to-many. Ephemeral PlantDefs inherit
+the same type tags as their root PlantDef.
+
+  plantDefId   Int   FK → PlantDef
+  plantTypeId  Int   FK → PlantType
+
+──────────────────────
+PlantType_EnvConditionEffect
+──────────────────────
+
+Type-level env condition response. Applies to all PlantDefs carrying this
+PlantType unless a PlantDef_EnvConditionEffect row on that specific plant
+overrides it. Mirrors SpeciesType_EnvConditionEffect.
+
+  plantTypeId    Int     FK → PlantType
+  envConditionId Int     FK → EnvCondition
+  effectTypeId   Int?    FK → EffectType. "cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival"
+  relationTypeId Int     FK → RelationType. "requires" | "increase" | "decrease" | "block" | "kills"
+  value          Float?  Delta magnitude, > 0.0. Null when "requires" or "block".
+
+RULE: One row per (plantTypeId, envConditionId, relationTypeId, effectTypeId) — DB-enforced unique.
+RULE: PlantDef_EnvConditionEffect takes precedence over PlantType_EnvConditionEffect for the same
+      (envConditionId, effectTypeId) combination on a given plant.
+
+──────────────────────
 PlantDef_PlotType
 ──────────────────────
 
@@ -167,19 +207,23 @@ PlantDef_Biome
 
 Biome affinities for a plant. Controls both wild foraging find rates and
 cultivated growth rate modifiers. Ephemeral PlantDefs carry their own rows
-for growthRateModifier only — findChance is not inherited or mutated, as
+for growthRateModifier only — spawnRate is not inherited or mutated, as
 ephemeral variants do not exist in the wild.
 
   plantDefId          Int    FK → PlantDef
   biomeId             Int    FK → Biome
-  spawnRate         Float  Base weight of finding this plant
-                             per foraging attempt in this biome. Scaled at runtime
-                             by PlantDef_EnvConditionEffect spawn_rate rows
-                             for each active env condition at the location.
+  spawnRate           Float  Base weight of finding this plant per foraging attempt
+                             in this biome. Scaled at runtime by PlantDef_EnvConditionEffect
+                             spawn_rate rows for each active env condition at the location.
                              Only meaningful on base (non-ephemeral) PlantDefs.
+  growthRateModifier  Float  Signed delta added to the cultivated growth total when this
+                             plant is grown at a location in this biome. 0.0 = neutral.
+                             Meaningful on both base and ephemeral PlantDefs.
+                             Ephemeral PlantDefs inherit and may mutate this value;
+                             spawnRate is not inherited (ephemerals don't appear in the wild).
 
 RULE: No rows = grows in any biome at 0.0 (neutral) but is never found during wild foraging.
-RULE: findChance is only read from the base (rootPlantDefId = null) PlantDef.
+RULE: spawnRate is only read from the base (rootPlantDefId = null) PlantDef.
       Ephemeral variants do not appear in the wild.
 
 
@@ -192,8 +236,8 @@ for a plant — cultivation requirements, foraging rates, growth rate, and survi
 
   plantDefId       Int     FK → PlantDef
   envConditionId   Int     FK → EnvCondition
-  effectType       String  "cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival"
-  relationshipType int     FK → RelationType "requires" | "increase" | "decrease" | "block" | "kills"
+  effectTypeId     Int?    FK → EffectType. "cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival"
+  relationTypeId   Int     FK → RelationType. "requires" | "increase" | "decrease" | "block" | "kills"
   value            Float?  Delta magnitude, > 0.0. Null when "requires" or "block".
 
   cultivation / requires
@@ -203,7 +247,7 @@ for a plant — cultivation requirements, foraging rates, growth rate, and survi
     growth pauses until it is restored. No value.
     effectType must always be "cultivation" for all "requires" rows.
 
-  spawn_rate   — wild foraging find chance (scales PlantDef_Biome.findChance)
+  spawn_rate   — wild foraging find chance (scales PlantDef_Biome.spawnRate)
   spawn_weight — quantity found per forage attempt
   growth_rate  — cultivated growth tick rate (farming only)
   survival     — per-tick death probability. Used exclusively with "kills" relationshipType.
@@ -606,9 +650,9 @@ forages at a location, two parallel lookups run:
 
   1. Location item drop table  — resolves general items as normal (existing system).
   2. Plant foraging            — checks PlantDef_Biome for all biomes at the location:
-       For each PlantDef with a findChance row matching a biome at this location:
+       For each PlantDef with a spawnRate row matching a biome at this location:
          If any active condition has a block on spawn_rate for this plant → skip.
-         effectiveChance = findChance × spawn_rate_netMod
+         effectiveChance = spawnRate × spawn_rate_netMod
            spawn_rate_netMod = 1.0 + Σ(increase.value × stacks) − Σ(decrease.value × stacks)
            across all active conditions with a PlantDef_EnvConditionEffect spawn_rate row.
          Roll against effectiveChance — on success, resolve PlantDef.harvestDropTableId.

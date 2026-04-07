@@ -5260,7 +5260,8 @@ model PlantDef_Trait {
 model PlantDef_Biome {
   plantDefId          Int
   biomeId             Int
-  spawnRate           Float @default(0.0)  // base weight per foraging attempt; scaled by PlantDef_EnvConditionEffect spawn_rate rows
+  spawnRate           Float @default(0.0)  // base weight per foraging attempt; scaled by PlantDef_EnvConditionEffect spawn_rate rows; only read from base PlantDef
+  growthRateModifier  Float @default(0.0)  // signed delta for cultivated growth in this biome; 0.0 = neutral; ephemerals inherit and may mutate this value
 
   plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
   biome    Biome    @relation(fields: [biomeId],    references: [id], onDelete: Restrict)
@@ -5282,7 +5283,7 @@ model PlantDef_Biome {
 //                     If lost after planting, growth pauses until restored.
 //                     No value. effectType must be "cultivation" for all "requires" rows.
 //
-//   spawn_rate   — wild foraging find chance (multiplies PlantDef_Biome.findChance)
+//   spawn_rate   — wild foraging find chance (multiplies PlantDef_Biome.spawnRate)
 //   spawn_weight — quantity found per forage attempt
 //   growth_rate  — cultivated growth tick rate (farming only)
 //   survival     — per-tick death probability check. Used with "kills" relationshipType only.
@@ -5296,7 +5297,7 @@ model PlantDef_Biome {
 //   "block" on any effectType excludes the entity entirely — takes precedence over all modifiers.
 //
 // A single env condition can have multiple rows for the same plant with different effectTypes.
-// e.g. Damp on Rice: requires(gate) + increase(growth_rate) — must be present AND boosts growth.
+// e.g. Damp on Rice: requires(cultivation) + increase(growth_rate) — must be present AND boosts growth.
 model PlantDef_EnvConditionEffect {
   id             Int  @id @default(autoincrement())
   plantDefId     Int
@@ -5329,9 +5330,8 @@ model PlantDef_PlotType {
   @@id([plantDefId, plotTypeId])
 }
 
-// Lookup table of plot environment types. Seeded globally; never altered via app.
-// e.g. Garden Bed, Crop Field, Orchard, Mushroom Substrate, Bog Bed, Aquatic Bed, Trellis, Rocky Bed, Shaded Bed
-// Guild-defined plot environment type. Admins create these per server.
+// Guild-defined plot environment type. Admins create these per server — no globally seeded values.
+// e.g. "Open Farmland", "Hydroponics Bay", "Mushroom Cave", "Tidal Bed", "Shaded Grove"
 // Each plot type can declare env conditions that are always active for plants in it,
 // stacking with the location's real env conditions in the growth formula.
 model PlotType {
