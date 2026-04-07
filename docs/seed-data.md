@@ -919,7 +919,7 @@ Values:
   foraging
   clean
   weather_onset
-  filth
+  threshold
   daily
 
 
@@ -942,13 +942,21 @@ Values:
 
 
 ──────────────────────────────────────────────
+EventThresholdType                      [ DONE ]
+──────────────────────────────────────────────
+Values:
+  filth
+
+
+──────────────────────────────────────────────
 EventParticipantScope                   [ DONE ]
 ──────────────────────────────────────────────
-  name               appliesToAll  appliesToRandom  appliesToLeader  appliesToGroup
-  all_participants   true          false            false            false
-  random_participant false         true             false            false
-  leader             false         false            true             false
-  group              false         false            false            true
+  name               appliesToAll  appliesToRandom  appliesToLeader  appliesToGroup  appliesToHoused
+  all_participants   true          false            false            false            false
+  random_participant false         true             false            false            false
+  leader             false         false            true             false            false
+  group              false         false            false            true             false
+  housed_entities    false         false            false            false            true
 
 
 ──────────────────────────────────────────────

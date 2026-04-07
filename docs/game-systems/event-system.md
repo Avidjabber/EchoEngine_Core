@@ -39,8 +39,9 @@ Events can be triggered by several mechanisms (EventTriggerType). An EventDef ma
   clean         — fires when a cleaning activity completes
   weather_onset — fires when a specific WeatherState becomes active
                   (EventDef_WeatherTrigger)
-  filth         — fires when guild filth level crosses a threshold
-                  (EventDef_FilthTrigger: threshold + chancePerDay + isOngoing)
+  threshold      — fires when a configurable threshold condition is met with daily chance roll
+                  (EventDef_ThresholdTrigger: thresholdType + thresholdValue + triggerDays + triggerOnHigh + chancePerDay + 
+                   resolutionThreshold + resolutionDays + resolutionOnLow + isOngoing)
   daily         — fires on the daily tick with a base chance per day
                   (EventDef.chancePerDay)
 
@@ -121,16 +122,17 @@ depending on the event's spawn context.
   EventStepDef                — ordered step within an event
   EventDef_ActionType         — links event to an action type trigger
   EventDef_WeatherTrigger     — links event to a weather state trigger
-  EventDef_FilthTrigger       — filth threshold trigger config
+  EventDef_ThresholdTrigger   — configurable threshold trigger config
   EventDef_Prerequisite       — prerequisite event that must have fired first
 
   LOOKUP TABLES (seed)
-  EventTriggerType            — admin | patrol | hunt | crafting | foraging | clean | weather_onset | filth | daily
+  EventTriggerType            — admin | patrol | hunt | crafting | foraging | clean | weather_onset | threshold | daily
   EventScopeType              — global | faction | action
   EventStepType               — narrative | choice | combat
-  EventParticipantScope       — all_participants | random_participant | leader | group
+  EventParticipantScope       — all_participants | random_participant | leader | group | housed_entities
   EventGrantType              — condition | item
   EventChoiceResolutionType   — individual | group_average | leader_designates
+  EventThresholdType          — filth
 
   ACTIVE INSTANCES
   ActiveEvent                 — live event instance

@@ -4412,6 +4412,13 @@ model EventStepType {
 // appliesToRandom: effect applies to one randomly selected participant
 // appliesToLeader: effect applies to the action leader only
 // appliesToGroup:  effect applies to the group of participants collectively
+model EventThresholdType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  thresholdTriggers EventDef_ThresholdTrigger[]
+}
+
 model EventParticipantScope {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -4420,6 +4427,7 @@ model EventParticipantScope {
   appliesToRandom Boolean @default(false)
   appliesToLeader Boolean @default(false)
   appliesToGroup  Boolean @default(false)
+  appliesToHoused Boolean @default(false)  // filters to entities currently assigned to housing structures
 
   stepDefs     EventStepDef[]
   outcomeDefs  EventOutcomeDef[]
@@ -4452,7 +4460,7 @@ model EventCheckMode {
 //   "foraging"      — fires when a foraging activity completes
 //   "clean"         — fires when a cleaning activity completes
 //   "weather_onset" — fires automatically when a matching WeatherState becomes active
-//   "filth"         — fires when faction filth/cap ratio crosses a threshold (see EventDef_FilthTrigger)
+//   "threshold"     — fires when a configurable threshold condition is met (EventDef_ThresholdTrigger)
 //   "daily"         — Worker rolls once per day per guild; chancePerDay controls probability
 //
 // scope:
@@ -4489,7 +4497,7 @@ model EventDef {
   // Trigger conditions
   weatherTriggers     EventDef_WeatherTrigger[]
   actionTriggers      EventDef_ActionType[]
-  filthTrigger        EventDef_FilthTrigger?
+  thresholdTrigger   EventDef_ThresholdTrigger?
   envConditionWeights EnvCondition_EventDef[]
   locationTriggers    EventDef_Location[]
   prerequisites       EventDef_Prerequisite[] @relation("EventPrerequisites")
@@ -4547,15 +4555,28 @@ model EventDef_ActionType {
 
 // Filth threshold trigger.
 // chancePerDay scales linearly above filthThreshold.
-// isOngoing: true = event persists and re-applies effects each tick until filth drops below threshold.
-model EventDef_FilthTrigger {
+// isOngoing: true = event persists and re-applies effects each tick until resolution conditions are met.
+// triggerDays: consecutive days threshold must be met before chance rolls begin.
+// triggerOnHigh: true = trigger when value > threshold, false = trigger when value < threshold.
+// resolutionThreshold: separate threshold for ending ongoing events (null = same as thresholdValue).
+// resolutionDays: consecutive days resolution threshold must be met to end event.
+// resolutionOnLow: true = resolve when value < resolutionThreshold, false = resolve when value > resolutionThreshold.
+model EventDef_ThresholdTrigger {
   eventDefId Int @id
 
-  filthThreshold Float   // filth/cap ratio (0.0–1.0) at which daily roll begins
-  chancePerDay   Float   // base daily chance at filth/cap = 1.0; scales linearly above threshold
-  isOngoing      Boolean @default(false)
+  thresholdTypeId    Int     // what type of threshold this monitors (filth, population, etc.)
+  thresholdValue     Float   // the threshold value (0.0–1.0 for ratios, absolute values for counts)
+  chancePerDay       Float   // fixed daily chance (0.0-1.0) once trigger conditions are met; 1.0 = 100%
+  isOngoing          Boolean @default(false)
 
-  eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
+  triggerDays        Int?    // consecutive days above/below thresholdValue before chance rolls begin (null = immediate)
+  triggerOnHigh      Boolean @default(true)  // true = trigger on high values, false = trigger on low values
+  resolutionThreshold Float?  // separate threshold for event resolution (null = use thresholdValue)
+  resolutionDays     Int?    // consecutive days at resolution threshold to end event (null = manual resolution only)
+  resolutionOnLow    Boolean? // true = resolve on low values, false = resolve on high values (null = opposite of triggerOnHigh)
+
+  thresholdType EventThresholdType @relation(fields: [thresholdTypeId], references: [id], onDelete: Restrict)
+  eventDef      EventDef           @relation(fields: [eventDefId],     references: [id], onDelete: Cascade)
 }
 
 // Another EventDef that must have at least one completed ActiveEvent in the guild before this event is eligible.
