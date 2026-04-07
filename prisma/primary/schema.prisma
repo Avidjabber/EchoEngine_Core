@@ -4757,7 +4757,7 @@ model CombatInitiationType {
 
   canResultInDeath Boolean @default(false)  // spar = false; event and boss can be fatal
   isScripted       Boolean @default(false)  // boss = true; pre-defined encounter with specific enemies
-  allowsFleeing    Boolean @default(false)  // event and boss allow fleeing; spar does not
+  allowsFleeing    Boolean @default(false)  // spar = false; event = true; boss = true
   canSecondWind    Boolean @default(true)   // entity can enter second wind state at low HP
 
   activeCombats ActiveCombat[]
@@ -4828,9 +4828,6 @@ model CombatEffectType {
   profileBehaviors      ItemEquipmentProfile[]        @relation("ProfileBehaviorEffect")
   activeBehaviorEffects ActiveCombat_BehaviorEffect[] @relation("ActiveBehaviorEffectType")
 }
-
-// Used by damage_mod combat effects to express roll-based modifiers instead of flat values.
-
 
 // Pre-populated categories that control turn economy.
 // Each entity may use one action per category per turn.
@@ -5031,9 +5028,8 @@ model ActiveCombat {
 //   NPC entities never trigger second wind (isAiControlled = true entities are simply defeated at 0 HP).
 // hasFled: entity chose to flee; removed from turn order, earns no exp or rep.
 // isDefeated: entity eliminated (declined second wind, hit 0 HP while inSecondWind, or NPC at 0 HP).
-// Guard and taunt state are not cached here — query ActiveCombat_BehaviorEffect directly:
-//   guard: WHERE behaviorKey = "guard" AND linkedParticipantId = <this participant>
-//   taunt: WHERE behaviorKey = "taunt" AND affectedParticipantId = <this participant>
+// Guard and taunt state are not cached here — query ActiveCombat_BehaviorEffect directly
+// via effectTypeId (JOIN CombatEffectType ON name = "guard" / "taunt").
 model ActiveCombat_Participant {
   id             Int  @id @default(autoincrement())
   activeCombatId Int
@@ -5101,10 +5097,17 @@ model ActiveCombat_Participant_ActionCooldown {
 // roundsRemaining — there is no "stack" or "ignore" mode for behavior effects.
 //
 // Directional semantics:
-//   guard:   affectedParticipantId = the guarding entity;  linkedParticipantId = the guarded participant
-//   taunt:   affectedParticipantId = the taunted entity;   linkedParticipantId = the taunting participant
-//   parry:   affectedParticipantId = the parrying entity;  linkedParticipantId = null
-//   absorb:  affectedParticipantId = the absorbing entity; linkedParticipantId = null
+//   guard:   affectedParticipantId = the guarding entity;   linkedParticipantId = the guarded participant
+//   taunt:   affectedParticipantId = the taunted entity;    linkedParticipantId = the taunting participant
+//   parry:   affectedParticipantId = the parrying entity;   linkedParticipantId = null
+//   absorb:  affectedParticipantId = the absorbing entity;  linkedParticipantId = null
+//   reflect: affectedParticipantId = the reflecting entity; linkedParticipantId = null
+//            (attacker is resolved at hit-time; not pre-linked)
+//
+// MAGNITUDE FIELDS — populated at application time from the item or ability; null if not applicable.
+//   flatModifier    — flat numeric value: absorb buffer HP, flat reflected damage amount, flat damage blocked, etc.
+//   percentModifier — fractional value (0.0–1.0): reflect % of incoming damage, guard damage reduction %, etc.
+//   Either or both may be set depending on the behavior type; unused fields are null.
 model ActiveCombat_BehaviorEffect {
   id             Int @id @default(autoincrement())
   activeCombatId    Int
@@ -5113,7 +5116,9 @@ model ActiveCombat_BehaviorEffect {
   affectedParticipantId Int
   linkedParticipantId   Int?
 
-  roundsRemaining Int
+  roundsRemaining  Int
+  flatModifier     Int?    // flat modification value; usage depends on effect type (see comment above)
+  percentModifier  Float?  // fractional modification value (0.0–1.0); usage depends on effect type
 
   activeCombat        ActiveCombat              @relation(fields: [activeCombatId],    references: [id], onDelete: Cascade)
   effectType          CombatEffectType          @relation("ActiveBehaviorEffectType",  fields: [effectTypeId],           references: [id], onDelete: Restrict)
@@ -5147,7 +5152,9 @@ model ActiveCombat_Action {
   damageRoll     Int?
   damageModifier Int?
   damageDealt    Int?
-  healDealt      Int?
+  healDealt       Int?
+  reflectedDamage Int?  // damage returned to the attacker via a reflect behavior effect
+  absorbedDamage  Int?  // damage intercepted by an absorb buffer instead of reducing HP
 
   secondWindTriggered Boolean  @default(false)
 

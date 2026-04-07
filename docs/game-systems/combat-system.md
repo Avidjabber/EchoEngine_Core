@@ -258,8 +258,25 @@ Directional semantics:
   reflect: affectedParticipantId = reflecting entity; linkedParticipantId = null
            (attacker is resolved at hit-time, not pre-linked)
 
+MAGNITUDE FIELDS
+─────────────────
+flatModifier and percentModifier on ActiveCombat_BehaviorEffect are populated at application
+time and carry the configurable magnitude for behavior types that need it:
+
+  flatModifier    — flat numeric value. Examples:
+                    absorb → HP buffer size (damage consumed before reaching the entity's HP)
+                    reflect → fixed damage returned to attacker regardless of hit size
+  percentModifier — fractional value (0.0–1.0). Examples:
+                    reflect → fraction of incoming damage returned to attacker (e.g. 0.3 = 30%)
+                    guard   → fraction of damage the guard absorbs for the protected ally (e.g. 0.9)
+
+Either or both may be set; behavior types that don't use a field leave it null. The engine reads
+whichever fields are non-null and resolves the magnitude in the order: flat first, then percent
+of the remaining damage (if both are set). Behavior types with no magnitude (taunt, parry,
+action_denial, etc.) always leave both fields null.
+
 Guard and taunt state are NOT cached on ActiveCombat_Participant — query
-ActiveCombat_BehaviorEffect directly at resolution time.
+ActiveCombat_BehaviorEffect directly via effectTypeId at resolution time.
 
 
 ─────────────────────────────────────────────
@@ -277,6 +294,8 @@ Used to reconstruct the Discord message narrative after each turn resolves.
   hitRoll / hitModifier / hit            — attack roll, modifier applied, and whether it connected
   damageRoll / damageModifier / damageDealt — damage roll, modifier applied, and final damage
   healDealt                               — HP restored (heal actions)
+  reflectedDamage                         — damage returned to the attacker via a reflect effect; null if none
+  absorbedDamage                          — damage intercepted by an absorb buffer before reaching HP; null if none
   secondWindTriggered                     — true if this action caused a second wind
 
 
