@@ -621,21 +621,22 @@ now defined as CombatStatEffectDef sub-tables (DamageOverTime, HealOverTime, Rol
 Flags isPerRound, dealsDamage, restoresHealth, grantsAdvantage, grantsDisadvantage were
 removed from the model for the same reason.
 
-  name              modifiesRoll  modifiesStat  deniesActions  modifiesAC  redirectsDamage  forcesTargeting  isReactive  absorbsDamage  grantsEvasion  enablesCounterattack  suppressesReactive  removesEffects  preventedAsTarget
-  hit_mod           true          false         false          false       false            false            false       false          false          false                 false               false           false
-  damage_mod        true          false         false          false       false            false            false       false          false          false                 false               false           false
-  stat_mod          false         true          false          false       false            false            false       false          false          false                 false               false           false
-  action_denial     false         false         true           false       false            false            false       false          false          false                 false               false           false
-  ac_mod            false         false         false          true        false            false            false       false          false          false                 false               false           false
-  guard             false         false         false          false       true             false            false       false          false          false                 false               false           false
-  taunt             false         false         false          false       false            true             false       false          false          false                 false               false           false
-  parry             false         false         false          false       false            false            true        false          false          false                 false               false           false
-  absorb            false         false         false          false       false            false            false       true           false          false                 false               false           false
-  dodge_stance      false         false         false          false       false            false            false       false          true           false                 false               false           false
-  counterattack     false         false         false          false       false            false            true        false          false          true                  false               false           false
-  suppress          false         false         false          false       false            false            false       false          false          false                 true                false           false
-  dispel            false         false         false          false       false            false            false       false          false          false                 false               true            false
-  untargetable      false         false         false          false       false            false            false       false          false          false                 false               false           true
+  name              modifiesRoll  modifiesStat  deniesActions  modifiesAC  redirectsDamage  forcesTargeting  isReactive  absorbsDamage  grantsEvasion  enablesCounterattack  suppressesReactive  removesEffects  preventedAsTarget  reflectsDamage
+  hit_mod           true          false         false          false       false            false            false       false          false          false                 false               false           false              false
+  damage_mod        true          false         false          false       false            false            false       false          false          false                 false               false           false              false
+  stat_mod          false         true          false          false       false            false            false       false          false          false                 false               false           false              false
+  action_denial     false         false         true           false       false            false            false       false          false          false                 false               false           false              false
+  ac_mod            false         false         false          true        false            false            false       false          false          false                 false               false           false              false
+  guard             false         false         false          false       true             false            false       false          false          false                 false               false           false              false
+  taunt             false         false         false          false       false            true             false       false          false          false                 false               false           false              false
+  parry             false         false         false          false       false            false            true        false          false          false                 false               false           false              false
+  absorb            false         false         false          false       false            false            false       true           false          false                 false               false           false              false
+  dodge_stance      false         false         false          false       false            false            false       false          true           false                 false               false           false              false
+  counterattack     false         false         false          false       false            false            true        false          false          true                  false               false           false              false
+  suppress          false         false         false          false       false            false            false       false          false          false                 true                false           false              false
+  dispel            false         false         false          false       false            false            false       false          false          false                 false               true            false              false
+  untargetable      false         false         false          false       false            false            false       false          false          false                 false               false           true               false
+  reflect           false         false         false          false       false            false            false       false          false          false                 false               false           false              true
 
 
 ──────────────────────────────────────────────

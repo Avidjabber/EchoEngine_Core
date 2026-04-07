@@ -251,10 +251,12 @@ use CombatEffectType via ConditionDef_CombatEffect — this is the only overlap.
 numerical effects route through CombatStatEffectDef regardless of source.
 
 Directional semantics:
-  guard:  affectedParticipantId = guarding entity;  linkedParticipantId = guarded ally
-  taunt:  affectedParticipantId = taunted entity;   linkedParticipantId = taunter
-  parry:  affectedParticipantId = parrying entity;  linkedParticipantId = null
-  absorb: affectedParticipantId = absorbing entity; linkedParticipantId = null
+  guard:   affectedParticipantId = guarding entity;   linkedParticipantId = guarded ally
+  taunt:   affectedParticipantId = taunted entity;    linkedParticipantId = taunter
+  parry:   affectedParticipantId = parrying entity;   linkedParticipantId = null
+  absorb:  affectedParticipantId = absorbing entity;  linkedParticipantId = null
+  reflect: affectedParticipantId = reflecting entity; linkedParticipantId = null
+           (attacker is resolved at hit-time, not pre-linked)
 
 Guard and taunt state are NOT cached on ActiveCombat_Participant — query
 ActiveCombat_BehaviorEffect directly at resolution time.

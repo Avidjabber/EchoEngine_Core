@@ -4799,11 +4799,11 @@ model CombatOutcome {
 //
 // Seeded values:
 //   Behavioral (route to ActiveCombat_BehaviorEffect):
-//     "guard" | "taunt" | "parry" | "absorb" | "dodge_stance" | "counterattack" | "suppress" | "dispel" | "untargetable" | "action_denial"
+//     "guard" | "taunt" | "parry" | "absorb" | "dodge_stance" | "counterattack" | "suppress" | "dispel" | "untargetable" | "action_denial" | "reflect"
 //   Skill-derived magnitude (route to ConditionDef_CombatEffect with flatModifier = null):
 //     "hit_mod" | "damage_mod" | "stat_mod" | "ac_mod"
 //
-// Fixed-value stat/roll effects (DoT, HoT, roll mods, AC mods, advantage, advantage) are defined
+// Fixed-value stat/roll effects (DoT, HoT, roll mods, AC mods, advantage, disadvantage) are defined
 // as CombatStatEffectDef sub-tables — they do NOT use CombatEffectType rows.
 //
 // modifiesRoll:         adds a skill-derived value to a hit or damage roll (hit_mod, damage_mod)
@@ -4819,6 +4819,7 @@ model CombatOutcome {
 // suppressesReactive:   prevents the target's reactive effects (parry, counterattack) from firing (suppress)
 // removesEffects:       strips existing active effects from the target (dispel)
 // preventedAsTarget:    effect-holder cannot be selected as a target (untargetable)
+// reflectsDamage:       a portion of incoming damage is dealt back to the attacker (reflect)
 model CombatEffectType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -4836,6 +4837,7 @@ model CombatEffectType {
   suppressesReactive   Boolean @default(false)
   removesEffects       Boolean @default(false)
   preventedAsTarget    Boolean @default(false)
+  reflectsDamage       Boolean @default(false)
 
   combatEffects        ConditionDef_CombatEffect[]
   profileBehaviors      ItemEquipmentProfile[]        @relation("ProfileBehaviorEffect")
