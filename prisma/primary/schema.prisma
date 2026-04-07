@@ -4453,7 +4453,7 @@ model EventCheckMode {
 //
 // triggerTypes:
 //   one or more trigger types may apply to the same event definition.
-//   "admin"         — admin-initiated; participants provided via signup before the chain starts
+//   "admin"         — admin-initiated; typically provides a signup window before the chain starts
 //   "patrol"        — fires when a patrol activity completes
 //   "hunt"          — fires when a hunt activity completes
 //   "crafting"      — fires when a crafting activity completes
@@ -4492,6 +4492,7 @@ model EventDef {
   minAge               Int?
 
   // Participant bounds for signup-based events
+  requiresSignup       Boolean @default(false)
   minParticipants       Int?  // null = no minimum
   maxParticipants       Int?  // null = no maximum
 

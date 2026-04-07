@@ -38,6 +38,11 @@ Faction is the core model. Key fields:
                    updated whenever any event fires for this faction;
                    Worker skips new events if now() < lastEventAt + EventDef.cooldownDays
 
+  EventCooldown   — per-event completion history for event-specific cooldowns.
+                   Each row stores the last completion time for a specific eventDefId
+                   and factionId (null factionId means guild-wide for global events).
+                   If no row exists, that event has never completed before for that scope.
+
 A faction may have zero or more camps (Camp_Faction). Multiple camps can be
 active simultaneously — there is no single "active camp" pointer.
 Entities belong to a faction via Entity.factionId.

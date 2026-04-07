@@ -45,6 +45,8 @@ Events can be triggered by several mechanisms (EventTriggerType). An EventDef ma
   daily         — fires on the daily tick with a base chance per day
                   (EventDef.chancePerDay)
 
+An event may also require signup even if it is triggered by another mechanism; set `EventDef.requiresSignup = true` to force participant enrollment before the event begins.
+
 An EventDef can also have prerequisites — other EventDefs that must have
 completed at least once (within an optional time window) before this event
 is eligible to fire (EventDef_Prerequisite).
@@ -124,6 +126,7 @@ depending on the event's spawn context.
   EventDef_WeatherTrigger     — links event to a weather state trigger
   EventDef_ThresholdTrigger   — configurable threshold trigger config
   EventDef_Prerequisite       — prerequisite event that must have fired first
+  EventCooldown               — per-event completion history for event-specific cooldowns
 
   LOOKUP TABLES (seed)
   EventTriggerType            — admin | patrol | hunt | crafting | foraging | clean | weather_onset | threshold | daily
