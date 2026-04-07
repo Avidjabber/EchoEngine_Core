@@ -43,6 +43,7 @@ vs. accepted type (see section 5).
     Electric    electrical energy (batteries, charged cells)
     Steam       pressurised steam (boilers, steam canisters)
     Alchemical  alchemical or magical energy (reagent canisters, mana cells)
+    Renewable   ambient natural energy (wind, solar, water flow)
 
 Items carry a fuelTypeId. When deposited into an active source, the item's
 fuelValue is added to Structure.currentFuel (active sources only).
@@ -58,13 +59,12 @@ A power-source StructureDef has exactly one StructureDef_FuelConfig row.
 StructureDef_FuelConfig
 ──────────────────────
 
-  isActive             Boolean. True = source is a passive generator (fueled
-                                   automatically by the worker each tick based on
-                                   active env conditions; no item deposits). False =
-                                   source is an active generator (fueled by item
-                                   deposits; items matching an input fuel type are
-                                   destroyed on deposit and their fuelValue added to
-                                   Structure.currentFuel).
+  isPassive            Boolean. False = active generator (fueled by item deposits;
+                                   items matching an input fuel type are destroyed on
+                                   deposit and their fuelValue added to
+                                   Structure.currentFuel). True = passive generator
+                                   (fueled automatically by the worker each tick based
+                                   on active env conditions; no item deposits).
                                    Rate for passive sources defined per condition in
                                    StructureDef_FuelConfig_EnvCondition.
 
@@ -126,8 +126,10 @@ Each worker tick, the passive source's fuel gain is:
                   + Σ(stackCount × generationRatePerStack) for each active condition
   Structure.currentFuel = MIN(fuelCapacity, currentFuel + totalGeneration)
 
-A passive source with no StructureDef_FuelConfig_EnvCondition rows generates
-nothing — this is a misconfiguration flagged at the app layer.
+A passive source with baseGenerationPerHour = 0 AND no EnvCondition rows generates
+nothing — this is a misconfiguration flagged at the app layer. A source with a
+non-zero baseGenerationPerHour is valid without env condition rows; it simply
+generates at the fixed base rate with no bonus scaling.
 
 RUNTIME STATE
 ──────────────
@@ -135,7 +137,8 @@ RUNTIME STATE
                                       when power type.
   Structure.isFuelActive     Boolean  Source toggle. Worker only drains or generates
                                       fuel when true. Set by the faction leader to
-                                      turn a source on or off.
+                                      turn a source on or off. Cannot be set to true
+                                      while the power_loss env condition is active.
   Structure.powerSortOrder   Int?     Camp-scope sources only. Worker drains the
                                       lowest value first. null = not a camp-scope source.
 
@@ -218,10 +221,18 @@ RUNTIME STATE
                                               the source. The faction leader can
                                               toggle this to shed load.
 
+  Structure.powerPriority            Int      Load-shedding order (default 0). When
+                                              fuel runs low mid-tick, higher priority
+                                              consumers are satisfied before lower ones.
+                                              Ties broken by Structure.id (ascending).
+
   Structure_AppliedUpgrade.isPoweredOn Boolean Same consumer toggle, per upgrade
                                               application. When false, that upgrade's
                                               effects are suspended and no fuel is
                                               drawn for it.
+
+  Structure_AppliedUpgrade.powerPriority Int  Same load-shedding priority as above,
+                                              per upgrade application.
 
 
 ─────────────────────────────────────────────
@@ -230,20 +241,29 @@ RUNTIME STATE
 
 The worker processes power once per tick (hourly).
 
+STEP 0 — POWER LOSS CHECK:
+  If the power_loss env condition is active for the guild, skip all power
+  processing. All isPowered consumers are treated as unsatisfied this tick.
+  No fuel is generated or drained.
+
 FOR EACH ACTIVE POWER SOURCE (isFuelActive = true, currentFuel > 0):
 
-  1. Passive generation (if generatorType = "passive"):
+  1. Passive generation (if isPassive = true):
        Compute totalGeneration from baseGenerationPerHour + env condition bonuses.
        currentFuel = MIN(fuelCapacity, currentFuel + totalGeneration)
 
   2. Identify consumers this source can satisfy (scope + type matching, section 4).
 
-  3. For each consumer with isPoweredOn = true:
+  3. Sort qualifying consumers by powerPriority descending (highest first).
+     Ties broken by Structure.id / Structure_AppliedUpgrade.id (ascending).
+
+  4. For each consumer with isPoweredOn = true (in priority order):
        a. Check satisfaction: scope, type match, currentFuel > 0.
        b. If satisfied: deduct fuelCostPerHour from currentFuel.
           currentFuel may not go below 0.
        c. If not satisfied (no fuel remaining, source inactive, or type mismatch):
           the consumer is unsatisfied this tick — powered effects suspended.
+          Remaining lower-priority consumers also fall through if fuel is exhausted.
 
 CAMP-SCOPE DRAIN ORDER:
   When multiple camp-scope sources exist in the same camp, the worker drains
@@ -262,32 +282,66 @@ STRUCTURE-SCOPE:
 6. UPGRADES FOR POWER STRUCTURES
 ─────────────────────────────────────────────
 
-Upgrade effectTypes valid for power-type StructureDefs (isFuel = true):
+Upgrade effectTypes valid for power-type StructureDefs (isPower = true):
 
   fuel_capacity      Increases fuelCapacity by effectValue per application.
                      e.g. +50 units per upgrade level.
 
   fuel_efficiency    Reduces the fuelCostPerHour for consumers satisfied by this
                      source. effectValue applied as a reduction multiplier per
-                     application.
+                     application. Scope controlled by efficiencyConsumerScopeId
+                     (FK → TargetScope, isEfficiencyConsumerScope = true):
+                       null             — all consumers (default)
+                       all              — all consumers (explicit)
+                       structures_only  — StructureDef consumers only
+                       upgrades_only    — StructureDef_Upgrade consumers only
 
   passive_gen_rate   Increases baseGenerationPerHour by effectValue per application.
-                     Only meaningful on passive sources; ignored on active.
+                     Only meaningful on passive sources (isPassive = true); ignored on active.
 
   damage_resistance  Reduces damage taken from hostile events (shared across all types).
   filth_reduction    Reduces daily filth contribution (shared across all types).
 
 
 ─────────────────────────────────────────────
-7. SCHEMA SUMMARY
+7. ENV-DRIVEN POWER LOSS
+─────────────────────────────────────────────
+
+The engine seeds a special EnvCondition with codeName = "power_loss". When this
+condition is active in a guild, the worker skips all power processing for that
+tick and treats every isPowered consumer as unsatisfied.
+
+Guild owners attach power_loss to any WeatherState they choose — it is just
+another env condition stacked alongside others. This lets guilds build any
+thematic scenario that disables power:
+
+  SOLAR FLARE PATTERN   — WeatherState carries: harsh_sunlight + power_loss
+  ARCANE STORM PATTERN  — WeatherState carries: storm + alchemical_surge + power_loss
+  EARTHQUAKE PATTERN    — WeatherState carries: dusty + muddy + power_loss
+  MAGICAL INTERFERENCE  — WeatherState carries: power_loss alone
+
+The condition has no inherent world modifiers of its own (filth, spoilage, etc.) —
+its sole engine effect is the power shutdown. All atmospheric flavour comes from
+the other conditions the guild pairs with it.
+
+isFuelActive cannot be set to true on any Structure while power_loss is active.
+The guild sees a clear status indicator that power is suspended by weather.
+
+
+─────────────────────────────────────────────
+8. SCHEMA SUMMARY
 ─────────────────────────────────────────────
 
   FuelType                            — static seed: Burnable | Electric | Steam | Alchemical | Renewable
-  StructureDef_FuelConfig             — isActive (passive generator flag), scopeId (FK → TargetScope), fuelCapacity,
+  EnvCondition (power_loss)           — seeded engine condition; worker skips all power processing while active
+  StructureDef_FuelConfig             — isPassive (passive generator flag), scopeId (FK → TargetScope), fuelCapacity,
                                         baseGenerationPerHour, allowsBatteryUse
   StructureDef_FuelConfig_InputFuelType  — fuel item types a source accepts as deposits (and battery fuel type checks)
   StructureDef_FuelConfig_OutputFuelType — fuel types a source produces
   StructureDef_FuelConfig_EnvCondition   — env conditions driving passive generation rate
   StructureDef_AcceptedFuelType          — output fuel types a powered StructureDef accepts; empty = any
   StructureDef_Upgrade_AcceptedFuelType  — same, for powered upgrades
-  StoredItem.currentFuelLevel            — Float?; battery charge state; null on non-battery items
+  StructureDef_Upgrade_Effect.efficiencyConsumerScopeId — FK → TargetScope (isEfficiencyConsumerScope); restricts fuel_efficiency to structures, upgrades, or all; null = all
+  Structure.powerPriority             — Int; consumer load-shedding priority; higher satisfied first
+  Structure_AppliedUpgrade.powerPriority — same, per upgrade application
+  StoredItem.currentFuelLevel         — Float?; battery charge state; null on non-battery items

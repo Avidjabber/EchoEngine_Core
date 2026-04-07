@@ -1707,13 +1707,15 @@ model TargetScope {
   id    Int    @id @default(autoincrement())
   name  String @unique
 
-  isAbilityTarget Boolean @default(false)  // valid for Ability_ActionTrigger.targetScopeId
-  isPresenceScope Boolean @default(false)  // valid for Ability_PresenceEffect.presenceScopeId
-  isPowerScope    Boolean @default(false)  // valid for StructureDef_FuelConfig.scopeId
+  isAbilityTarget          Boolean @default(false)  // valid for Ability_ActionTrigger.targetScopeId
+  isPresenceScope          Boolean @default(false)  // valid for Ability_PresenceEffect.presenceScopeId
+  isPowerScope             Boolean @default(false)  // valid for StructureDef_FuelConfig.scopeId
+  isEfficiencyConsumerScope Boolean @default(false) // valid for StructureDef_Upgrade_Effect.efficiencyConsumerScopeId
 
-  abilityActionTrigger   Ability_ActionTrigger[]
-  abilityPresenceEffects Ability_PresenceEffect[]
-  fuelConfigs            StructureDef_FuelConfig[]
+  abilityActionTrigger    Ability_ActionTrigger[]
+  abilityPresenceEffects  Ability_PresenceEffect[]
+  fuelConfigs             StructureDef_FuelConfig[]
+  upgradeEfficiencyScopes StructureDef_Upgrade_Effect[]
 }
 
 model TriggerTiming {
@@ -3564,7 +3566,7 @@ model StructureDef_CompostConfig {
 // ties broken by Structure.id. Structure-scope sources drain independently.
 model StructureDef_FuelConfig {
   structureDefId        Int     @id
-  isActive              Boolean @default(false) // false = active generator (item deposits); true = passive generator (env conditions)
+  isPassive             Boolean @default(false) // false = active generator (fueled by item deposits); true = passive generator (fueled by env conditions each tick)
   scopeId               Int
   fuelCapacity          Float   @default(100)  // max fuel units the bank can hold; upgradeable via fuel_capacity effect
   baseGenerationPerHour Float?                 // passive sources only — base fuel units generated per hour before env condition bonuses;
@@ -3686,15 +3688,19 @@ model StructureDef_Upgrade {
 // effectValue: additive delta applied per application.
 // targetEnvConditionId: required when UpgradeEffectType.requiresEnvTarget = true; null otherwise.
 model StructureDef_Upgrade_Effect {
-  id                   Int    @id @default(autoincrement())
+  id                   Int     @id @default(autoincrement())
   upgradeId            Int
   effectTypeId         Int
   effectValue          Float
   targetEnvConditionId Int?
+  // fuel_efficiency only: restricts which consumer type receives the efficiency reduction.
+  // null = all consumers. FK → TargetScope (isEfficiencyConsumerScope = true).
+  efficiencyConsumerScopeId Int?
 
-  upgrade            StructureDef_Upgrade @relation(fields: [upgradeId],            references: [id], onDelete: Cascade)
-  effectType         UpgradeEffectType    @relation(fields: [effectTypeId],          references: [id], onDelete: Restrict)
-  targetEnvCondition EnvCondition?        @relation(fields: [targetEnvConditionId], references: [id], onDelete: Restrict)
+  upgrade                   StructureDef_Upgrade @relation(fields: [upgradeId],                   references: [id], onDelete: Cascade)
+  effectType                UpgradeEffectType    @relation(fields: [effectTypeId],                   references: [id], onDelete: Restrict)
+  targetEnvCondition        EnvCondition?        @relation(fields: [targetEnvConditionId],           references: [id], onDelete: Restrict)
+  efficiencyConsumerScope   TargetScope?         @relation(fields: [efficiencyConsumerScopeId],      references: [id], onDelete: Restrict)
 
   @@index([upgradeId])
   @@index([effectTypeId])
@@ -3747,9 +3753,10 @@ model Structure {
   filthLevel         Int     @default(0)
   name               String? @db.VarChar(200)
   currentFuel        Float?               // null = not a fuel structure; 0–fuelCapacity when fuel type
-  isFuelActive       Boolean @default(false) // power SOURCE toggle — worker only drains/generates when true
+  isFuelActive       Boolean @default(false) // power SOURCE toggle — worker only drains/generates when true; blocked while power_loss env condition is active
   isPoweredOn        Boolean @default(false) // power CONSUMER toggle — when false, powered functionality disabled and no fuel drawn
   powerSortOrder     Int?                 // camp-scope sources only; lower = drained first by worker. null = not a camp-scope source
+  powerPriority      Int     @default(0)  // consumer load-shedding order — higher value satisfied first when fuel is scarce mid-tick
 
   camp         Camp         @relation(fields: [campId],         references: [id], onDelete: Cascade)
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Restrict)
@@ -3772,7 +3779,8 @@ model Structure_AppliedUpgrade {
   structureId Int
   upgradeId   Int
   appliedAt   DateTime @default(now()) @db.Timestamptz
-  isPoweredOn Boolean  @default(false) // power CONSUMER toggle for powered upgrades — when false, upgrade effects suspended and no fuel drawn
+  isPoweredOn   Boolean @default(false) // power CONSUMER toggle for powered upgrades — when false, upgrade effects suspended and no fuel drawn
+  powerPriority Int     @default(0)   // consumer load-shedding order — higher value satisfied first when fuel is scarce mid-tick
 
   structure Structure            @relation(fields: [structureId], references: [id], onDelete: Cascade)
   upgrade   StructureDef_Upgrade @relation(fields: [upgradeId],   references: [id], onDelete: Restrict)

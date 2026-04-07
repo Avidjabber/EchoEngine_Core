@@ -299,25 +299,29 @@ AbilityThresholdType                    [ DONE ]
 ──────────────────────────────────────────────
 TargetScope                             [ DONE ]
 ──────────────────────────────────────────────
-  isAbilityTarget — valid for Ability_ActionTrigger.targetScopeId
-  isPresenceScope — valid for Ability_PresenceEffect.presenceScopeId
-  isPowerScope    — valid for StructureDef_FuelConfig.scopeId
+  isAbilityTarget           — valid for Ability_ActionTrigger.targetScopeId
+  isPresenceScope           — valid for Ability_PresenceEffect.presenceScopeId
+  isPowerScope              — valid for StructureDef_FuelConfig.scopeId
+  isEfficiencyConsumerScope — valid for StructureDef_Upgrade_Effect.efficiencyConsumerScopeId
 
-  name                 isAbilityTarget  isPresenceScope  isPowerScope
-  ──────────           ───────────────  ───────────────  ────────────
-  self                 true             false            false
-  action_target        true             false            false
-  action_participant   true             false            false
-  area                 true             false            false
-  housing_structure    false            true             false
-  housing_plot         false            true             false
-  colocated_entities   false            true             false
-  camp_entities        false            true             false
-  camp_structures      false            true             false
-  structure            false            false            true
-  camp                 false            false            true
-  location             false            false            true
-  faction              false            false            true
+  name                 isAbilityTarget  isPresenceScope  isPowerScope  isEfficiencyConsumerScope
+  ──────────           ───────────────  ───────────────  ────────────  ─────────────────────────
+  self                 true             false            false         false
+  action_target        true             false            false         false
+  action_participant   true             false            false         false
+  area                 true             false            false         false
+  housing_structure    false            true             false         false
+  housing_plot         false            true             false         false
+  colocated_entities   false            true             false         false
+  camp_entities        false            true             false         false
+  camp_structures      false            true             false         false
+  structure            false            false            true          false
+  camp                 false            false            true          false
+  location             false            false            true          false
+  faction              false            false            true          false
+  all                  false            false            false         true
+  structures_only      false            false            false         true
+  upgrades_only        false            false            false         true
 
 
 ──────────────────────────────────────────────
@@ -384,9 +388,9 @@ Each type has a corresponding config table (except storage, which uses Structure
   medical   StructureDef_MedicalConfig      treatment/exam roll bonus, recovery modifier, contagion resist
   compost   StructureDef_CompostConfig      conversion days, weight/volume capacity; MUST pair with storage
   crafting  StructureDef_CraftingConfig     crafting roll bonus, output quantity bonus, supported interactions
-  power     StructureDef_FuelConfig         isActive (passive generator flag), scopeId (FK → TargetScope), capacity, burn rate;
-            —                               isActive=false: active generator — accepts item deposits matching fuelTypeId
-            —                               isActive=true:  passive generator — generates from env conditions via StructureDef_FuelConfig_EnvCondition
+  power     StructureDef_FuelConfig         isPassive (passive generator flag), scopeId (FK → TargetScope), capacity, burn rate;
+            —                               isPassive=false: active generator — accepts item deposits matching fuelTypeId
+            —                               isPassive=true:  passive generator — generates from env conditions via StructureDef_FuelConfig_EnvCondition
             —                               allowsBatteryUse=true: entity may discharge or charge Battery-type items via this structure
             —                               scope structure: satisfies only the structure this source is built into (multi-type def)
             —                               scope camp:      satisfies all isPowered in the same camp
@@ -1146,7 +1150,7 @@ Species_EnvConditionEffect, ConditionDef_EnvRule) seeded separately.
   codeName       name           modifiers
   overcast       Overcast       —
   sunny          Sunny          spoilage=0.2
-  harsh_sunlight Harsh Sunlight spoilage=0.3                                   [NEW]
+  harsh_sunlight Harsh Sunlight spoilage=0.3                                    [NEW]
   bright         Bright         —                                               [NEW]
   dappled_light  Dappled Light  —                                               [NEW]
   shaded         Shaded         —                                               [NEW]
@@ -1157,6 +1161,12 @@ Species_EnvConditionEffect, ConditionDef_EnvRule) seeded separately.
   codeName   name       modifiers
   cultivated Cultivated —
   (No global modifiers. Effects on plants/species seeded via per-entity tables.)
+
+  ENGINE-RESERVED (hardcoded engine behavior — no guild modifiers)
+  codeName    name        modifiers  notes
+  power_loss  Power Loss  —          Worker skips all power processing while active; isFuelActive
+                                     cannot be set to true. Attach to any WeatherState to create
+                                     power-disabling weather (solar flares, arcane storms, etc.).
 
   SEASONAL (contributed by season rows only — one condition per season)
   Per-plant and per-species seasonal effects are seeded via PlantDef_EnvConditionEffect
