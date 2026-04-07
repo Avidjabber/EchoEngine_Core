@@ -1172,34 +1172,42 @@ ActionSystemType                        [ DONE ]
   fight     Spawns a lethal ActiveCombat (CombatInitiationType = fight)
   crafting  Opens the crafting UI for participants; XP flows from Recipe_DisciplineReward
   healing   Opens the treatment UI for the healer; XP flows from treatment subsystem
+  diagnose  Opens the diagnosis UI; reveals symptoms and attempts condition identification
   clean     Interactive camp cleaning UI; player chooses target (base / food / herb storage)
-  farming             Farming harvest and growth logic (NOT YET IMPLEMENTED — see farming-system.md)
-  farming_crossbreed  Cross-breed two mature PlotCrops; solo only; produces ephemeral PlantDef + seed Item on success
-  compost             Opens the compost deposit UI; player chooses items to deposit into a compost structure
+
+  -- Farming: two player-facing system types; sub-types are internal (used for Plot_TendRecord
+  -- and Action_EntityDailyRecord tracking only, no ActionType row points to them)
+  farming_crop       Crop work UI: plant, harvest, uproot, or cross-breed a PlotCrop
+  farming_tend       Tending UI: water, prune, or fertilize a PlotCrop
+  farming_plant      [internal] Plant a propagation item into an open plot slot
+  farming_harvest    [internal] Harvest a mature PlotCrop
+  farming_uproot     [internal] Uproot a PlotCrop at any stage
+  farming_crossbreed [internal] Cross-breed two mature PlotCrops; solo only
+  farming_water      [internal] Daily tending; cooldownHours=24;  progressPoints=1
+  farming_prune      [internal] Weekly tending; cooldownHours=168; progressPoints=7
+  farming_fertilize  [internal] Weekly tending; cooldownHours=168; progressPoints=7
 
 ──────────────────────────────────────────────
 ActionType                              [ DONE ]
 ──────────────────────────────────────────────
-All rows: guildId = "global"
-
-Seeded fields: name · displayName · systemTypeId · isInteractive
+Seeded fields: name · displayName · systemTypeId
                requiresCanMentor · allowApprenticesWithAdult · requiresCanLeadEvents · minAge
 
 Costs and rewards (energyCost, dailyLimit, minEntities, maxEntities, durationMinutes, baseFactionReward,
 DisciplineRewards) are NOT seeded globally — each guild configures these via Guild_ActionConfig
 and ActionType_DisciplineReward.
 
-  name           displayName          systemTypeId  isInteractive  requiresCanMentor  allowApprenticesWithAdult  requiresCanLeadEvents  minAge  notes
-  ─────────────  ───────────────────  ────────────  ─────────────  ─────────────────  ─────────────────────────  ─────────────────────  ───────────  ─────────────────────────────────────────────────────────────
-  border_patrol  Border Patrol        patrol        false          false              true                       false                  null
-  hunting        Hunting Run          hunting       false          false              true                       false                  null         Combat XP distributed by engine, not DisciplineReward
-  foraging       Foraging Run         foraging      false          false              true                       false                  null
-  spar           Spar                 spar          true           false              true                       false                  null         Combat XP at 50% from engine; StatProgression split winners/losers
-  fight          Fight                fight         true           false              false                      false                  null         Faction rep outcome determined by app layer based on target faction
-  training       Training Session     null          false          true               true                       false                  null         App layer applies bonus XP multiplier for registered mentors
-  crafting       Crafting Session     crafting      true           false              true                       false                  null         Main XP flows from Recipe_DisciplineReward
-  treat          Treat Patient        healing       true           false              true                       false                  null         Main XP flows from healing subsystem
-  clean          Clean Camp           clean         true           false              true                       false                  null
-  farming        Farm Work            farming       false          false              true                       false                  null         [ PLACEHOLDER — farming system not yet implemented ]
-  crossbreed     Crossbreed Crops     farming_crossbreed  true    false              false                      false                  null         Solo only (maxEntities = 1); gated via ActionType_DisciplineRequirement
-  compost        Deposit to Compost   compost       true           false              true                       false                  null
+  name           displayName          systemTypeId   requiresCanMentor  allowApprenticesWithAdult  requiresCanLeadEvents  minAge  notes
+  ─────────────  ───────────────────  ─────────────  ─────────────────  ─────────────────────────  ─────────────────────  ──────  ──────────────────────────────────────────────────────────────
+  border_patrol  Border Patrol        patrol         false              true                       false                  null
+  hunting        Hunting Run          hunting        false              true                       false                  null    Combat XP distributed by engine, not DisciplineReward
+  foraging       Foraging Run         foraging       false              true                       false                  null
+  spar           Spar                 spar           false              true                       false                  null    Combat XP at 50% from engine; StatProgression split winners/losers
+  fight          Fight                fight          false              false                      false                  null    Faction rep outcome determined by app layer based on target faction
+  training       Training Session     null           true               true                       false                  null    App layer applies bonus XP multiplier for registered mentors
+  crafting       Crafting Session     crafting       false              true                       false                  null    Main XP flows from Recipe_DisciplineReward
+  treat          Treat Patient        healing        false              true                       false                  null    Main XP flows from healing subsystem
+  diagnose       Diagnose             diagnose       false              true                       false                  null    Reveals hidden symptoms; may identify condition
+  clean          Clean Camp           clean          false              true                       false                  null
+  crop_work      Crop Work            farming_crop   false              true                       false                  null    Plant, harvest, uproot, or cross-breed; see farming-system.md
+  tend_crops     Tend Crops           farming_tend   false              true                       false                  null    Water, prune, or fertilize; tending sub-type tracked on Plot_TendRecord

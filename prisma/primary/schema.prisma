@@ -4037,15 +4037,14 @@ model Action_EntityDailyRecord {
 }
 
 // Defines the set of actions cats can spend daily energy on (patrol, hunt, gather herbs, train, etc.)
-// Guild-extensible; guildId = "global" for seeded defaults.
+// All action types are bot-defined and universal — guilds cannot create their own.
 // Identity and eligibility only — costs and rewards are configured per-guild in Guild_ActionConfig
 // and ActionType_DisciplineReward.
 // Eligibility mirrors EventDef: requiresCanMentor gates adult-only actions; allowApprenticesWithAdult permits
 // apprentices when at least one canMentor entity is present.
 model ActionType {
   id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
-  name        String  @db.VarChar(100)    // internal key e.g. "border_patrol"
+  name        String  @unique @db.VarChar(100)    // internal key e.g. "border_patrol"
   displayName String  @db.VarChar(200)
   description String? @db.VarChar(1000)
 
@@ -4056,12 +4055,8 @@ model ActionType {
   minAge               Int?
 
   // Resolution mode — null = pure reward action (auto-resolves, no subsystem invoked).
-  // App rule: only guildId = "global" actions may have a non-null systemTypeId.
   systemTypeId  String?           @db.VarChar(50)
   systemType    ActionSystemType? @relation(fields: [systemTypeId], references: [id], onDelete: Restrict)
-  // false = quick (auto-resolves in background, posts summary)
-  // true  = interactive (step-by-step): each participant's roll is surfaced
-  isInteractive Boolean @default(false)
 
   eventTriggers          EventDef_ActionType[]
   instances              ActionInstance[]
@@ -4070,9 +4065,6 @@ model ActionType {
   disciplineRewards      ActionType_DisciplineReward[]
   disciplineRequirements ActionType_DisciplineRequirement[]
   entityUsage            Entity_ActionUsage[]
-
-  @@unique([guildId, name])
-  @@index([guildId])
 }
 
 // Per-guild configuration for a global action type.

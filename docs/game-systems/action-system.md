@@ -20,8 +20,8 @@ else — costs, durations, rewards, and discipline gates — is configured per g
 
 ActionInstance is a single in-progress or completed run of that action type.
 
-Actions are guild-extensible: guildId = "global" for seeded defaults;
-guilds may define their own.
+All action types are defined by the bot and are universal across all guilds.
+Guilds cannot create their own action types.
 
 
 ─────────────────────────────────────────────
@@ -34,12 +34,10 @@ NOT store costs, durations, or rewards — those are per-guild (see section 2b).
 
   Field                     │ Purpose
   ──────────────────────────┼────────────────────────────────────────────────
-  name                      │ Internal key e.g. "border_patrol" (unique per guild)
+  name                      │ Internal key e.g. "border_patrol" (globally unique)
   displayName               │ User-facing label
   systemTypeId              │ FK → ActionSystemType. null = pure reward action (auto-resolves,
-                            │ no subsystem). Non-null = invokes a seeded bot subsystem on resolution.
-                            │ Only guildId = "global" actions may have a non-null systemTypeId.
-  isInteractive             │ false = auto-resolves silently; true = step-by-step user interaction
+                            │ no subsystem). Non-null = invokes a bot subsystem on resolution.
   requiresCanMentor         │ At least one participant must have Rank.canMentor
   allowApprenticesWithAdult │ Apprentices may join only if a canMentor entity is present
   requiresCanLeadEvents     │ The initiating entity must have Rank.canLeadEvents
@@ -174,49 +172,52 @@ flows differently depending on the system:
     rows define XP as normal — these are the primary XP source since no
     sub-recipes are executed.
 
-  systemType = "farming_plant"
-    Entity plants a propagation item into an open plot slot. Consumes the
-    StoredItem and creates a PlotCrop. Reads Item.plantDefId for the PlantDef.
+  systemType = "diagnose"
+    Opens the diagnosis UI. The performing entity inspects a target entity,
+    revealing any hidden symptoms and rolling to identify the active condition.
+    Some symptoms are only discoverable through diagnosis.
 
-  systemType = "farming_harvest"
-    Harvests a mature PlotCrop using PlantDef.harvestDropTableId. Crop remains.
+  systemType = "farming_crop"
+    Crop Work action. Presents a picker: plant, harvest, uproot, or cross-breed.
+    Internally routes to the appropriate sub-system:
 
-  systemType = "farming_uproot"
-    Uproots a PlotCrop at any stage using PlantDef.uprootDropTableId. Crop deleted.
+    farming_plant      — Entity plants a propagation item into an open plot slot.
+                         Consumes the StoredItem, creates a PlotCrop.
+    farming_harvest    — Harvests a mature PlotCrop using PlantDef.harvestDropTableId.
+                         Crop remains.
+    farming_uproot     — Uproots a PlotCrop at any stage using PlantDef.harvestDropTableId
+                         (same formula as harvest; no output if not mature). Crop deleted.
+    farming_crossbreed — Cross-breeds two mature PlotCrops sharing the same root PlantDef.
+                         Solo only (maxEntities = 1). Gated via ActionType_DisciplineRequirement.
+                         On success: new ephemeral PlantDef + ephemeral seed Item created.
+                         On failure: offspring inherits one parent's PlantDef unchanged.
 
-  systemType = "farming_crossbreed"
-    Cross-breeds two mature PlotCrops sharing the same root PlantDef.
-    Solo only (maxEntities = 1). Gated via ActionType_DisciplineRequirement.
-    On success: new ephemeral PlantDef + ephemeral seed Item created.
-    On failure: offspring inherits one parent's PlantDef unchanged.
+    Adding compost to a plot is an item interaction, not a crop_work action.
+    See farming-system.md section 7 for full crop action reference.
 
   systemType = "farming_tend"
-    Applies Compost to a Plot, increasing Plot.soilQuality. Consumes a
-    Compost StoredItem from storage.
+    Tend Crops action. Presents a picker: water, prune, or fertilize.
+    Internally routes to the appropriate sub-system (each tracked separately on
+    Plot_TendRecord for per-sub-action cooldown enforcement):
 
-  systemType = "farming_water"
-    Daily tending action. Updates PlotCrop_TendRecord, increments PlotCrop.carePoints
-    by 1. If the performing entity has a matching Ability_PlotBuff, writes a
-    growth_rate Plot_Buff on the target plot (or refreshes its expiresAt).
-    cooldownHours = 24. progressPoints = 1.
+    farming_water      — Daily tending. Increments Plot.carePoints by 1.
+                         cooldownHours = 24. progressPoints = 1.
+    farming_prune      — Weekly tending. Increments Plot.carePoints by 7.
+                         cooldownHours = 168. progressPoints = 7.
+    farming_fertilize  — Weekly tending. Increments Plot.carePoints by 7.
+                         cooldownHours = 168. progressPoints = 7.
 
-  systemType = "farming_prune"
-    Weekly tending action. Updates PlotCrop_TendRecord, increments PlotCrop.carePoints
-    by 7. If the performing entity has a matching Ability_PlotBuff, writes a
-    yield Plot_Buff on the target plot (or refreshes its expiresAt).
-    cooldownHours = 168. progressPoints = 7.
+    If the performing entity has a matching Ability_PlotBuff, the resolved
+    sub-action writes or refreshes a Plot_Buff on the target plot:
+      farming_water     → growth_rate buff
+      farming_prune     → yield buff
+      farming_fertilize → decay_resistance buff
 
-  systemType = "farming_fertilize"
-    Weekly tending action. Updates PlotCrop_TendRecord, increments PlotCrop.carePoints
-    by 7. If the performing entity has a matching Ability_PlotBuff, writes a
-    decay_resistance Plot_Buff on the target plot (or refreshes its expiresAt).
-    cooldownHours = 168. progressPoints = 7.
-
-  TENDING ACTIONS — ActionSystemType fields
-    cooldownHours   Int?  Hours before this action can be performed again on the
-                          same PlotCrop. Null for non-tending actions.
-    progressPoints  Int?  Points added to PlotCrop.carePoints on completion.
-                          Null for non-tending actions.
+  TENDING ACTIONS — ActionSystemType fields (on sub-type rows)
+    cooldownHours   Int?  Hours before this sub-action can be performed again on the
+                          same Plot. Null for non-tending system types.
+    progressPoints  Int?  Points added to Plot.carePoints on completion.
+                          Null for non-tending system types.
 
   See farming-system.md section 7 for full farming action type reference.
 
@@ -245,7 +246,7 @@ could be required to meet both Farming level 3 AND Crafting level 2.
 
 EXAMPLE — Cross-breeding (farming guild gate):
   guildId → the configuring guild
-  actionTypeId → cross_breed
+  actionTypeId → crop_work
   disciplineId → Farming
   minLevel → 5
   scope → "leader"   (solo action; only the performing entity is checked)
@@ -281,13 +282,14 @@ EXAMPLE — Advanced Herb Gathering (all participants must qualify):
 ─────────────────────────────────────────────
 
   ActionSystemType              — seeded reference table; one row per bot subsystem
-  ActionType                    — universal definition; guild-extensible; systemTypeId FK → ActionSystemType
+  ActionType                    — bot-defined universal definition; systemTypeId FK → ActionSystemType
   Guild_ActionConfig            — per-guild costs and limits; PK is (guildId, actionTypeId)
   ActionType_DisciplineReward   — per-guild XP rewards; PK is (guildId, actionTypeId, disciplineId, recipientScope)
                                   allowing the same discipline to reward winners and losers at different amounts
   ActionType_DefaultItem        — items shadow-equipped during the action
   ActionType_DisciplineRequirement — per-guild discipline level gates; PK is (guildId, actionTypeId, disciplineId)
   Entity_ActionUsage                 — daily usage counter per entity per action type; enforces Guild_ActionConfig.dailyLimit
+  Action_EntityDailyRecord           — daily count per entity per ActionSystemType; enforces ActionSystemType.entityDailyLimit
   ActionInstance                     — a single in-progress or completed run
   ActionInstance_Entity              — per-participant record with reward snapshots
   ActionInstance_Entity_DisciplineXp — per-discipline XP snapshot per participant
