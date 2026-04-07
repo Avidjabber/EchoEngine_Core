@@ -926,10 +926,11 @@ model Entity {
   actionParticipations  ActionInstance_Entity[]
   actionLeaderships     ActionInstance[]          @relation("ActionInstanceLeader")
   eventParticipations   ActiveEvent_Participant[]
-  combatParticipations  ActiveCombat_Participant[]
-  combatActionsPerformed ActiveCombat_Action[] @relation("CombatActionActor")
-  combatActionsTargeted  ActiveCombat_Action[] @relation("CombatActionTarget")
+  combatParticipations   ActiveCombat_Participant[]
+  combatActionsPerformed ActiveCombat_Action[]      @relation("CombatActionActor")
+  combatActionsTargeted  ActiveCombat_Action[]      @relation("CombatActionTarget")
   namedEncounterDefs     CombatEncounterDef_NamedEntity[]
+  preCombatEffects       Entity_PreCombatEffect[]
 
   relationships EntityRelationship[] @relation("EntityRelationshipsFrom")
   relatedTo     EntityRelationship[] @relation("EntityRelationshipsTo")
@@ -1084,9 +1085,10 @@ model EntityCondition {
   linkedBy        EntityCondition[]    @relation("LinkedConditions")
   condition       ConditionDef         @relation(fields: [conditionDefId],    references: [id], onDelete: Restrict)
   bodyPart        BodyPart?            @relation(fields: [bodyPartId],        references: [id], onDelete: Restrict)
-  appliedInCombat ActiveCombat?        @relation(fields: [appliedInCombatId], references: [id], onDelete: SetNull)
-  appliedByAction ActiveCombat_Action? @relation(fields: [appliedByActionId], references: [id], onDelete: SetNull)
-  treatmentLogs   EntityTreatmentLog[]
+  appliedInCombat  ActiveCombat?           @relation(fields: [appliedInCombatId], references: [id], onDelete: SetNull)
+  appliedByAction  ActiveCombat_Action?    @relation(fields: [appliedByActionId], references: [id], onDelete: SetNull)
+  treatmentLogs    EntityTreatmentLog[]
+  combatStatEffects ActiveCombat_StatEffect[]  // stat effects kept alive by this condition; Cascade-deleted when condition ends
 
   // Allows the same condition on different body parts (scratch on tail AND scratch on leg)
   // For non-injury conditions (bodyPart = null), PostgreSQL treats NULLs as distinct; app enforces uniqueness
@@ -1480,6 +1482,8 @@ model AbilityDef {
   actionTriggers       Ability_ActionTrigger[]
   thresholdTriggers    Ability_ThresholdTrigger[]
   presenceEffects      Ability_PresenceEffect[]
+  combatStatEffects    AbilityDef_StatEffect[]
+  preCombatEffects     Entity_PreCombatEffect[]
 
   entityAbilities Entity_Ability[]
   speciesDefaults Species_DefaultAbility[]
@@ -1730,6 +1734,7 @@ model StackBehavior {
   abilityThresholdTriggers Ability_ThresholdTrigger[]
   abilityActionTrigger     Ability_ActionTrigger[]
   abilityPresenceEffects   Ability_PresenceEffect[]
+  combatStatEffectDefs     CombatStatEffectDef[]
 }
 
 // Fires an effect when the entity performs a specific action system type.
@@ -1928,6 +1933,7 @@ model ConditionDef {
   statEffects           ConditionDef_StatEffect[]
   proficiencyEffects          ConditionDef_ProficiencyEffect[]
   combatEffects         ConditionDef_CombatEffect[]
+  combatStatEffects     ConditionDef_CombatStatEffect[]
   eventConditionEffects EventEffect[]
   combatActions         ItemEquipmentProfile_Condition[]
   itemWarnings          ItemWarning[]
@@ -2018,36 +2024,39 @@ model ConditionDef_ProficiencyEffect {
   @@index([proficiencyDefId])
 }
 
-// In-combat effects for a condition — applied each round while the EntityCondition is active.
-// Complements ConditionDef_StatEffect / ConditionDef_ProficiencyEffect, which are the out-of-combat effects.
-// One ConditionDef can have multiple combat effects (e.g. Poisoned: damage per round + hit penalty).
+// Skill-derived and behavioral combat effects for a condition.
 //
-// effectType:
-//   "damage_per_round" — rolls diceCount d diceSides and deals the result as HP damage each round
-//   "heal_per_round"   — rolls diceCount d diceSides and restores HP each round
-//   "hit_mod"          — adds flatModifier (or EntityCondition.resolvedFlatModifier if null) to all hit rolls
-//   "damage_mod"       — flat bonus/penalty to damage rolls
-//   "stat_mod"         — temporary in-combat stat modifier (statId + flatModifier); distinct from the
-//                        out-of-combat ConditionDef_StatEffect, which persists outside of combat
-//   "action_denial"    — entity skips flatModifier turns each time this effect triggers (null = 1 turn)
-//   "ac_mod"           — flat bonus/penalty to the entity's effective AC (e.g. defensive stance +2, broken guard -2)
-//   "advantage"        — roll twice on affected rolls, take the higher result
-//   "disadvantage"     — roll twice on affected rolls, take the lower result
+// Use this table only when:
+//   a) the magnitude is skill-derived — flatModifier is null and the value is read from
+//      EntityCondition.resolvedFlatModifier at resolution time (e.g. a hit penalty that
+//      scales with disease severity), OR
+//   b) the effect is behavioral — action_denial (stun/paralysis), which belongs to the
+//      CombatEffectType / ActiveCombat_BehaviorEffect layer, not CombatStatEffectDef.
 //
-// flatModifier: null when the magnitude is skill-derived (read from EntityCondition.resolvedFlatModifier).
+// For all fixed-value stat effects (DoT, HoT, stat mods, roll mods, AC mods, advantage,
+// damage resistance, etc.) use ConditionDef_CombatStatEffect → CombatStatEffectDef instead.
+// Those are reusable across items, abilities, and conditions without duplication.
+//
+// flatModifier: null = skill-derived (read from EntityCondition.resolvedFlatModifier).
 //               positive = bonus, negative = penalty.
-//               for "action_denial", null means skip 1 turn.
+// Skill-derived magnitude effect from a condition in combat. Use this ONLY when the modifier
+// value should scale with actor skill — i.e. flatModifier = null and the value is read from
+// EntityCondition.resolvedFlatModifier at resolution time (e.g. a hit penalty that grows with
+// disease progression, or a Rallying Cry bonus that scales with Leadership skill).
+//
+// For fixed-value stat mods, DoT, HoT, AC mods, roll mods, advantage/disadvantage:
+//   use ConditionDef_CombatStatEffect → CombatStatEffectDef instead.
+// For behavioral effects (stun, paralysis):
+//   use CombatEffectType.deniesActions via ActiveCombat_BehaviorEffect instead.
+//
+// effectTypeId must point to a CombatEffectType with modifiesRoll, modifiesStat, or modifiesAC.
+// statId is required for stat_mod; null for hit_mod, damage_mod, and ac_mod.
 model ConditionDef_CombatEffect {
   id             Int @id @default(autoincrement())
   conditionDefId Int
   effectTypeId   Int
 
-  // damage_per_round / heal_per_round
-  diceCount Int?
-  diceSides Int?
-
-  // hit_mod / damage_mod / stat_mod / ac_mod
-  statId       Int?  // stat_mod only
+  statId       Int?  // required for stat_mod; null for hit_mod, damage_mod, ac_mod
   flatModifier Int?  // null = use EntityCondition.resolvedFlatModifier; positive = bonus, negative = penalty
 
   condition  ConditionDef     @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
@@ -2384,6 +2393,8 @@ model ItemEquipmentProfile {
   equippedItems    StoredItem[]
   participantCooldowns ActiveCombat_Participant_ActionCooldown[]
   combatActionRecords  ActiveCombat_Action[]
+  statEffects          ItemEquipmentProfile_StatEffect[]
+  preCombatEffects     Entity_PreCombatEffect[]
 
   item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
@@ -4783,17 +4794,22 @@ model CombatOutcome {
   activeCombats ActiveCombat[]
 }
 
-//             "advantage" | "disadvantage" | "guard" | "taunt" | "parry" | "absorb" | "dodge_stance"
-//             "counterattack" | "suppress" | "dispel" | "untargetable"
-// isPerRound:           fires actively each round rather than applying as a passive modifier
-// dealsDamage:          applies damage each round (bleed, burn, poison tick)
-// restoresHealth:       restores HP each round (regeneration)
-// modifiesRoll:         adds/subtracts from a roll result (hit_mod, damage_mod)
-// modifiesStat:         changes a base stat value while active
+// Behavioral and skill-derived effect types used by ActiveCombat_BehaviorEffect,
+// ItemEquipmentProfile.behaviorEffectTypeId, and ConditionDef_CombatEffect.
+//
+// Seeded values:
+//   Behavioral (route to ActiveCombat_BehaviorEffect):
+//     "guard" | "taunt" | "parry" | "absorb" | "dodge_stance" | "counterattack" | "suppress" | "dispel" | "untargetable" | "action_denial"
+//   Skill-derived magnitude (route to ConditionDef_CombatEffect with flatModifier = null):
+//     "hit_mod" | "damage_mod" | "stat_mod" | "ac_mod"
+//
+// Fixed-value stat/roll effects (DoT, HoT, roll mods, AC mods, advantage, advantage) are defined
+// as CombatStatEffectDef sub-tables — they do NOT use CombatEffectType rows.
+//
+// modifiesRoll:         adds a skill-derived value to a hit or damage roll (hit_mod, damage_mod)
+// modifiesStat:         applies a skill-derived modifier to a base stat (stat_mod)
 // deniesActions:        prevents the entity from acting (stun, paralysis)
-// modifiesAC:           changes the AC value that attack rolls are checked against
-// grantsAdvantage:      roll twice, take higher
-// grantsDisadvantage:   roll twice, take lower
+// modifiesAC:           applies a skill-derived modifier to AC (ac_mod)
 // redirectsDamage:      incoming damage to a protected ally is rerouted to the effect-holder (guard)
 // forcesTargeting:      enemies must select the effect-holder as their target (taunt)
 // isReactive:           effect triggers on an incoming attack rather than on action use (parry, counterattack)
@@ -4807,15 +4823,10 @@ model CombatEffectType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
-  isPerRound           Boolean @default(false)
-  dealsDamage          Boolean @default(false)
-  restoresHealth       Boolean @default(false)
   modifiesRoll         Boolean @default(false)
   modifiesStat         Boolean @default(false)
   deniesActions        Boolean @default(false)
   modifiesAC           Boolean @default(false)
-  grantsAdvantage      Boolean @default(false)
-  grantsDisadvantage   Boolean @default(false)
   redirectsDamage      Boolean @default(false)
   forcesTargeting      Boolean @default(false)
   isReactive           Boolean @default(false)
@@ -4881,10 +4892,12 @@ model DamageType {
 
   category DamageCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
-  equipmentPrimary   ItemEquipmentProfile[]      @relation("EquipmentDamageType")
-  equipmentElemental ItemEquipmentProfile[]      @relation("EquipmentElementalDamageType")
-  conditionModifiers   ConditionDef_DamageModifier[]
-  abilityDamageModifiers Ability_DamageModifier[]
+  equipmentPrimary        ItemEquipmentProfile[]                 @relation("EquipmentDamageType")
+  equipmentElemental      ItemEquipmentProfile[]                 @relation("EquipmentElementalDamageType")
+  conditionModifiers      ConditionDef_DamageModifier[]
+  abilityDamageModifiers  Ability_DamageModifier[]
+  statEffectDots          CombatStatEffectDef_DamageOverTime[]   @relation("StatEffectDamageType")
+  statEffectDamageModifiers CombatStatEffectDef_DamageModifier[] @relation("StatEffectDamageModifier")
 
   @@unique([guildId, name])
   @@index([guildId])
@@ -4997,6 +5010,7 @@ model ActiveCombat {
   participants      ActiveCombat_Participant[]
   actions           ActiveCombat_Action[]
   behaviorEffects   ActiveCombat_BehaviorEffect[]
+  statEffects       ActiveCombat_StatEffect[]
   entityConditions  EntityCondition[]
 
   @@index([guildId])
@@ -5064,9 +5078,11 @@ model ActiveCombat_Participant {
   activeCombat    ActiveCombat              @relation(fields: [activeCombatId], references: [id], onDelete: Cascade)
   entity          Entity                    @relation(fields: [entityId],       references: [id], onDelete: Cascade)
   dropTable       DropTable?                @relation(fields: [dropTableId],    references: [id], onDelete: SetNull)
-  actionCooldowns ActiveCombat_Participant_ActionCooldown[]
-  behaviorEffects ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectTarget")
-  linkedBehaviors ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectLinked")
+  actionCooldowns   ActiveCombat_Participant_ActionCooldown[]
+  behaviorEffects   ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectTarget")
+  linkedBehaviors   ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectLinked")
+  statEffects       ActiveCombat_StatEffect[]     @relation("StatEffectTarget")
+  statEffectsCaused ActiveCombat_StatEffect[]     @relation("StatEffectSource")
 
   @@unique([activeCombatId, entityId])
   @@unique([activeCombatId, turnOrder])
@@ -5090,10 +5106,13 @@ model ActiveCombat_Participant_ActionCooldown {
   @@index([participantId])
 }
 
-// Persistent behavioral effects lasting one or more rounds (guard, taunt, etc.).
+// Persistent behavioral effects lasting one or more rounds (guard, taunt, parry, etc.).
 // At round start: decrement roundsRemaining and delete rows that reach 0.
 //
-// behaviorKey: "guard" | "taunt" | extensible
+// STACKING: @@unique([affectedParticipantId, effectTypeId]) enforces one active instance per
+// entity per behavior type. Re-applying the same effect type always refreshes (upserts)
+// roundsRemaining — there is no "stack" or "ignore" mode for behavior effects.
+//
 // Directional semantics:
 //   guard:   affectedParticipantId = the guarding entity;  linkedParticipantId = the guarded participant
 //   taunt:   affectedParticipantId = the taunted entity;   linkedParticipantId = the taunting participant
@@ -5153,6 +5172,7 @@ model ActiveCombat_Action {
   actorEntity      Entity               @relation("CombatActionActor",  fields: [actorEntityId],  references: [id], onDelete: Cascade)
   targetEntity     Entity?              @relation("CombatActionTarget", fields: [targetEntityId], references: [id], onDelete: SetNull)
   appliedConditions EntityCondition[]
+  appliedStatEffects ActiveCombat_StatEffect[]
 
   @@unique([activeCombatId, roundNumber, turnIndex])
   @@index([activeCombatId, roundNumber])
@@ -5209,6 +5229,305 @@ model CombatEncounterDef_NamedEntity {
 
   @@id([combatEncounterDefId, entityId])
   @@index([entityId])
+}
+
+// ============================================================
+// COMBAT STAT EFFECT SYSTEM
+// ============================================================
+
+// Seeded reference: which combat roll a RollMod or RollAdvantage effect targets.
+model CombatRollType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)  // "hit" | "damage" | "heal"
+
+  rollMods      CombatStatEffectDef_RollMod[]
+  rollAdvantages CombatStatEffectDef_RollAdvantage[]
+}
+
+// Reusable combat effect definition. Multiple sources (items, conditions, abilities) can reference
+// the same def — e.g. a snake bite and a venom-coated blade both apply the same Snake Venom effect.
+//
+// guildId: "global" for bot-seeded defs; guild codeName for guild-custom effects.
+// durationRounds: null = lasts until end of combat; non-null = removed after N rounds.
+//   Tracked on ActiveCombat_StatEffect.roundsRemaining, decremented at round end.
+// stackBehaviorId: what happens when the same def is applied to the same participant again.
+//   "refresh" (default) — restart the duration. "stack" — add another instance. "ignore" — no-op.
+model CombatStatEffectDef {
+  id      Int    @id @default(autoincrement())
+  guildId String @default("global") @db.VarChar(50)
+  codeName    String @db.VarChar(200)
+  displayName String @db.VarChar(200)
+
+  durationRounds  Int?  // null = lasts until combat ends; non-null = N rounds
+  stackBehaviorId Int   // FK → StackBehavior; default row = "refresh"
+
+  stackBehavior StackBehavior @relation(fields: [stackBehaviorId], references: [id], onDelete: Restrict)
+
+  // Effect sub-tables — any combination may be populated on a single def
+  statMods        CombatStatEffectDef_StatMod[]
+  rollMods        CombatStatEffectDef_RollMod[]
+  acMods          CombatStatEffectDef_AcMod[]
+  damageOverTime  CombatStatEffectDef_DamageOverTime[]
+  healOverTime    CombatStatEffectDef_HealOverTime[]
+  damageModifiers CombatStatEffectDef_DamageModifier[]
+  rollAdvantages  CombatStatEffectDef_RollAdvantage[]
+
+  // Source link tables
+  profileApplications   ItemEquipmentProfile_StatEffect[]
+  conditionApplications ConditionDef_CombatStatEffect[]
+  abilityApplications   AbilityDef_StatEffect[]
+
+  activeEffects    ActiveCombat_StatEffect[]
+  preCombatEffects Entity_PreCombatEffect[]
+
+  @@unique([guildId, codeName])
+  @@index([guildId])
+  @@index([stackBehaviorId])
+}
+
+// Flat stat modifier while this effect is active.
+// context: situational key; null = always applies. Matches Ability_StatModifier.context vocabulary.
+//   e.g. "attack" = only on attack rolls, "dodge" = only when resolving dodge checks.
+model CombatStatEffectDef_StatMod {
+  id          Int     @id @default(autoincrement())
+  effectDefId Int
+  statId      Int
+  value       Int     // positive = bonus, negative = penalty
+  context     String? @db.VarChar(50)
+
+  effectDef CombatStatEffectDef @relation(fields: [effectDefId], references: [id], onDelete: Cascade)
+  stat      Stat                @relation(fields: [statId],       references: [id], onDelete: Restrict)
+
+  @@index([effectDefId])
+  @@index([statId])
+}
+
+// Flat modifier to a specific combat roll type (hit, damage, or heal).
+model CombatStatEffectDef_RollMod {
+  id          Int @id @default(autoincrement())
+  effectDefId Int
+  rollTypeId  Int
+  value       Int  // positive = bonus, negative = penalty
+
+  effectDef CombatStatEffectDef @relation(fields: [effectDefId], references: [id], onDelete: Cascade)
+  rollType  CombatRollType      @relation(fields: [rollTypeId],  references: [id], onDelete: Restrict)
+
+  @@index([effectDefId])
+  @@index([rollTypeId])
+}
+
+// Flat AC modifier while this effect is active.
+model CombatStatEffectDef_AcMod {
+  id          Int @id @default(autoincrement())
+  effectDefId Int
+  value       Int  // positive = bonus (harder to hit), negative = penalty
+
+  effectDef CombatStatEffectDef @relation(fields: [effectDefId], references: [id], onDelete: Cascade)
+
+  @@index([effectDefId])
+}
+
+// Damage dealt at the end of each round while this effect is active.
+// App rolls diceCount d diceSides + flatDamage at round end for each participant with this effect.
+// damageTypeId: null = untyped (bypasses resistances and vulnerabilities).
+model CombatStatEffectDef_DamageOverTime {
+  id           Int @id @default(autoincrement())
+  effectDefId  Int
+  diceCount    Int
+  diceSides    Int
+  flatDamage   Int @default(0)
+  damageTypeId Int?
+
+  effectDef  CombatStatEffectDef @relation(fields: [effectDefId],  references: [id], onDelete: Cascade)
+  damageType DamageType?         @relation("StatEffectDamageType", fields: [damageTypeId], references: [id], onDelete: Restrict)
+
+  @@index([effectDefId])
+  @@index([damageTypeId])
+}
+
+// HP restored at the end of each round while this effect is active.
+// App rolls diceCount d diceSides + flatHeal at round end.
+model CombatStatEffectDef_HealOverTime {
+  id          Int @id @default(autoincrement())
+  effectDefId Int
+  diceCount   Int
+  diceSides   Int
+  flatHeal    Int @default(0)
+
+  effectDef CombatStatEffectDef @relation(fields: [effectDefId], references: [id], onDelete: Cascade)
+
+  @@index([effectDefId])
+}
+
+// Damage type resistance or immunity while this effect is active.
+// modifier: 1.0 = normal, 0.5 = half damage (resistance), 2.0 = double damage (vulnerability).
+// isImmune: true overrides modifier — entity takes no damage of this type.
+model CombatStatEffectDef_DamageModifier {
+  id           Int     @id @default(autoincrement())
+  effectDefId  Int
+  damageTypeId Int
+  modifier     Float   @default(1.0)
+  isImmune     Boolean @default(false)
+
+  effectDef  CombatStatEffectDef @relation(fields: [effectDefId],  references: [id], onDelete: Cascade)
+  damageType DamageType          @relation("StatEffectDamageModifier", fields: [damageTypeId], references: [id], onDelete: Restrict)
+
+  @@index([effectDefId])
+  @@index([damageTypeId])
+}
+
+// Advantage or disadvantage on a specific roll type while this effect is active.
+// isDisadvantage: false = roll twice take higher (advantage); true = roll twice take lower (disadvantage).
+model CombatStatEffectDef_RollAdvantage {
+  id             Int     @id @default(autoincrement())
+  effectDefId    Int
+  rollTypeId     Int
+  isDisadvantage Boolean @default(false)
+
+  effectDef CombatStatEffectDef @relation(fields: [effectDefId], references: [id], onDelete: Cascade)
+  rollType  CombatRollType      @relation(fields: [rollTypeId],  references: [id], onDelete: Restrict)
+
+  @@index([effectDefId])
+  @@index([rollTypeId])
+}
+
+// Active instance of a CombatStatEffectDef on a participant.
+//
+// DURATION — three modes, determined at application time:
+//   sourceEntityConditionId set — lasts as long as that EntityCondition is active on the entity.
+//     roundsRemaining is null and ignored. Deleted via Cascade when the condition ends.
+//     Used for all condition-sourced applications.
+//   roundsRemaining non-null — lasts N more rounds; decremented at round end; deleted at 0.
+//     Used for item- and ability-sourced applications with a fixed durationRounds on the def.
+//   both null — lasts until combat ends (durationRounds = null on def, non-condition source).
+//
+// sourceParticipantId: participant who triggered the application; null for ability/condition sources.
+// appliedByActionId: the action that fired; null for condition/ability sources.
+model ActiveCombat_StatEffect {
+  id                      Int  @id @default(autoincrement())
+  activeCombatId          Int
+  effectDefId             Int
+  affectedParticipantId   Int
+  sourceParticipantId     Int?
+  appliedByActionId       Int?
+  sourceEntityConditionId Int?  // set for condition-sourced effects; Cascade ensures cleanup when condition ends
+
+  roundsRemaining Int?  // null when condition-scoped or def.durationRounds = null
+
+  activeCombat          ActiveCombat              @relation(fields: [activeCombatId],          references: [id], onDelete: Cascade)
+  effectDef             CombatStatEffectDef       @relation(fields: [effectDefId],             references: [id], onDelete: Restrict)
+  affectedParticipant   ActiveCombat_Participant  @relation("StatEffectTarget", fields: [affectedParticipantId], references: [id], onDelete: Cascade)
+  sourceParticipant     ActiveCombat_Participant? @relation("StatEffectSource", fields: [sourceParticipantId],   references: [id], onDelete: SetNull)
+  appliedByAction       ActiveCombat_Action?      @relation(fields: [appliedByActionId],       references: [id], onDelete: SetNull)
+  sourceEntityCondition EntityCondition?          @relation(fields: [sourceEntityConditionId], references: [id], onDelete: Cascade)
+
+  @@index([activeCombatId])
+  @@index([affectedParticipantId])
+  @@index([effectDefId])
+  @@index([sourceParticipantId])
+  @@index([appliedByActionId])
+  @@index([sourceEntityConditionId])
+}
+
+// Links an ItemEquipmentProfile to a CombatStatEffectDef it may apply on action use.
+// applicationChance: 0.0–1.0. The roll is made once per use; if it fires, the effect applies to
+//   all targets of that action. 1.0 = always; 0.0 = never (effectively disabled).
+model ItemEquipmentProfile_StatEffect {
+  id                 Int   @id @default(autoincrement())
+  equipmentProfileId Int
+  effectDefId        Int
+  applicationChance  Float @default(1.0)
+
+  equipmentProfile ItemEquipmentProfile @relation(fields: [equipmentProfileId], references: [id], onDelete: Cascade)
+  effectDef        CombatStatEffectDef  @relation(fields: [effectDefId],        references: [id], onDelete: Restrict)
+
+  @@index([equipmentProfileId])
+  @@index([effectDefId])
+}
+
+// Links a ConditionDef to a CombatStatEffectDef applied while that condition is active in combat.
+// Works identically to ItemEquipmentProfile_StatEffect — same applicationChance, same sub-tables.
+// The only difference is duration: condition-sourced applications set sourceEntityConditionId on
+// the ActiveCombat_StatEffect row, so the effect lives and dies with the condition rather than
+// counting down rounds. No special-casing in application logic is required.
+//
+// Note: ConditionDef_CombatEffect remains for skill-derived magnitude effects (resolvedFlatModifier).
+//   Both tables can coexist on the same ConditionDef.
+model ConditionDef_CombatStatEffect {
+  id             Int   @id @default(autoincrement())
+  conditionDefId Int
+  effectDefId    Int
+  applicationChance Float @default(1.0)
+
+  conditionDef ConditionDef        @relation(fields: [conditionDefId], references: [id], onDelete: Cascade)
+  effectDef    CombatStatEffectDef @relation(fields: [effectDefId],    references: [id], onDelete: Restrict)
+
+  @@unique([conditionDefId, effectDefId])
+  @@index([conditionDefId])
+  @@index([effectDefId])
+}
+
+// Links an AbilityDef to a CombatStatEffectDef applied while that ability is active in combat.
+// applicationChance: probability the effect applies on combat entry. 1.0 = always.
+model AbilityDef_StatEffect {
+  id            Int   @id @default(autoincrement())
+  abilityDefId  Int
+  effectDefId   Int
+  applicationChance Float @default(1.0)
+
+  abilityDef AbilityDef          @relation(fields: [abilityDefId], references: [id], onDelete: Cascade)
+  effectDef  CombatStatEffectDef @relation(fields: [effectDefId],  references: [id], onDelete: Restrict)
+
+  @@unique([abilityDefId, effectDefId])
+  @@index([abilityDefId])
+  @@index([effectDefId])
+}
+
+// Tracks stat effects applied to an entity outside of active combat — pre-fight buffs, blessings,
+// ability-triggered effects, etc. Serves as the bridge between out-of-combat use and combat start.
+//
+// At combat start: the engine queries this table for each participant (WHERE expiresAt > now()),
+//   creates an ActiveCombat_StatEffect row for each entry using effectDef.durationRounds as
+//   roundsRemaining (full rounds — no pro-rating based on time elapsed), then seeds
+//   ActiveCombat_Participant_ActionCooldown for any entry where equipmentProfileId is set and
+//   that profile has cooldownRounds > 0.
+//
+// After combat start: the ActiveCombat_StatEffect row governs the effect in combat.
+//   This table is not modified by combat. The background worker deletes expired rows
+//   (expiresAt < now()) independently of combat state.
+//
+// Stacking: governed by the effectDef.stackBehaviorId at application time.
+//   "refresh" — app updates expiresAt on the existing row.
+//   "stack"   — app inserts a new row (multiple rows per entity+def allowed).
+//   "ignore"  — app no-ops if a row already exists for this entity+def.
+//
+// SOURCE FIELDS (mutually exclusive; at most one should be set per row)
+//   equipmentProfileId — applied via an item action or ability-granted action. Used at combat
+//                        start to seed the cooldown for this profile on the participant.
+//   abilityDefId       — applied passively by an ability (no action involved). No cooldown
+//                        carry-in; the ability itself governs re-application.
+//   Both null          — applied by a system event, admin action, or other source.
+model Entity_PreCombatEffect {
+  id          Int      @id @default(autoincrement())
+  entityId    Int
+  effectDefId Int
+
+  appliedAt DateTime  @default(now()) @db.Timestamptz
+  expiresAt DateTime  @db.Timestamptz  // background worker deletes rows where expiresAt < now()
+
+  equipmentProfileId Int?  // FK → ItemEquipmentProfile; set for action-sourced applications
+  abilityDefId       Int?  // FK → AbilityDef; set for passive ability-sourced applications
+
+  entity           Entity               @relation(fields: [entityId],           references: [id], onDelete: Cascade)
+  effectDef        CombatStatEffectDef  @relation(fields: [effectDefId],        references: [id], onDelete: Cascade)
+  equipmentProfile ItemEquipmentProfile? @relation(fields: [equipmentProfileId], references: [id], onDelete: SetNull)
+  abilityDef       AbilityDef?          @relation(fields: [abilityDefId],        references: [id], onDelete: SetNull)
+
+  @@index([entityId])
+  @@index([expiresAt])   // used by the background worker to find and delete expired rows
+  @@index([effectDefId])
+  @@index([equipmentProfileId])
+  @@index([abilityDefId])
 }
 
 // ============================================================

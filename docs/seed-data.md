@@ -616,25 +616,38 @@ Values:
 ──────────────────────────────────────────────
 CombatEffectType                        [ DONE ]
 ──────────────────────────────────────────────
-  name              isPerRound  dealsDamage  restoresHealth  modifiesRoll  modifiesStat  deniesActions  modifiesAC  grantsAdvantage  grantsDisadvantage  redirectsDamage  forcesTargeting  isReactive  absorbsDamage  grantsEvasion  enablesCounterattack  suppressesReactive  removesEffects  preventedAsTarget
-  damage_per_round  true        true         false           false         false         false          false       false            false               false            false            false       false          false          false                 false               false           false
-  heal_per_round    true        false        true            false         false         false          false       false            false               false            false            false       false          false          false                 false               false           false
-  hit_mod           false       false        false           true          false         false          false       false            false               false            false            false       false          false          false                 false               false           false
-  damage_mod        false       false        false           true          false         false          false       false            false               false            false            false       false          false          false                 false               false           false
-  stat_mod          false       false        false           false         true          false          false       false            false               false            false            false       false          false          false                 false               false           false
-  action_denial     false       false        false           false         false         true           false       false            false               false            false            false       false          false          false                 false               false           false
-  ac_mod            false       false        false           false         false         false          true        false            false               false            false            false       false          false          false                 false               false           false
-  advantage         false       false        false           true          false         false          false       true             false               false            false            false       false          false          false                 false               false           false
-  disadvantage      false       false        false           true          false         false          false       false            true                false            false            false       false          false          false                 false               false           false
-  guard             false       false        false           false         false         false          false       false            false               true             false            false       false          false          false                 false               false           false
-  taunt             false       false        false           false         false         false          false       false            false               false            true             false       false          false          false                 false               false           false
-  parry             false       false        false           false         false         false          false       false            false               false            false            true        false          false          false                 false               false           false
-  absorb            false       false        false           false         false         false          false       false            false               false            false            false       true           false          false                 false               false           false
-  dodge_stance      false       false        false           false         false         false          false       false            false               false            false            false       false          true           false                 false               false           false
-  counterattack     false       false        false           false         false         false          false       false            false               false            false            true        false          false          true                  false               false           false
-  suppress          false       false        false           false         false         false          false       false            false               false            false            false       false          false          false                 true                false           false
-  dispel            false       false        false           false         false         false          false       false            false               false            false            false       false          false          false                 false               true            false
-  untargetable      false       false        false           false         false         false          false       false            false               false            false            false       false          false          false                 false               false           true
+Note: damage_per_round, heal_per_round, advantage, and disadvantage were removed — these are
+now defined as CombatStatEffectDef sub-tables (DamageOverTime, HealOverTime, RollAdvantage).
+Flags isPerRound, dealsDamage, restoresHealth, grantsAdvantage, grantsDisadvantage were
+removed from the model for the same reason.
+
+  name              modifiesRoll  modifiesStat  deniesActions  modifiesAC  redirectsDamage  forcesTargeting  isReactive  absorbsDamage  grantsEvasion  enablesCounterattack  suppressesReactive  removesEffects  preventedAsTarget
+  hit_mod           true          false         false          false       false            false            false       false          false          false                 false               false           false
+  damage_mod        true          false         false          false       false            false            false       false          false          false                 false               false           false
+  stat_mod          false         true          false          false       false            false            false       false          false          false                 false               false           false
+  action_denial     false         false         true           false       false            false            false       false          false          false                 false               false           false
+  ac_mod            false         false         false          true        false            false            false       false          false          false                 false               false           false
+  guard             false         false         false          false       true             false            false       false          false          false                 false               false           false
+  taunt             false         false         false          false       false            true             false       false          false          false                 false               false           false
+  parry             false         false         false          false       false            false            true        false          false          false                 false               false           false
+  absorb            false         false         false          false       false            false            false       true           false          false                 false               false           false
+  dodge_stance      false         false         false          false       false            false            false       false          true           false                 false               false           false
+  counterattack     false         false         false          false       false            false            true        false          false          true                  false               false           false
+  suppress          false         false         false          false       false            false            false       false          false          false                 true                false           false
+  dispel            false         false         false          false       false            false            false       false          false          false                 false               true            false
+  untargetable      false         false         false          false       false            false            false       false          false          false                 false               false           true
+
+
+──────────────────────────────────────────────
+CombatRollType                          [ DONE ]
+──────────────────────────────────────────────
+Used by CombatStatEffectDef_RollMod and CombatStatEffectDef_RollAdvantage to identify
+which roll a modifier or advantage/disadvantage effect targets.
+
+Values:
+  hit     — the 1d20 attack roll against target AC
+  damage  — the damage dice roll
+  heal    — the heal dice roll
 
 
 ──────────────────────────────────────────────

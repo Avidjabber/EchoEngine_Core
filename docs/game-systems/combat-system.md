@@ -227,12 +227,28 @@ Strategy values: "lowest_health" | "highest_health" | "lowest_strength" | "rando
 7. BEHAVIOR EFFECTS
 ─────────────────────────────────────────────
 
-ActiveCombat_BehaviorEffect tracks persistent multi-round effects (guard, taunt,
+ActiveCombat_BehaviorEffect tracks persistent multi-round behavioral states (guard, taunt,
 parry, absorb, etc.). Rows are decremented at round start and deleted at 0.
 
-  effectTypeId  — FK → CombatEffectType; the name field holds the behavior key
-                  (e.g. "guard", "taunt", "parry", "absorb"). CombatEffectType
-                  flags describe what the effect does (redirectsDamage, forcesTargeting, etc.)
+  effectTypeId  — FK → CombatEffectType; flags on the row describe what the effect does
+                  (redirectsDamage, forcesTargeting, deniesActions, etc.)
+
+STACKING
+─────────
+One active instance per entity per effect type is enforced by the unique constraint on
+(affectedParticipantId, effectTypeId). Re-applying the same behavior type always refreshes
+(upserts) roundsRemaining — there is no "stack" or "ignore" mode.
+
+WHAT BELONGS HERE VS. CombatStatEffectDef
+───────────────────────────────────────────
+  BehaviorEffect  — changes HOW an entity acts or is targeted: guard, taunt, parry, absorb,
+                    stun (deniesActions), evasion, counterattack, suppress, dispel, untargetable.
+  StatEffect      — changes WHAT NUMBERS apply: stat mods, roll mods, AC mods, DoT, HoT,
+                    damage resistance/immunity, advantage/disadvantage.
+
+Skill-derived flat modifiers (hit_mod, damage_mod, stat_mod, ac_mod with flatModifier = null)
+use CombatEffectType via ConditionDef_CombatEffect — this is the only overlap. All fixed-value
+numerical effects route through CombatStatEffectDef regardless of source.
 
 Directional semantics:
   guard:  affectedParticipantId = guarding entity;  linkedParticipantId = guarded ally
@@ -293,15 +309,185 @@ Entities that fled (hasFled = true) or were defeated earn no combat XP.
   CombatActionCategory                 — Main Action | Bonus Action | Item Interaction (seed)
   CombatTargetStrategy                 — lowest_health | highest_health | etc. (seed)
   CombatEffectType                     — guard | taunt | parry | absorb | etc. (seed); flags describe behavior
+  CombatRollType                       — hit | damage | heal (seed); used by stat effect roll modifiers
   DamageCategory                       — Physical | Magical | True (seed)
   DamageType                           — guild-extensible; FK → DamageCategory
   CombatTargetScope                    — targetsAllies / targetsEnemies scope (seed)
   SpeciesCombatBehavior                — NPC AI action weights and target strategies
   SpeciesDefaultLoadout                — items granted to all entities of a species
 
+  STAT EFFECT DEFINITIONS (see section 11)
+  CombatStatEffectDef                  — reusable effect definition; guild-extensible
+  CombatStatEffectDef_StatMod          — flat stat bonus/penalty with optional context
+  CombatStatEffectDef_RollMod          — flat hit/damage/heal roll modifier
+  CombatStatEffectDef_AcMod            — flat AC modifier
+  CombatStatEffectDef_DamageOverTime   — damage dealt at round end
+  CombatStatEffectDef_HealOverTime     — HP restored at round end
+  CombatStatEffectDef_DamageModifier   — resistance, vulnerability, or immunity to a damage type
+  CombatStatEffectDef_RollAdvantage    — advantage or disadvantage on a roll type
+
+  SOURCE LINKS (attach a CombatStatEffectDef to a source)
+  ItemEquipmentProfile_StatEffect      — profile applies effect on action use; applicationChance Float
+  ConditionDef_CombatStatEffect        — condition applies effect while active in combat
+  AbilityDef_StatEffect                — ability applies effect while active in combat
+
+  PRE-COMBAT
+  Entity_PreCombatEffect               — out-of-combat stat effects pending combat start; see section 12
+
   ACTIVE INSTANCES
   ActiveCombat                         — live encounter
   ActiveCombat_Participant             — per-entity state within a combat
   ActiveCombat_Participant_ActionCooldown — cooldown tracking per action
-  ActiveCombat_BehaviorEffect          — persistent multi-round behavior effects
+  ActiveCombat_BehaviorEffect          — persistent multi-round behavioral effects (guard, taunt, parry, etc.)
+  ActiveCombat_StatEffect              — persistent stat/over-time effects on a participant
   ActiveCombat_Action                  — action log for Discord narrative reconstruction
+
+
+─────────────────────────────────────────────
+11. STAT EFFECTS
+─────────────────────────────────────────────
+
+CombatStatEffectDef is a reusable, guild-extensible definition for any numerical or
+over-time effect applied to a participant during combat. Multiple sources can reference
+the same def — a snake bite and a venom-coated blade both apply the same Snake Venom
+effect, ensuring consistent behaviour regardless of delivery mechanism.
+
+DEFINITION FIELDS
+──────────────────
+  codeName       — snake_case slug; unique per guild. "global" for bot-seeded defs.
+  displayName    — user-facing label shown in the Discord narrative.
+  durationRounds — null = lasts until combat ends; non-null = removed after N rounds.
+                   Tracked on ActiveCombat_StatEffect.roundsRemaining, decremented
+                   at round end, deleted when it reaches 0.
+  stackBehaviorId — what happens when the same def is applied to the same participant again:
+                    "refresh" (default) — restart the duration.
+                    "stack"             — add a separate instance.
+                    "ignore"            — no-op if already active.
+
+EFFECT SUB-TABLES
+──────────────────
+Any combination of sub-table rows may be attached to one def. All active rows
+apply simultaneously while the effect is on a participant.
+
+  StatMod          — flat stat modifier; optional context key ("attack", "dodge", etc.)
+                     scopes it to specific roll contexts. null context = always applies.
+  RollMod          — flat modifier to a hit, damage, or heal roll.
+  AcMod            — flat AC modifier (positive = harder to hit, negative = easier).
+  DamageOverTime   — dice + flat damage dealt at the end of each round. damageTypeId null
+                     = untyped, bypasses resistances and vulnerabilities.
+  HealOverTime     — dice + flat HP restored at the end of each round.
+  DamageModifier   — resistance (0.5×), vulnerability (2.0×), or full immunity to a
+                     specific damage type. isImmune overrides modifier.
+  RollAdvantage    — advantage (roll twice, take higher) or disadvantage (roll twice,
+                     take lower) on a specific roll type.
+
+DoT and HoT effects fire at the end of each round — this is app-owned logic and
+requires no additional field on the def.
+
+DURATION MODES
+───────────────
+Duration is determined at application time on ActiveCombat_StatEffect, not on the def.
+Three modes, resolved in this order:
+
+  Condition-scoped — sourceEntityConditionId is set. The effect lives and dies with that
+                     EntityCondition. roundsRemaining is null and ignored. When the
+                     condition ends (cured, expired, or combat ends), the stat effect
+                     row is Cascade-deleted automatically. Used for all
+                     ConditionDef_CombatStatEffect applications.
+
+  Round-counted    — sourceEntityConditionId is null; roundsRemaining is non-null.
+                     Decremented at round end; deleted when it reaches 0. Used when
+                     the def has a fixed durationRounds and the source is an item or
+                     ability.
+
+  Combat-duration  — both null. Effect lasts until combat ends. Used when
+                     durationRounds = null on the def and the source is not a condition.
+
+APPLICATION CHANCE
+───────────────────
+Each source link table carries applicationChance Float (0.0–1.0). The probability
+the effect is applied when the source fires. 1.0 = always; 0.0 = never.
+
+  ItemEquipmentProfile_StatEffect — roll is made once per action use; if it fires,
+                                    the effect applies to all targets of that action.
+  ConditionDef_CombatStatEffect   — works identically to the item link. No special-casing
+                                    in application logic. The only difference is that
+                                    sourceEntityConditionId is set on the active instance,
+                                    giving it condition-scoped duration.
+  AbilityDef_StatEffect           — applied on combat entry while the ability is active.
+
+COEXISTENCE WITH ConditionDef_CombatEffect
+───────────────────────────────────────────
+ConditionDef_CombatEffect is retained for two narrow cases:
+  a) Skill-derived magnitude — flatModifier is null and the value is read from
+     EntityCondition.resolvedFlatModifier at resolution time (e.g. a hit penalty
+     that scales with how advanced the disease is).
+  b) Behavioral effects from conditions — action_denial (stun/paralysis) is a
+     behavioral concern that belongs to CombatEffectType / ActiveCombat_BehaviorEffect,
+     not to CombatStatEffectDef.
+
+For everything else — fixed-value DoT, HoT, stat mods, roll mods, AC mods, advantage,
+damage resistance — use ConditionDef_CombatStatEffect. Those route through
+CombatStatEffectDef and are reusable across items, abilities, and conditions.
+
+EXAMPLE — Snake Venom (DoT, shared across sources):
+  CombatStatEffectDef:
+    codeName       = "snake_venom"
+    displayName    = "Snake Venom"
+    durationRounds = 3
+    stackBehavior  = "refresh"
+  CombatStatEffectDef_DamageOverTime:
+    diceCount = 1, diceSides = 4, flatDamage = 0, damageTypeId → Physical
+  Sources:
+    ItemEquipmentProfile_StatEffect (Snake Bite profile) → applicationChance = 1.0
+    ItemEquipmentProfile_StatEffect (Venom-Coated Blade profile) → applicationChance = 0.5
+
+
+─────────────────────────────────────────────
+12. PRE-COMBAT EFFECTS
+─────────────────────────────────────────────
+
+Entity_PreCombatEffect tracks stat effects applied to an entity outside of active
+combat — pre-fight buffs, blessings, or ability-triggered effects that should carry
+into the next combat encounter.
+
+FIELDS
+───────
+  entityId           — the entity holding the effect
+  effectDefId        — FK → CombatStatEffectDef; defines what the effect does
+  appliedAt          — when the effect was applied (for narrative / logging)
+  expiresAt          — wall-clock expiry; background worker deletes rows past this time
+  equipmentProfileId — set when applied via an item or ability-granted action
+  abilityDefId       — set when applied passively by an ability with no action involved
+  (both null)        — system, admin, or event source
+
+STACKING
+─────────
+Governed by effectDef.stackBehaviorId at application time:
+  "refresh" — app updates expiresAt on the existing row; no new row inserted.
+  "stack"   — app inserts a new row (multiple rows per entity + def are valid).
+  "ignore"  — app no-ops if a row for this entity + def already exists.
+
+AT COMBAT START
+────────────────
+For each participant joining combat the engine:
+  1. Queries Entity_PreCombatEffect WHERE entityId = participant AND expiresAt > now().
+  2. For each active entry: creates an ActiveCombat_StatEffect with
+       roundsRemaining = effectDef.durationRounds  (full rounds — no pro-rating).
+       roundsRemaining = null if effectDef.durationRounds is null (lasts entire combat).
+  3. If equipmentProfileId is set and that profile has cooldownRounds > 0:
+       creates an ActiveCombat_Participant_ActionCooldown for that participant + profile.
+
+This table is not modified by combat start or end. The background worker is the sole
+deletion mechanism — it removes rows where expiresAt < now() on each tick, regardless
+of combat state. If combat ends while the real-time buff is still active, the entry
+remains and will carry into the next combat encounter.
+
+EXAMPLE — Blessed (pre-combat buff from a healer):
+  Entity_PreCombatEffect:
+    effectDefId        → "blessed" CombatStatEffectDef (+2 hit roll for 3 combat rounds)
+    expiresAt          = appliedAt + 1 hour
+    equipmentProfileId → Healer's Blessing profile (cooldownRounds = 2)
+  At combat start:
+    ActiveCombat_StatEffect created with roundsRemaining = 3
+    ActiveCombat_Participant_ActionCooldown created for healer, profile, roundsRemaining = 2
