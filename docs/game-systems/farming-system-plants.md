@@ -180,7 +180,7 @@ overrides it. Mirrors SpeciesType_EnvConditionEffect.
   envConditionId Int     FK → EnvCondition
   effectTypeId   Int?    FK → EffectType. "cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival"
   relationTypeId Int     FK → RelationType. "requires" | "increase" | "decrease" | "block" | "kills"
-  value          Float?  Delta magnitude, > 0.0. Null when "requires" or "block".
+  value          Float?  Magnitude, > 0.0. Null when "requires" or "block".
 
 RULE: One row per (plantTypeId, envConditionId, relationTypeId, effectTypeId) — DB-enforced unique.
 RULE: PlantDef_EnvConditionEffect takes precedence over PlantType_EnvConditionEffect for the same
@@ -237,7 +237,7 @@ for a plant — cultivation requirements, foraging rates, growth rate, and survi
   envConditionId   Int     FK → EnvCondition
   effectTypeId     Int?    FK → EffectType. "cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival"
   relationTypeId   Int     FK → RelationType. "requires" | "increase" | "decrease" | "block" | "kills"
-  value            Float?  Delta magnitude, > 0.0. Null when "requires" or "block".
+  value            Float?  Magnitude, > 0.0. Null when "requires" or "block".
 
   cultivation / requires
     Planting prerequisite. The condition must be present in the combined active
@@ -275,7 +275,7 @@ STACKING FORMULA (per effectType, across all active conditions and their stacks)
   "block" on any effectType excludes the plant — takes precedence over all other modifiers.
   "kills" rows roll independently per active condition each tick.
 
-RULE: Only one row per (plantDefId, envConditionId, effectType) — DB-enforced unique.
+RULE: Only one row per (plantDefId, envConditionId, relationTypeId, effectTypeId) — DB-enforced unique.
 RULE: spawn_rate and spawn_weight rows are only read from the base (non-ephemeral)
       PlantDef. Ephemeral variants do not appear in the wild.
 RULE: growth_rate modifier is combined with biome, plot type, and soil quality
@@ -397,12 +397,12 @@ target a plot. Both use the same table — effectValue may be positive or negati
 
   plotId          Int      FK → Plot
   sourceEntityId  Int      FK → Entity. Who applied the buff.
-  effectType      String   growth_rate | yield | decay_resistance
+  effectTypeId    Int      FK → EffectType. growth_rate | yield | decay_resistance
   effectValue     Float    Applied while buff is active. Positive = buff, negative = debuff.
   appliedAt       DateTime
   expiresAt       DateTime appliedAt + ability-defined durationHours.
 
-PK is (plotId, sourceEntityId, effectType) — one active buff per effect type per
+PK is (plotId, sourceEntityId, effectTypeId) — one active buff per effect type per
 entity per plot. This allows multiple entities to stack buffs of the same type
 independently while preventing the same entity from applying the same buff twice.
 stackBehavior on Ability_ActionTrigger (for ability-sourced buffs) and on the
@@ -459,7 +459,7 @@ HARVEST YIELD DECAY FORMULA
   growthProgression Float     Accumulated growth points this stage. Increments each daily tick by
                               dailyGrowthRate (see formula). Resets to 0 when a stage advances.
   carePoints        Int       Accumulated tending care points for this plant's lifetime.
-                              Incremented by tending actions via PlotCrop_TendRecord resolution.
+                              Incremented by tending actions via Plot_TendRecord resolution.
                               Used at cross-breeding time to compute carePercentage for
                               mutation direction bias.
 
@@ -665,7 +665,7 @@ generation-0 cultivated yields — same drop table, same quantities before env m
 Wild-foraged outputs are standard Items (never ephemeral — no variant lineage).
 
 A location with multiple biomes can surface plants from any of those biomes.
-A plant with findChance rows for multiple biomes present at the same location
+A plant with spawnRate rows for multiple biomes present at the same location
 only rolls once (deduplicated by plantDefId before rolling).
 
 
@@ -719,7 +719,7 @@ TENDING ACTIONS (care point + buff system)
 ───────────────────────────────────────────
 Tending actions are available to all entities. Any entity earns Farming XP on
 completion. Only entities with a matching Ability_PlotBuff write a Plot_Buff.
-All tending actions update PlotCrop_TendRecord and increment PlotCrop.carePoints.
+All tending actions update Plot_TendRecord and increment PlotCrop.carePoints.
 
 Cooldowns and care points are defined on ActionSystemType (cooldownHours,
 progressPoints) — engine-level values, not guild-configurable.
@@ -747,7 +747,7 @@ RULE: harvest_crop requires PlotCrop.currentStage = PlantDef.growthStages.
 RULE: cross_breed requires both target PlotCrops to be mature
       (currentStage = growthStages) and share the same resolved root.
 RULE: Tending actions are blocked if lastPerformedAt + cooldownHours > now
-      (checked via PlotCrop_TendRecord).
+      (checked via Plot_TendRecord).
 
 
 ─────────────────────────────────────────────
@@ -800,7 +800,7 @@ Will be handled in a separate farming-system-livestock document.
   Drop Tables    — harvestDropTableId uses the Species drop table pattern. Ephemeral PlantDefs have their own drop tables with variant values already baked in. 
                   harvestDropTableId is also used for wild foraging — wild plants resolve the same table as a generation-0 cultivated harvest.
 
-  Foraging       — Wild foraging runs PlantDef_Biome.findChance lookups alongside
+  Foraging       — Wild foraging runs PlantDef_Biome.spawnRate lookups alongside
                    the location's standard item drop table. PlantDef_EnvConditionEffect
                    spawn_rate rows scale find probability per active condition;
                    spawn_weight rows scale quantity rolls. Only base PlantDefs appear

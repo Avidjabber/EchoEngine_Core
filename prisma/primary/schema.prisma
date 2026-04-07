@@ -5254,9 +5254,9 @@ model PlantDef_Trait {
   @@id([plantDefId, plantTraitId])
 }
 
-// Biome affinities for a plant. Controls wild foraging find rates and cultivated growth rate deltas.
+// Biome affinities for a plant. Controls wild foraging find rates and cultivated growth rate modifiers.
 // No rows = grows in any biome at 0.0 (neutral) but never found during wild foraging.
-// findChance is only read from the base (rootPlantDefId = null) PlantDef.
+// spawnRate is only read from the base (rootPlantDefId = null) PlantDef.
 model PlantDef_Biome {
   plantDefId          Int
   biomeId             Int
@@ -5274,8 +5274,8 @@ model PlantDef_Biome {
 // relationships for a plant into one table, including hard planting requirements.
 //
 // effectType:       "cultivation" | "spawn_rate" | "spawn_weight" | "growth_rate" | "survival"
-// relationshipType: "requires" | "increase" | "decrease" | "block" | "kills"
-// value:            delta magnitude, > 0.0; null when relationshipType is "requires" or "block"
+// relationType:     "requires" | "increase" | "decrease" | "block" | "kills"
+// value:            magnitude, > 0.0; null when relationType is "requires" or "block"
 //
 //   cultivation / requires — planting prerequisite. The condition must be present in the
 //                     combined active set (location + PlotType_EnvCondition + env_inject stacks)
@@ -5340,7 +5340,7 @@ model PlotType {
   name        String  @db.VarChar(100)
   description String? @db.VarChar(500)
 
-  // Maximum soilQuality delta achievable via composting. Prevents indefinite improvement.
+  // Maximum soilQuality achievable via composting. Prevents indefinite improvement.
   // e.g. 1.0 = soil can contribute at most +100% to growth/yield. Rocky terrain might cap at 0.3.
   soilQualityCap Float @default(1.0)
 
@@ -5369,8 +5369,8 @@ model PlotType_EnvCondition {
 // A single growing slot within a farming structure. One Plot = one PlotCrop at a time.
 // Created when a farming structure is built (basePlotCount rows) and when plot_count upgrades complete.
 // PlotType is derived via Plot → Structure → StructureDef → StructureDef_FarmingConfig.
-// carePoints, TendRecord rows, and Buff rows all live on Plot (not on the crop).
-// On PlotCrop removal (uproot or replant): reset carePoints = 0, delete Plot_TendRecord rows, delete Plot_Buff rows.
+// TendRecord rows and Buff rows live on Plot (not on the crop). carePoints lives on PlotCrop.
+// On PlotCrop removal (uproot or replant): delete Plot_TendRecord rows, delete Plot_Buff rows.
 model Plot {
   id          Int     @id @default(autoincrement())
   structureId Int                  // FK → Structure (farming-type)
@@ -5422,7 +5422,7 @@ model PlotCrop {
 
 // Tracks when each tending action type was last performed on a plot slot.
 // Enforces the per-systemType cooldown (crop-level lock — one entity tending resets the clock for all).
-// Deleted when the PlotCrop is removed; carePoints on Plot is reset at the same time.
+// Deleted when the PlotCrop is removed (PlotCrop deletion also removes its carePoints).
 // PK is (plotId, systemType).
 model Plot_TendRecord {
   plotId          Int
