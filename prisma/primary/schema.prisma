@@ -4491,6 +4491,10 @@ model EventDef {
   allowApprenticesWithAdult Boolean @default(false)
   minAge               Int?
 
+  // Participant bounds for signup-based events
+  minParticipants       Int?  // null = no minimum
+  maxParticipants       Int?  // null = no maximum
+
   // Cooldown — days before this event can fire again for the same faction/guild
   cooldownDays Int @default(3)
 

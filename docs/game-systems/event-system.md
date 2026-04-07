@@ -31,7 +31,7 @@ weather, and the passage of time.
 
 Events can be triggered by several mechanisms (EventTriggerType). An EventDef may reference one or more trigger types:
 
-  admin         — manually fired by a guild admin
+  admin         — manually fired by a guild admin; participants are typically provided via signup before the chain starts
   patrol        — fires when a patrol activity completes
   hunt          — fires when a hunt activity completes
   crafting      — fires when a crafting activity completes
