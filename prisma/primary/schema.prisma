@@ -2638,9 +2638,10 @@ model Item {
                                         // 1 point = 1 day at base rate. 60 = lasts 60 days with no modifiers.
   maxDurability Int?                 // max durability for equipment; null = indestructible
   maxUses       Int?                 // max uses before depletion; null = unlimited
-  fuelValue     Int?                 // fuel units added to a power source's bank on deposit; null = not a fuel item.
-                                    // an item may carry multiple Fuel_* ItemType tags (for storage classification), but its
-                                    // fuelValue is the same regardless of which power source accepts it.
+  fuelValue     Int?                 // consumable fuel: units added to a power source's bank on deposit (item destroyed).
+                                    // battery (Battery ItemType tag present): max charge capacity — StoredItem.currentFuelLevel
+                                    // tracks remaining charge; item is never destroyed on use.
+                                    // null = not a fuel item.
   fuelTypeId    Int?                 // fuel category of this item — matched against StructureDef_FuelConfig_InputFuelType on deposit; null = not a fuel item
 
   // Ephemeral items are created at craft time by the recipe system (e.g. Dried Yarrow Leaf, Yarrow Paste).
@@ -3219,8 +3220,11 @@ model StoredItem {
   craftBonus     Float  @default(0.0)  // flat bonus accumulated through crafting skill rolls; added to ItemEffect.effectiveness on use
                                         // carries forward to ephemeral outputs when RecipeOutput.craftBonusApplies = true
 
-  currentDurability Int?  // null when item.maxDurability is null; initialized from maxDurability on creation
-  usesRemaining     Int?  // null when item.maxUses is null; initialized from maxUses on creation, decremented on use
+  currentDurability Int?   // null when item.maxDurability is null; initialized from maxDurability on creation
+  usesRemaining     Int?   // null when item.maxUses is null; initialized from maxUses on creation, decremented on use
+  currentFuelLevel  Float? // battery items only (Battery ItemType tag + fuelValue non-null); initialized to item.fuelValue on creation.
+                           // decremented on discharge into a power source; incremented on charge from a power source.
+                           // null on all non-battery StoredItems.
 
   isEquipped      Boolean   @default(false)
   chosenProfileId Int?      // set at equip time; null when not equipped
@@ -3559,18 +3563,21 @@ model StructureDef_CompostConfig {
 // Camp-scope drain order: worker drains the lowest Structure.powerSortOrder source first;
 // ties broken by Structure.id. Structure-scope sources drain independently.
 model StructureDef_FuelConfig {
-  structureDefId        Int    @id
-  isActive              Boolean @default(false)
-  scopeId                 Int
-  fuelCapacity          Float  @default(100)   // max fuel units the bank can hold; upgradeable via fuel_capacity effect
+  structureDefId        Int     @id
+  isActive              Boolean @default(false) // false = active generator (item deposits); true = passive generator (env conditions)
+  scopeId               Int
+  fuelCapacity          Float   @default(100)  // max fuel units the bank can hold; upgradeable via fuel_capacity effect
   baseGenerationPerHour Float?                 // passive sources only — base fuel units generated per hour before env condition bonuses;
                                                // null on active sources (gain only from item deposits)
+  allowsBatteryUse      Boolean @default(false) // when true, entities may discharge or charge Battery-type items via this structure;
+                                               // discharge: transfers charge from battery → structure.currentFuel;
+                                               // charge: transfers charge from structure.currentFuel → battery
 
-  structureDef   StructureDef                               @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
-  targetScope TargetScope @relation(fields: [scopeId], references: [id], onDelete: Restrict)
-  inputFuelTypes StructureDef_FuelConfig_InputFuelType[]
+  structureDef    StructureDef                            @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  targetScope     TargetScope                             @relation(fields: [scopeId],        references: [id], onDelete: Restrict)
+  inputFuelTypes  StructureDef_FuelConfig_InputFuelType[]
   outputFuelTypes StructureDef_FuelConfig_OutputFuelType[]
-  envConditions  StructureDef_FuelConfig_EnvCondition[]
+  envConditions   StructureDef_FuelConfig_EnvCondition[]
 }
 
 // Fuel types a power source accepts as item inputs.

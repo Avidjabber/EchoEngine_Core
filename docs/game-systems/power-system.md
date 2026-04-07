@@ -141,6 +141,49 @@ RUNTIME STATE
 
 
 ─────────────────────────────────────────────
+3b. BATTERY ITEMS
+─────────────────────────────────────────────
+
+Battery-type items carry charge that can be transferred to or from a compatible
+power source. Unlike consumable fuel items (wood, coal, tallow), batteries are
+never destroyed on use — they remain as StoredItems at their updated charge level.
+
+An item is a battery if it has the Battery ItemType tag AND non-null fuelTypeId
+and fuelValue. For batteries, fuelValue is the max charge capacity. For consumables,
+fuelValue is the units deposited and the item is destroyed on deposit.
+
+StoredItem.currentFuelLevel tracks remaining charge:
+  - Initialized to Item.fuelValue (full charge) when the StoredItem is created.
+  - Decremented on discharge; incremented on charge.
+  - null on all non-battery StoredItems.
+
+ENABLING BATTERY USE ON A STRUCTURE
+  StructureDef_FuelConfig.allowsBatteryUse must be true. The structure's
+  InputFuelType set must also include the battery's fuelTypeId — the same type
+  check that applies to consumable deposits.
+
+DISCHARGE (battery → structure)
+  Entity selects a battery and a target power structure (allowsBatteryUse = true).
+  Entity chooses an amount up to the allowed maximum.
+
+  maxTransfer = min(battery.currentFuelLevel, structure.fuelCapacity − structure.currentFuel)
+  battery.currentFuelLevel  −= amount   (amount ≤ maxTransfer)
+  structure.currentFuel     += amount
+
+CHARGE (structure → battery)
+  Entity selects a battery and a target power structure (allowsBatteryUse = true).
+  Direction is reversed; same cap logic applies.
+
+  maxTransfer = min(Item.fuelValue − battery.currentFuelLevel, structure.currentFuel)
+  battery.currentFuelLevel  += amount   (amount ≤ maxTransfer)
+  structure.currentFuel     −= amount
+
+Full discharge/charge is simply entering the maximum — it uses the same code path.
+An empty battery (currentFuelLevel = 0) stays in storage and can be recharged,
+used as a crafting ingredient, or otherwise interacted with.
+
+
+─────────────────────────────────────────────
 4. POWER CONSUMERS
 ─────────────────────────────────────────────
 
@@ -239,10 +282,12 @@ Upgrade effectTypes valid for power-type StructureDefs (isFuel = true):
 7. SCHEMA SUMMARY
 ─────────────────────────────────────────────
 
-  FuelType                            — static seed: Burnable | Electric | Steam | Alchemical
-  StructureDef_FuelConfig             — isActive (passive vs active generator), scopeId (FK → TargetScope), capacity, base generation rate
-  StructureDef_FuelConfig_InputFuelType  — fuel item types a source accepts as deposits
+  FuelType                            — static seed: Burnable | Electric | Steam | Alchemical | Renewable
+  StructureDef_FuelConfig             — isActive (passive generator flag), scopeId (FK → TargetScope), fuelCapacity,
+                                        baseGenerationPerHour, allowsBatteryUse
+  StructureDef_FuelConfig_InputFuelType  — fuel item types a source accepts as deposits (and battery fuel type checks)
   StructureDef_FuelConfig_OutputFuelType — fuel types a source produces
   StructureDef_FuelConfig_EnvCondition   — env conditions driving passive generation rate
   StructureDef_AcceptedFuelType          — output fuel types a powered StructureDef accepts; empty = any
   StructureDef_Upgrade_AcceptedFuelType  — same, for powered upgrades
+  StoredItem.currentFuelLevel            — Float?; battery charge state; null on non-battery items

@@ -182,6 +182,7 @@ Values:
   Ingot
   Gem
   Leather
+  Battery
 
 
 ──────────────────────────────────────────────
@@ -340,10 +341,16 @@ StackBehavior                           [ DONE ]
 ──────────────────────────────────────────────
 FuelType                                [ DONE ]
 ──────────────────────────────────────────────
-Static seed values. Declares the category of energy a power source produces or accepts
-as item deposits. Items carry a fuelTypeId — when deposited into an active source, the
-item is consumed if its fuelTypeId matches one of the source's input types, and its
-fuelValue is added to the source's fuel pool.
+Static seed values. Declares the category of energy a power source produces or accepts.
+
+Two kinds of fuel items:
+  Consumable (no Battery ItemType tag) — destroyed on deposit; fuelValue added to source's fuel pool.
+  Battery    (Battery ItemType tag)    — never destroyed; charge transferred via the battery UI
+                                         (structure must have allowsBatteryUse = true). fuelValue is
+                                         the battery's max charge capacity; StoredItem.currentFuelLevel
+                                         tracks remaining charge. Transfer direction is selectable:
+                                         discharge (battery → structure) or charge (structure → battery).
+                                         Amount is capped by whichever side has less headroom.
 
 Consumers (StructureDef.isPowered / StructureDef_Upgrade.isPowered) declare which output
 FuelTypes satisfy them via StructureDef_AcceptedFuelType and
@@ -377,13 +384,14 @@ Each type has a corresponding config table (except storage, which uses Structure
   medical   StructureDef_MedicalConfig      treatment/exam roll bonus, recovery modifier, contagion resist
   compost   StructureDef_CompostConfig      conversion days, weight/volume capacity; MUST pair with storage
   crafting  StructureDef_CraftingConfig     crafting roll bonus, output quantity bonus, supported interactions
-  power     StructureDef_FuelConfig         generatorType (active|passive), scope (structure|camp|location|faction), capacity, burn rate;
-            —                               active: accepts item deposits matching fuelTypeId
-            —                               passive: generates from env conditions via StructureDef_FuelConfig_EnvCondition
-            —                               structure: satisfies only the structure this source is built into (multi-type def)
-            —                               camp: satisfies all isPowered in the same camp
-            —                               location: satisfies all isPowered across all camps in the location
-            —                               faction: satisfies all isPowered across the entire faction
+  power     StructureDef_FuelConfig         isActive (passive generator flag), scopeId (FK → TargetScope), capacity, burn rate;
+            —                               isActive=false: active generator — accepts item deposits matching fuelTypeId
+            —                               isActive=true:  passive generator — generates from env conditions via StructureDef_FuelConfig_EnvCondition
+            —                               allowsBatteryUse=true: entity may discharge or charge Battery-type items via this structure
+            —                               scope structure: satisfies only the structure this source is built into (multi-type def)
+            —                               scope camp:      satisfies all isPowered in the same camp
+            —                               scope location:  satisfies all isPowered across all camps in the location
+            —                               scope faction:   satisfies all isPowered across the entire faction
 
 
 ──────────────────────────────────────────────
