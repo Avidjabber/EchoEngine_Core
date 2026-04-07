@@ -2024,21 +2024,6 @@ model ConditionDef_ProficiencyEffect {
   @@index([proficiencyDefId])
 }
 
-// Skill-derived and behavioral combat effects for a condition.
-//
-// Use this table only when:
-//   a) the magnitude is skill-derived — flatModifier is null and the value is read from
-//      EntityCondition.resolvedFlatModifier at resolution time (e.g. a hit penalty that
-//      scales with disease severity), OR
-//   b) the effect is behavioral — action_denial (stun/paralysis), which belongs to the
-//      CombatEffectType / ActiveCombat_BehaviorEffect layer, not CombatStatEffectDef.
-//
-// For all fixed-value stat effects (DoT, HoT, stat mods, roll mods, AC mods, advantage,
-// damage resistance, etc.) use ConditionDef_CombatStatEffect → CombatStatEffectDef instead.
-// Those are reusable across items, abilities, and conditions without duplication.
-//
-// flatModifier: null = skill-derived (read from EntityCondition.resolvedFlatModifier).
-//               positive = bonus, negative = penalty.
 // Skill-derived magnitude effect from a condition in combat. Use this ONLY when the modifier
 // value should scale with actor skill — i.e. flatModifier = null and the value is read from
 // EntityCondition.resolvedFlatModifier at resolution time (e.g. a hit penalty that grows with

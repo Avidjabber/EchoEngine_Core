@@ -193,6 +193,26 @@ Modifies damage taken or dealt for a specific damage type.
   isImmune     — true = no damage of this type; overrides modifier
 
 ─────────────────────────────────────────────
+NOTE: ALWAYS-ON VS. COMBAT-ENTRY STACKING
+─────────────────────────────────────────────
+
+Ability_StatModifier and Ability_DamageModifier are always-on — they apply in and out
+of combat for as long as the ability is active.
+
+AbilityDef_StatEffect (see combat-system.md section 11) links an ability to a
+CombatStatEffectDef that is applied separately at combat entry as a temporary effect.
+
+Both layers apply simultaneously in combat. If an ability defines both an
+Ability_StatModifier and an AbilityDef_StatEffect targeting the same stat, the entity
+receives both modifiers during combat — the always-on passive plus the combat-entry buff.
+This is intentional when the values differ (e.g. a permanent +2 STR plus a combat-only
++1 STR adrenaline boost), but will silently double-count if the same value is defined
+in both places by mistake.
+
+The same applies to Ability_DamageModifier and any CombatStatEffectDef_DamageModifier
+linked via AbilityDef_StatEffect.
+
+─────────────────────────────────────────────
 4h. Ability_ActionTrigger
 ─────────────────────────────────────────────
 
@@ -470,16 +490,17 @@ to express a range, or use only one side for a floor/ceiling gate.
   SkillTreeNode_Relation     — REQUIRES / BLOCKS / UPGRADES edges between nodes
   Entity_SkillTreeNode       — records which nodes an entity has obtained
 
-  Ability_StatModifier        — stat bonuses/penalties with optional context/environment/state gates
+  Ability_StatModifier        — always-on stat bonuses/penalties with optional context/environment/state gates
   Ability_ProficiencyModifier — proficiency roll bonuses with optional gates
   Ability_MultiplierEffect    — rate/yield multipliers with optional gates
   Ability_GrantedAction       — unlocked item actions
   Ability_CombatBehavior      — combat behavior intercepts
   Ability_ConditionResistance — condition resistance/immunity
-  Ability_DamageModifier      — damage type modifiers
+  Ability_DamageModifier      — always-on damage type modifiers
   Ability_ActionTrigger       — action-triggered effects: plot buffs, condition grants, energy restore, xp grants
   Ability_ThresholdTrigger    — condition grant fired when HP/nutrition/hydration crosses a threshold
   Ability_PresenceEffect      — daily housing-based passive effects: condition grants, multipliers, structure/plot buffs
+  AbilityDef_StatEffect       — combat-entry CombatStatEffectDef applied at combat start; stacks with always-on modifiers above
 
   Lookup tables (seeded):
   AbilityEffectType           — effect categories for ActionTrigger and PresenceEffect

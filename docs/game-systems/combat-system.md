@@ -418,6 +418,18 @@ the effect is applied when the source fires. 1.0 = always; 0.0 = never.
                                     giving it condition-scoped duration.
   AbilityDef_StatEffect           — applied on combat entry while the ability is active.
 
+STACKING WITH ALWAYS-ON MODIFIERS
+───────────────────────────────────
+CombatStatEffectDef is a combat-entry layer — effects are created at combat start and
+removed when combat ends. Always-on modifiers (Ability_StatModifier, Ability_DamageModifier,
+ConditionDef_StatEffect, ConditionDef_DamageModifier) apply independently in and out of
+combat and are not replaced by a CombatStatEffectDef covering the same stat or damage type.
+
+If both layers are defined for the same ability/condition and the same stat or damage type,
+both apply in combat and the values add. This is intentional when the modifiers represent
+different things (e.g. a permanent +2 STR plus a combat-only +1 STR adrenaline burst), but
+will silently double-count if the same value is duplicated across both layers by mistake.
+
 COEXISTENCE WITH ConditionDef_CombatEffect
 ───────────────────────────────────────────
 ConditionDef_CombatEffect is retained for two narrow cases:
