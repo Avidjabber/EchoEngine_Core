@@ -136,9 +136,12 @@ model GuildSettings {
   // Worker skips firing any new global-scope event if now() < lastEventAt + EventDef.cooldownDays.
   lastEventAt DateTime? @db.Timestamptz
 
-  // Max discipline level an entity in this guild can reach. null = no cap.
-  // Stat points are not capped — only discipline levels. Applies to all disciplines equally.
+  // Guild-wide discipline level cap fallback. null = no cap.
+  // Applies to all disciplines unless overridden by a Guild_DisciplineLevelCap row for that discipline.
+  // Stat points are not capped — only discipline levels.
   disciplineLevelCap Int?
+
+  disciplineLevelCaps Guild_DisciplineLevelCap[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
   updatedAt DateTime @updatedAt      @db.Timestamptz
@@ -1289,8 +1292,9 @@ model Entity_Proficiency {
 // Global seeded disciplines — the same seven apply to every entity in every guild.
 // XP required for level N is computed at the app layer using baseXp as the level-1 threshold.
 model DisciplineDef {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(100)
+  id       Int    @id @default(autoincrement())
+  codeName String @unique @db.VarChar(100)  // snake_case slug; stable lookup key used in app logic
+  name     String @unique @db.VarChar(100)
   description String? @db.VarChar(500)
 
   // XP needed to reach level 1 (disciplines) or to earn one stat point (stat progression row).
@@ -1316,6 +1320,23 @@ model DisciplineDef {
   abilityActionTriggerXpGrants  Ability_ActionTrigger[]
   craftingInteractionRules      Guild_CraftingInteractionRule[]
   recipeCraftingRequirements    Recipe_CraftingRequirement[]
+  guildLevelCaps                Guild_DisciplineLevelCap[]
+}
+
+// Per-guild per-discipline level cap override.
+// Overrides GuildSettings.disciplineLevelCap for this specific discipline.
+// If no row exists for a discipline, GuildSettings.disciplineLevelCap applies as the fallback.
+// null fallback = no cap for that discipline.
+model Guild_DisciplineLevelCap {
+  guildId         String @db.VarChar(50)
+  disciplineDefId Int
+  levelCap        Int
+
+  guild           GuildSettings @relation(fields: [guildId],         references: [guildId], onDelete: Cascade)
+  disciplineDef   DisciplineDef @relation(fields: [disciplineDefId], references: [id],      onDelete: Restrict)
+
+  @@id([guildId, disciplineDefId])
+  @@index([disciplineDefId])
 }
 
 // Per-entity discipline progression. A row is created for every discipline at entity creation.
@@ -1342,6 +1363,7 @@ model SkillTreeNode {
   guildId         String @db.VarChar(50)
   disciplineDefId Int
   abilityDefId    Int?   // null = gate-only node (level requirement with no ability grant)
+  name            String @db.VarChar(200)  // human-readable; unique per guild across all discipline trees
   levelRequired   Int
   statPointCost   Int    @default(0)
 
@@ -1357,6 +1379,7 @@ model SkillTreeNode {
   craftingInteractionRules   Guild_CraftingInteractionRule[]
   recipeCraftingRequirements Recipe_CraftingRequirement[]
 
+  @@unique([guildId, name])
   @@index([guildId])
   @@index([disciplineDefId])
   @@index([abilityDefId])

@@ -45,9 +45,14 @@ See stats-proficiencies-disciplines.md section 2 for full details.
 
 DISCIPLINE LEVEL CAP
 ─────────────────────
-GuildSettings.disciplineLevelCap (Int?) defines the maximum discipline level any
-entity in the guild can reach. null = no cap. This is a guild-wide setting — all
-disciplines share the same ceiling. Stat points are not subject to any cap.
+Level caps are resolved per discipline using a two-tier lookup:
+  1. Guild_DisciplineLevelCap — per-discipline override for this guild (takes precedence)
+  2. GuildSettings.disciplineLevelCap — guild-wide fallback; null = no cap
+
+If no Guild_DisciplineLevelCap row exists for a given discipline, the guild-wide
+fallback applies. A guild can cap Combat at 20 while allowing Farming to go to 50
+by seeding one row for Combat and leaving the others to the fallback.
+Stat points are not subject to any cap.
 
 
 ─────────────────────────────────────────────
@@ -116,12 +121,14 @@ Discipline XP reaches an entity through three paths:
 5. SCHEMA
 ─────────────────────────────────────────────
 
-  DisciplineDef             — global seeded table, one row per discipline + one stat progression row
-                              key fields: baseXp, isStatProgression, dailyXpCap
-  Entity_Discipline         — per-entity progression tracking (level, currentXp)
-  SkillTreeNode             — guild-defined node: ability granted, level threshold, cost
-  SkillTreeNode_Relation    — directed edges between nodes; relationTypeId FK → RelationType (REQUIRES / BLOCKS / UPGRADES)
-  Entity_SkillTreeNode      — records which nodes an entity has obtained
+  DisciplineDef                — global seeded table, one row per discipline + one stat progression row
+                                 key fields: codeName, baseXp, isStatProgression, dailyXpCap
+  Entity_Discipline            — per-entity progression tracking (level, currentXp)
+  Guild_DisciplineLevelCap     — per-guild per-discipline level cap override; fallback is GuildSettings.disciplineLevelCap
+  SkillTreeNode                — guild-defined node: name, ability granted, level threshold, cost; name unique per guild
+  SkillTreeNode_Relation       — directed edges between nodes; relationTypeId FK → RelationType (REQUIRES / BLOCKS / UPGRADES)
+  SkillTreeNode_DisciplineRequirement — cross-discipline level gate on a node
+  Entity_SkillTreeNode         — records which nodes an entity has obtained
 
 DisciplineDef has no guildId — disciplines are the same across all guilds.
 
@@ -140,6 +147,7 @@ NODE SCHEMA
     guildId         — owning guild
     disciplineDefId — which discipline tree this node belongs to
     abilityDefId    — the AbilityDef granted when the node is obtained; null = gate-only node (no ability grant)
+    name            — human-readable display name (e.g. "Enhance Strength I"); unique per guild across all trees
     levelRequired   — entity's discipline level must reach this to unlock
     statPointCost   — stat points required to purchase; 0 = free but still requires explicit player purchase
 
@@ -265,7 +273,7 @@ DISCIPLINE PROGRESSION
 
 SKILL TREE NODE MANAGEMENT (admin / guild setup)
 ──────────────────────────────────────────────────
-  createSkillTreeNode(guildId, disciplineDefId, abilityDefId, levelRequired,
+  createSkillTreeNode(guildId, disciplineDefId, name, abilityDefId, levelRequired,
                       statPointCost, relations[])
     - relations[] is an array of { relationTypeId, targetNodeId } pairs
     - Validates all targetNodeIds belong to same guildId
