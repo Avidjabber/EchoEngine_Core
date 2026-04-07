@@ -324,7 +324,7 @@ model DropTable {
 
   entries             DropTable_Entry[]
   species             Species[]                  // species whose loot resolves from this table (catch/kill + NPC combat defeat)
-  biomes              Biome[]                    // biomes whose gather yields resolve from this table
+  guildBiomeDrops     Guild_BiomeDrop[]          // per-guild biome gather yield assignments
   combatParticipants  ActiveCombat_Participant[]  // snapshotted per-participant at combat spawn
   plantDefHarvests    PlantDef[]                 @relation("PlantDefHarvestDrop")
   @@index([guildId])
@@ -418,7 +418,7 @@ model Season {
 // of time in different patterns.
 model WeatherState {
   id       Int     @id @default(autoincrement())
-  guildId  String  @default("global") @db.VarChar(50)
+  guildId  String  @db.VarChar(50)
   codeName String  @db.VarChar(200)  // snake_case slug; unique per guild
   name     String  @db.VarChar(100)
   isSevere Boolean @default(false)
@@ -481,7 +481,7 @@ model WeatherState_EnvCondition {
 // cooldownDays — minimum days before this pattern can be selected again for the same guild.
 model WeatherPattern {
   id           Int     @id @default(autoincrement())
-  guildId      String  @default("global") @db.VarChar(50)
+  guildId      String  @db.VarChar(50)
   codeName     String  @db.VarChar(200)  // snake_case slug; unique per guild
   name         String  @db.VarChar(100)
   isSevere     Boolean @default(false)
@@ -623,30 +623,24 @@ model EnvCondition_ProficiencyModifier {
 }
 
 
-// A named biome / terrain type. Determines what species spawn here and what can be gathered.
-// Guild-extensible; guildId = "global" for seeded defaults (Forest, Moorland, River, etc.)
+// Engine-defined terrain types. Fixed set — contact the engine team to request additions.
+// Guilds assign per-guild drop tables via Guild_BiomeDrop.
 model Biome {
   id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
-  name        String  @db.VarChar(100)
+  codeName    String  @unique @db.VarChar(100)  // snake_case slug; stable engine lookup key
+  name        String  @unique @db.VarChar(100)
   description String? @db.VarChar(500)
-  color       Int?                        // Discord-style integer color (decimal value of RRGGBB hex)
+  color       Int?                               // Discord-style integer color (decimal value of RRGGBB hex)
 
-  dropTableId Int?
-  dropTable   DropTable? @relation(fields: [dropTableId], references: [id], onDelete: SetNull)
-
-  locations    Location_Biome[]
-  species      Species_Biome[]
+  locations     Location_Biome[]
+  species       Species_Biome[]
   envConditions Biome_EnvCondition[]
+  guildDrops    Guild_BiomeDrop[]
 
   abilityStatModifiers        Ability_StatModifier[]
   abilityProficiencyModifiers Ability_ProficiencyModifier[]
   abilityMultiplierEffects    Ability_MultiplierEffect[]
   plantDefBiomes              PlantDef_Biome[]
-
-  @@unique([guildId, name])
-  @@index([guildId])
-  @@index([dropTableId])
 }
 
 // Inherent environmental conditions for a biome — always active regardless of weather or season.
@@ -662,6 +656,21 @@ model Biome_EnvCondition {
 
   @@id([biomeId, envConditionId])
   @@index([envConditionId])
+}
+
+// Per-guild drop table for a biome. Guilds configure what can be gathered from each biome
+// independently — the same Forest biome can yield different resources in different guilds.
+model Guild_BiomeDrop {
+  guildId     String
+  biomeId     Int
+  dropTableId Int
+
+  biome     Biome     @relation(fields: [biomeId],     references: [id], onDelete: Cascade)
+  dropTable DropTable @relation(fields: [dropTableId], references: [id], onDelete: Restrict)
+
+  @@id([guildId, biomeId])
+  @@index([biomeId])
+  @@index([dropTableId])
 }
 
 // ============================================================
@@ -699,7 +708,7 @@ model SpeciesType {
 //   Example: Cat 2d10, base CON 10 → modifier 0 → NPC maxHp = floor(20/2) + 0 = 10.
 model Species {
   id       Int    @id @default(autoincrement())
-  guildId  String @default("global") @db.VarChar(50)
+  guildId  String @db.VarChar(50)
   codeName String @db.VarChar(200)  // snake_case slug; unique per guild
   name     String @db.VarChar(100)
 
@@ -1272,7 +1281,7 @@ model Rank_DefaultItem {
 // If the entity is proficient in the skill, add the guild proficiency bonus on top.
 model ProficiencyDef {
   id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
+  guildId     String  @db.VarChar(50)
   codeName    String  @db.VarChar(200)  // snake_case slug; unique per guild
   name        String  @db.VarChar(100)
   description String? @db.VarChar(500)
@@ -1462,11 +1471,11 @@ model Entity_SkillTreeNode {
 
 
 
-// Guild-extensible ability definitions.
+// Guild-scoped ability definitions. Seeded at guild initialization; guilds and modules may add their own.
 // Sources: species (inherent at creation), skill tree (earned), items (while equipped), events (granted).
 model AbilityDef {
   id           Int     @id @default(autoincrement())
-  guildId      String  @default("global") @db.VarChar(50)
+  guildId      String  @db.VarChar(50)
   codeName     String  @db.VarChar(200)
   name         String  @db.VarChar(200)
   description  String? @db.VarChar(1000)
@@ -1880,12 +1889,12 @@ model ConditionType {
 }
 
 
-// Guild-extensible condition definition — name is freely chosen by guild owners
+// Guild-scoped condition definition — name is freely chosen by guild owners.
 // conditionTypeId: FK to ConditionType — determines the progression lifecycle and display label
 // visibility is tracked per-instance via EntityCondition.discoveryLevel, not on the definition
 model ConditionDef {
   id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
+  guildId     String  @db.VarChar(50)
   codeName    String  @db.VarChar(200)  // snake_case slug; unique per guild
   name        String  @db.VarChar(200)
   description String? @db.VarChar(1000)
@@ -2236,7 +2245,7 @@ model ItemType {
 // Reusable warning labels for items — e.g. "Dangerous for kits", "Dangerous for elders"
 model ItemWarning {
   id      Int    @id @default(autoincrement())
-  guildId String @default("global") @db.VarChar(50)
+  guildId String @db.VarChar(50)
   name    String @db.VarChar(200)
 
   // If both are set: when an entity performs triggeredByInteraction on this item, conditionDef is applied
@@ -2631,10 +2640,10 @@ model ItemFoodProfile {
 }
 
 
-// Item definition (guild-extensible; guildId = "global" for seeded items)
+// Item definition. Guild-scoped; base items seeded at guild initialization.
 model Item {
   id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
+  guildId     String  @db.VarChar(50)
   codeName    String  @db.VarChar(200)  // snake_case slug; unique per guild (see @@unique below)
                                         // ephemeral: yarrow_leaf_a3f9b2 (source codeName + random suffix)
   name        String  @db.VarChar(200)  // display name; not unique — ephemeral items share names
@@ -2799,11 +2808,10 @@ model RecipeOutputMode {
   recipeOutputs RecipeOutput[]
 }
 
-// A crafting recipe: one CraftingInteraction + input slots + output definitions.
-// guildId = "global" for globally available recipes; guild snowflake for custom guild recipes.
+// A crafting recipe: one CraftingInteraction + input slots + output definitions. Guild-scoped.
 model Recipe {
   id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
+  guildId     String  @db.VarChar(50)
   codeName    String  @db.VarChar(200)  // snake_case slug; unique per guild
   name        String  @db.VarChar(200)
   description String? @db.VarChar(1000)
@@ -4348,7 +4356,7 @@ model EventCheckMode {
 //   minAge               — minimum entity age gate; null = no requirement
 model EventDef {
   id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
+  guildId     String  @db.VarChar(50)
   codeName    String  @db.VarChar(200)  // snake_case slug; unique per guild
   name        String  @db.VarChar(200)
   description String? @db.VarChar(1000)
@@ -4865,26 +4873,24 @@ model DamageCategory {
   damageTypes DamageType[]
 }
 
-// Guild-extensible — guildId = "global" for base types; guilds may add their own.
-// categoryId drives engine defense resolution; name is the display label.
+// Engine-defined damage types. Fixed set — contact the engine team to request additions.
+// categoryId drives engine defense resolution (Physical / Magical / True).
 // Resistance/immunity to a damage type is modelled via ConditionDef_DamageModifier on inherentTrait conditions.
 model DamageType {
-  id       Int    @id @default(autoincrement())
-  guildId  String @default("global") @db.VarChar(50)
-  name     String @db.VarChar(50)
+  id         Int    @id @default(autoincrement())
+  codeName   String @unique @db.VarChar(50)  // snake_case slug; stable engine lookup key
+  name       String @unique @db.VarChar(50)
   categoryId Int
 
   category DamageCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
-  equipmentPrimary        ItemEquipmentProfile[]                 @relation("EquipmentDamageType")
-  equipmentElemental      ItemEquipmentProfile[]                 @relation("EquipmentElementalDamageType")
-  conditionModifiers      ConditionDef_DamageModifier[]
-  abilityDamageModifiers  Ability_DamageModifier[]
-  statEffectDots          CombatStatEffectDef_DamageOverTime[]   @relation("StatEffectDamageType")
-  statEffectDamageModifiers CombatStatEffectDef_DamageModifier[] @relation("StatEffectDamageModifier")
+  equipmentPrimary          ItemEquipmentProfile[]                 @relation("EquipmentDamageType")
+  equipmentElemental        ItemEquipmentProfile[]                 @relation("EquipmentElementalDamageType")
+  conditionModifiers        ConditionDef_DamageModifier[]
+  abilityDamageModifiers    Ability_DamageModifier[]
+  statEffectDots            CombatStatEffectDef_DamageOverTime[]   @relation("StatEffectDamageType")
+  statEffectDamageModifiers CombatStatEffectDef_DamageModifier[]   @relation("StatEffectDamageModifier")
 
-  @@unique([guildId, name])
-  @@index([guildId])
   @@index([categoryId])
 }
 
@@ -5193,7 +5199,7 @@ model ActiveCombat_Action {
 //     persist after combat.
 model CombatEncounterDef {
   id       Int    @id @default(autoincrement())
-  guildId  String @default("global") @db.VarChar(50)
+  guildId  String @db.VarChar(50)
   codeName String @db.VarChar(200)  // snake_case slug; unique per guild
   name     String @db.VarChar(200)
 
@@ -5248,7 +5254,7 @@ model CombatRollType {
 //   "refresh" (default) — restart the duration. "stack" — add another instance. "ignore" — no-op.
 model CombatStatEffectDef {
   id      Int    @id @default(autoincrement())
-  guildId String @default("global") @db.VarChar(50)
+  guildId String @db.VarChar(50)
   codeName    String @db.VarChar(200)
   displayName String @db.VarChar(200)
 

@@ -5,9 +5,9 @@ Last updated: 2026-04-06
 This file defines all global seed values for EchoPaw. Work through each
 table one at a time. Mark a table as DONE when its values are finalised.
 
-Tables are grouped by category. "Static" tables are fixed and never change
-at runtime. "Global-default" tables use guildId = "global" and can be
-extended by guilds after seeding.
+Tables are grouped by category. "Static" tables are fixed engine reference data
+and never change at runtime. "Guild-scoped" tables are owned by guilds — base
+rows are seeded per guild at initialization; guilds and modules add their own.
 
 
 ═══════════════════════════════════════════════════════════════════════
@@ -965,8 +965,8 @@ Values:
 
 
 ═══════════════════════════════════════════════════════════════════════
-GLOBAL-DEFAULT EXTENSIBLE TABLES
-(guildId = "global" — guilds may add their own rows after seeding)
+ENGINE-GLOBAL EXTENSIBLE TABLES
+(no guildId — seeded once; guilds reference but do not own these rows)
 ═══════════════════════════════════════════════════════════════════════
 
 ──────────────────────────────────────────────
@@ -1001,27 +1001,32 @@ NOTE — stat progression calibration:
 ──────────────────────────────────────────────
 DamageType                              [ DONE ]
 ──────────────────────────────────────────────
-  name       category
-  blunt      Physical
-  slashing   Physical
-  piercing   Physical
-  fire       Magical
-  frost      Magical
-  lightning  Magical
-  poison     Magical
-  arcane     Magical
-  nature     Magical
-  shadow     Magical
-  radiant    Magical
-  sonic      Magical
-  acid       Magical
-  wind       Magical
-  void       True
+Engine-defined fixed set. Not guild-extensible — contact the engine team to request additions.
+
+  codeName   name       category
+  blunt      Blunt      Physical
+  slashing   Slashing   Physical
+  piercing   Piercing   Physical
+  fire       Fire       Magical
+  frost      Frost      Magical
+  lightning  Lightning  Magical
+  poison     Poison     Magical
+  arcane     Arcane     Magical
+  nature     Nature     Magical
+  shadow     Shadow     Magical
+  radiant    Radiant    Magical
+  sonic      Sonic      Magical
+  acid       Acid       Magical
+  wind       Wind       Magical
+  void       Void       True
 
 
 ──────────────────────────────────────────────
 Biome                                   [ DONE ]
 ──────────────────────────────────────────────
+Engine-defined fixed set. Not guild-extensible — contact the engine team to request additions.
+Drop tables are NOT seeded here — guilds assign per-biome drop tables via Guild_BiomeDrop at init.
+
 color: Discord-style integer (decimal value of RRGGBB hex). Hex shown in parentheses for reference.
 inherentConditions: codeName:stacks — always active regardless of weather or season.
 Conversion: parseInt('RRGGBB', 16) in seeding code.
@@ -1033,84 +1038,84 @@ Removed from original list as redundant:
   Underground     — covered by Cave System
 
   FORESTS
-  name                color                  inherentConditions
-  Forest              2976301   (#2D6A2D)    shaded:1  damp:1
-  Deciduous Forest    4881471   (#4A7C3F)    shaded:1  damp:1
-  Coniferous Forest   1727530   (#1A5C2A)    shaded:1  cold:1
-  Mixed Forest        4028997   (#3D7A45)    shaded:1
-  Taiga               2776122   (#2A5C3A)    shaded:1  cold:2
-  Rainforest          1796922   (#1B6B3A)    shaded:1  humid:2  damp:1
-  Tropical Dry Forest 8227642   (#7D8B3A)    shaded:1  dry:1
-  Cloud Forest        6065258   (#5C8C6A)    shaded:1  misty:2  damp:1
-  Bamboo Forest       7187290   (#6DAB5A)    shaded:1  damp:1
-  Mangrove Forest     4880988   (#4A7A5C)    humid:1   damp:2   muddy:1
+  codeName              name                color                  inherentConditions
+  forest                Forest              2976301   (#2D6A2D)    shaded:1  damp:1
+  deciduous_forest      Deciduous Forest    4881471   (#4A7C3F)    shaded:1  damp:1
+  coniferous_forest     Coniferous Forest   1727530   (#1A5C2A)    shaded:1  cold:1
+  mixed_forest          Mixed Forest        4028997   (#3D7A45)    shaded:1
+  taiga                 Taiga               2776122   (#2A5C3A)    shaded:1  cold:2
+  rainforest            Rainforest          1796922   (#1B6B3A)    shaded:1  humid:2  damp:1
+  tropical_dry_forest   Tropical Dry Forest 8227642   (#7D8B3A)    shaded:1  dry:1
+  cloud_forest          Cloud Forest        6065258   (#5C8C6A)    shaded:1  misty:2  damp:1
+  bamboo_forest         Bamboo Forest       7187290   (#6DAB5A)    shaded:1  damp:1
+  mangrove_forest       Mangrove Forest     4880988   (#4A7A5C)    humid:1   damp:2   muddy:1
 
   GRASSLANDS
-  name                  color                  inherentConditions
-  Grassland             9287772   (#8DB85C)    (none)
-  Savanna               13150283  (#C8A84B)    warm:1  dry:1
-  Steppe                11049820  (#A89B5C)    dry:1   windy:1
-  Meadow                8243322   (#7DC87A)    dappled_light:1
-  Floodplain Grassland  7055472   (#6BA870)    damp:1  muddy:1
+  codeName              name                  color                  inherentConditions
+  grassland             Grassland             9287772   (#8DB85C)    (none)
+  savanna               Savanna               13150283  (#C8A84B)    warm:1  dry:1
+  steppe                Steppe                11049820  (#A89B5C)    dry:1   windy:1
+  meadow                Meadow                8243322   (#7DC87A)    dappled_light:1
+  floodplain_grassland  Floodplain Grassland  7055472   (#6BA870)    damp:1  muddy:1
 
   DESERTS
-  name              color                  inherentConditions
-  Arid Desert       15255674  (#E8C87A)    arid:2  heat:1
-  Semi-Arid Desert  13150298  (#C8A85A)    arid:1  dry:1
-  Rocky Desert      12089930  (#B87A4A)    arid:1  dusty:1
-  Salt Flats        15788758  (#F0EAD6)    arid:2  harsh_sunlight:1
-  Badlands          12081722  (#B85A3A)    dusty:1  arid:1
+  codeName          name              color                  inherentConditions
+  arid_desert       Arid Desert       15255674  (#E8C87A)    arid:2  heat:1
+  semi_arid_desert  Semi-Arid Desert  13150298  (#C8A85A)    arid:1  dry:1
+  rocky_desert      Rocky Desert      12089930  (#B87A4A)    arid:1  dusty:1
+  salt_flats        Salt Flats        15788758  (#F0EAD6)    arid:2  harsh_sunlight:1
+  badlands          Badlands          12081722  (#B85A3A)    dusty:1  arid:1
 
   TUNDRA / ICE
-  name           color                  inherentConditions
-  Arctic Tundra  9222344   (#8CB8C8)    freezing:2  windy:1
-  Alpine Tundra  10139816  (#9AB8A8)    cold:2      windy:1
-  Glacier        12114152  (#B8D8E8)    freezing:2  icy:1
-  Snowfield      15266040  (#E8F0F8)    freezing:1  snow:1
+  codeName       name           color                  inherentConditions
+  arctic_tundra  Arctic Tundra  9222344   (#8CB8C8)    freezing:2  windy:1
+  alpine_tundra  Alpine Tundra  10139816  (#9AB8A8)    cold:2      windy:1
+  glacier        Glacier        12114152  (#B8D8E8)    freezing:2  icy:1
+  snowfield      Snowfield      15266040  (#E8F0F8)    freezing:1  snow:1
 
   FRESHWATER
-  name                 color                  inherentConditions
-  River                4889272   (#4A9AB8)    damp:1
-  Stream               6992072   (#6AB0C8)    damp:1
-  Lake                 3832488   (#3A7AA8)    damp:1  misty:1
-  Pond                 5937320   (#5A98A8)    damp:1
-  Wetlands             5933674   (#5A8A6A)    damp:2  humid:1
-  Swamp                3828298   (#3A6A4A)    damp:2  humid:1  muddy:1
-  Marsh                5933658   (#5A8A5A)    damp:2  muddy:1
-  Bog                  4876858   (#4A6A3A)    damp:2  humid:1
-  Fen                  5929546   (#5A7A4A)    damp:1  humid:1
+  codeName   name                 color                  inherentConditions
+  river      River                4889272   (#4A9AB8)    damp:1
+  stream     Stream               6992072   (#6AB0C8)    damp:1
+  lake       Lake                 3832488   (#3A7AA8)    damp:1  misty:1
+  pond       Pond                 5937320   (#5A98A8)    damp:1
+  wetlands   Wetlands             5933674   (#5A8A6A)    damp:2  humid:1
+  swamp      Swamp                3828298   (#3A6A4A)    damp:2  humid:1  muddy:1
+  marsh      Marsh                5933658   (#5A8A5A)    damp:2  muddy:1
+  bog        Bog                  4876858   (#4A6A3A)    damp:2  humid:1
+  fen        Fen                  5929546   (#5A7A4A)    damp:1  humid:1
 
   COASTAL / MARINE
-  name           color                  inherentConditions
-  Estuary        5937802   (#5A9A8A)    damp:1  humid:1
-  Coastal Shore  13944986  (#D4C89A)    breezy:1  damp:1
-  Coral Reef     16743002  (#FF7A5A)    damp:1
-  Ocean          2775690   (#2A5A8A)    breezy:1  damp:1
-  Deep Ocean     1718890   (#1A3A6A)    (none — surface conditions don't apply)
+  codeName       name           color                  inherentConditions
+  estuary        Estuary        5937802   (#5A9A8A)    damp:1  humid:1
+  coastal_shore  Coastal Shore  13944986  (#D4C89A)    breezy:1  damp:1
+  coral_reef     Coral Reef     16743002  (#FF7A5A)    damp:1
+  ocean          Ocean          2775690   (#2A5A8A)    breezy:1  damp:1
+  deep_ocean     Deep Ocean     1718890   (#1A3A6A)    (none — surface conditions don't apply)
 
   ELEVATED
-  name              color                  inherentConditions
-  Mountains         8026762   (#7A7A8A)    cold:1   windy:2
-  Foothills         9079402   (#8A8A6A)    breezy:1
-  Highland Plateau  10132090  (#9A9A7A)    windy:1  bright:1
-  Cliffs            9075306   (#8A7A6A)    windy:2  bright:1
+  codeName          name              color                  inherentConditions
+  mountains         Mountains         8026762   (#7A7A8A)    cold:1   windy:2
+  foothills         Foothills         9079402   (#8A8A6A)    breezy:1
+  highland_plateau  Highland Plateau  10132090  (#9A9A7A)    windy:1  bright:1
+  cliffs            Cliffs            9075306   (#8A7A6A)    windy:2  bright:1
 
   SPECIAL
-  name     color                  inherentConditions
-  Volcano  9058858   (#8A3A2A)    scorching:1  dusty:1
-  Oasis    4896906   (#4AB88A)    damp:2
-  Canyon   13138506  (#C87A4A)    dusty:1  dry:1
+  codeName  name     color                  inherentConditions
+  volcano   Volcano  9058858   (#8A3A2A)    scorching:1  dusty:1
+  oasis     Oasis    4896906   (#4AB88A)    damp:2
+  canyon    Canyon   13138506  (#C87A4A)    dusty:1  dry:1
 
   HUMAN-MADE / BUILT
-  name      color                  inherentConditions
-  Urban     9079450   (#8A8A9A)    filth:1  dusty:1
-  Suburban  11053210  (#A8A89A)    cultivated:1
-  Ruins     8024160   (#7A7060)    dusty:1
-  Farmland  11061360  (#A8C870)    cultivated:1
+  codeName  name      color                  inherentConditions
+  urban     Urban     9079450   (#8A8A9A)    filth:1  dusty:1
+  suburban  Suburban  11053210  (#A8A89A)    cultivated:1
+  ruins     Ruins     8024160   (#7A7060)    dusty:1
+  farmland  Farmland  11061360  (#A8C870)    cultivated:1
 
   UNDERGROUND
-  name         color                  inherentConditions
-  Cave System  5921386   (#5A5A6A)    dark:2  damp:1  cold:1
+  codeName     name         color                  inherentConditions
+  cave_system  Cave System  5921386   (#5A5A6A)    dark:2  damp:1  cold:1
 
 ──────────────────────────────────────────────
 EnvCondition                            [ DONE ]
