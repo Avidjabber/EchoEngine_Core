@@ -145,6 +145,14 @@ model GuildSettings {
   // Tunable per guild — high-activity servers may want slower decay; low-activity ones faster.
   factionRepDecayRate Int @default(5)
 
+  // Farming system — soil quality change rates applied by the daily tick worker.
+  // soilDegradationFilth: subtracted from Plot.soilQuality per tick while Filth env condition is active on the plot's location.
+  // soilDegradationToxic: subtracted from Plot.soilQuality per tick while Toxic env condition is active on the plot's location.
+  // compostIncrement: added to Plot.soilQuality per compost_plot action, before PlotType.soilQualityCap is applied.
+  farmingSoilDegradationFilth Float @default(0.02)
+  farmingSoilDegradationToxic Float @default(0.05)
+  farmingCompostIncrement     Float @default(0.10)
+
   disciplineLevelCaps Guild_DisciplineLevelCap[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
@@ -4002,12 +4010,30 @@ model ActionSystemType {
   id          String  @id @db.VarChar(50)   // e.g. "patrol", "hunting", "spar", "farming_water"
   description String  @db.VarChar(500)
 
-  cooldownHours  Int?  // null = no cooldown enforced by this system type
-  progressPoints Int?  // null = no progress tracking; for farming = care points per action; for construction = points per contribution
+  cooldownHours     Int?  // null = no cooldown enforced by this system type; global per-plot time lock for farming actions
+  progressPoints    Int?  // null = no progress tracking; for farming = care points per action; for construction = points per contribution
+  entityDailyLimit  Int?  // null = unlimited; max times per day any one entity may perform this action type globally
 
-  actionTypes     ActionType[]
-  abilityTriggers Ability_ActionTrigger[]
-  tendRecords     PlotCrop_TendRecord[]
+  actionTypes         ActionType[]
+  abilityTriggers     Ability_ActionTrigger[]
+  tendRecords         Plot_TendRecord[]
+  entityDailyRecords  Action_EntityDailyRecord[]
+}
+
+// Per-entity daily action count. Tracks how many times an entity has performed each ActionSystemType today.
+// Row is upserted on every resolution; checked against ActionSystemType.entityDailyLimit before resolving.
+// Date is stored as UTC date (day boundary). Rows may be pruned on daily tick.
+model Action_EntityDailyRecord {
+  entityId   Int
+  systemType String   @db.VarChar(50)   // FK → ActionSystemType
+  date       DateTime @db.Date           // UTC date; truncated to day
+  count      Int      @default(1)
+
+  entity           Entity           @relation(fields: [entityId],   references: [id], onDelete: Cascade)
+  actionSystemType ActionSystemType @relation(fields: [systemType], references: [id], onDelete: Cascade)
+
+  @@id([entityId, systemType, date])
+  @@index([entityId, date])
 }
 
 // Defines the set of actions cats can spend daily energy on (patrol, hunt, gather herbs, train, etc.)
@@ -5171,7 +5197,7 @@ model PlantTrait {
 // Ephemeral rows are deleted when no PlotCrop.plantDefId and no Item.plantDefId references them.
 model PlantDef {
   id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
+  guildId     String  @db.VarChar(50)
   codeName    String  @db.VarChar(200)   // snake_case slug unique per guild; ephemeral: base_codeName + random suffix
   name        String  @db.VarChar(200)
   description String? @db.VarChar(1000)
@@ -5198,6 +5224,7 @@ model PlantDef {
   biomes                PlantDef_Biome[]
   envConditionEffects   PlantDef_EnvConditionEffect[]
   traits                PlantDef_Trait[]
+  growthStages          PlantDef_GrowthStage[]
   plotCrops             PlotCrop[]
 
   @@unique([guildId, codeName])
@@ -5252,6 +5279,19 @@ model PlantDef_Trait {
   plantTrait PlantTrait @relation(fields: [plantTraitId], references: [id], onDelete: Restrict)
 
   @@id([plantDefId, plantTraitId])
+}
+
+// Display labels for each growth stage of a plant. Optional — stages without a row show the integer stage number.
+// Ephemeral PlantDefs inherit their root's rows (same rootPlantDefId → same stage labels).
+model PlantDef_GrowthStage {
+  plantDefId Int
+  stage      Int           // matches PlotCrop.currentStage (0 = seedling, growthStages = harvestable)
+  label      String        @db.VarChar(100)   // e.g. "Seedling", "Sprouting", "Budding", "Flowering", "Mature"
+  description String?      @db.VarChar(500)   // optional flavour text shown in plot inspection
+
+  plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
+
+  @@id([plantDefId, stage])
 }
 
 // Biome affinities for a plant. Controls wild foraging find rates and cultivated growth rate modifiers.
@@ -5336,7 +5376,7 @@ model PlantDef_PlotType {
 // stacking with the location's real env conditions in the growth formula.
 model PlotType {
   id          Int     @id @default(autoincrement())
-  guildId     String  @default("global") @db.VarChar(50)
+  guildId     String  @db.VarChar(50)
   name        String  @db.VarChar(100)
   description String? @db.VarChar(500)
 
@@ -5389,15 +5429,15 @@ model Plot {
 // PK is (plotId, sourceEntityId, effectTypeId) — one active buff per effect type per entity per plot.
 model Plot_Buff {
   plotId         Int
-  sourceEntityId Int
+  sourceEntityId Int?  // null for event-system-written debuffs (blights, droughts, etc.) that have no entity source
   effectTypeId   Int
   effectValue    Float
   appliedAt      DateTime @default(now()) @db.Timestamptz
   expiresAt      DateTime @db.Timestamptz
 
-  plot       Plot       @relation(fields: [plotId],         references: [id], onDelete: Cascade)
-  entity     Entity     @relation(fields: [sourceEntityId], references: [id], onDelete: Cascade)
-  effectType EffectType @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+  plot       Plot        @relation(fields: [plotId],         references: [id], onDelete: Cascade)
+  entity     Entity?     @relation(fields: [sourceEntityId], references: [id], onDelete: Cascade)
+  effectType EffectType  @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
 
   @@id([plotId, sourceEntityId, effectTypeId])
 }
@@ -5414,7 +5454,8 @@ model PlotCrop {
   currentStage      Int      @default(0)    // 0 = seedling; PlantDef.growthStages = harvestable
   growthProgression Float    @default(0.0)  // accumulated growth points this stage; resets when a stage advances
   harvestCount      Int      @default(0)    // increments each harvest; blocks harvest_crop when >= PlantDef.maxHarvests
-  carePoints        Int      @default(0)    // accumulated tending care points for this plant's lifetime; used at cross-breeding for mutation bias
+  carePoints        Int       @default(0)    // accumulated tending care points for this plant's lifetime; used at cross-breeding for mutation bias
+  lastCrossbredAt   DateTime? @db.Timestamptz // null = never cross-bred; updated on both parent crops when a cross-breed resolves
 
   plot     Plot     @relation(fields: [plotId],     references: [id], onDelete: Cascade)
   plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Restrict)

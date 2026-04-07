@@ -59,6 +59,15 @@ The following are already seeded and ready:
     variant harvest outputs reuse this pattern — ephemeral Items deleted
     when no StoredItems reference them. See item-definitions.md section 2.
 
+  Seed acquisition
+    Base plant seeds are obtained through wild foraging. Each base PlantDef
+    carries PlantDef_Biome rows — when an entity forages in a matching biome,
+    there is a chance of finding items from that plant's harvestDropTableId.
+    Guilds should include propagation items (seeds, spores, cuttings) in
+    their base plant drop tables so they surface naturally via foraging.
+    Variant (ephemeral) seeds are only obtainable by cross-breeding or by
+    harvesting a growing ephemeral PlotCrop.
+
   Entity RelationshipTypes: mother, father
     Already seeded. Farmed animals use these for lineage tracking.
     No new tables needed for animal generational tracking.
@@ -68,9 +77,23 @@ The following are already seeded and ready:
 3. SCHEMA
 ─────────────────────────────────────────────
 
-Ten new tables are needed. Everything else reuses existing infrastructure.
-Two existing tables gain new fields: Item gains plantDefId; PlantDef gains
-isEphemeral and rootPlantDefId.
+Twelve new tables are needed. Everything else reuses existing infrastructure.
+Existing tables that gain new fields: Item (plantDefId), PlantDef (isEphemeral,
+rootPlantDefId), PlotCrop (lastCrossbredAt), GuildSettings (farming config),
+ActionSystemType (entityDailyLimit).
+
+──────────────────────
+GuildSettings (existing table — new fields)
+──────────────────────
+
+Three new fields control soil quality change rates, tunable per guild:
+
+  farmingSoilDegradationFilth  Float  Subtracted from Plot.soilQuality per daily tick while
+                                      Filth is active at the plot's location. Default 0.02.
+  farmingSoilDegradationToxic  Float  Subtracted from Plot.soilQuality per daily tick while
+                                      Toxic is active at the plot's location. Default 0.05.
+  farmingCompostIncrement      Float  Added to Plot.soilQuality per compost_plot action,
+                                      before PlotType.soilQualityCap is applied. Default 0.10.
 
 ──────────────────────
 PlantDef
@@ -299,7 +322,9 @@ Seeded values:
   potency              Feeds into StoredItem.craftBonus on herb/medicine outputs.
   nutrition            Feeds into StoredItem.craftBonus on food outputs.
   decay_resistance     Multiplier on rotCap of harvested output StoredItems.
-  propagation_yield    Multiplier on propagation item drop rate and quantity only.
+  propagation_yield    Multiplier applied only to quantity rolls for drop table entries
+                       whose output item matches PlantDef.propagationItemId. All other
+                       drop table entries are unaffected. 1.0 = default (no change).
 
 ──────────────────────
 PlantDef_Trait
@@ -322,6 +347,23 @@ RULE: minValue and maxValue are always copied verbatim from the root PlantDef
       when an ephemeral PlantDef is created. They never drift — only value drifts.
       The root PlantDef's bounds are the permanent ceiling and floor for the
       entire lineage.
+
+──────────────────────
+PlantDef_GrowthStage
+──────────────────────
+
+Optional display labels for each growth stage. If no row exists for a stage,
+the integer stage number is shown. Ephemeral PlantDefs share their root's
+stage labels — no separate rows needed.
+
+  plantDefId    Int      FK → PlantDef
+  stage         Int      Matches PlotCrop.currentStage. 0 = seedling, growthStages = harvestable.
+  label         String   Display name. e.g. "Seedling", "Sprouting", "Budding", "Mature".
+  description   String?  Optional flavour text shown in plot inspection.
+
+RULE: Ephemeral PlantDefs do not need their own rows. Display queries should
+      fall back to the root PlantDef's PlantDef_GrowthStage rows when the
+      ephemeral has none.
 
 ──────────────────────
 PlotType
@@ -396,20 +438,21 @@ the event system when blights, droughts, infestations, or other negative events
 target a plot. Both use the same table — effectValue may be positive or negative.
 
   plotId          Int      FK → Plot
-  sourceEntityId  Int      FK → Entity. Who applied the buff.
+  sourceEntityId  Int?     FK → Entity. Who applied the buff. Null for event-system-written
+                           debuffs (blights, droughts, infestations) that have no entity source.
   effectTypeId    Int      FK → EffectType. growth_rate | yield | decay_resistance
   effectValue     Float    Applied while buff is active. Positive = buff, negative = debuff.
   appliedAt       DateTime
   expiresAt       DateTime appliedAt + ability-defined durationHours.
 
 PK is (plotId, sourceEntityId, effectTypeId) — one active buff per effect type per
-entity per plot. This allows multiple entities to stack buffs of the same type
-independently while preventing the same entity from applying the same buff twice.
+source per plot. sourceEntityId = null rows represent event-system debuffs; only one
+null-source buff per effectType per plot is allowed at a time.
 stackBehavior on Ability_ActionTrigger (for ability-sourced buffs) and on the
 event system (for event-sourced debuffs) governs whether duplicate rows are
 refreshed, stacked, or ignored. A blight event may write a negative growth_rate
-buff that partially or fully cancels an ability-sourced growth_rate buff from the
-same or different source entity — they resolve independently by (plotId, sourceEntityId, effectType).
+buff that partially or fully cancels an ability-sourced growth_rate buff from a
+different source — they resolve independently by (plotId, sourceEntityId, effectTypeId).
 
 Active Plot_Buff rows with effectType = growth_rate contribute to the growth formula:
   structure_growth_modifier already covers structure-level upgrades.
@@ -440,28 +483,16 @@ A live instance of a plant growing at a plot.
                               blocked — only uproot_crop is available.
                               Each harvest resets currentStage to 0 (full regrow).
 
-HARVEST YIELD DECAY FORMULA
-─────────────────────────────
-  Each successive harvest yields proportionally less than the first.
-  The yield multiplier at any harvest is:
-
-    yieldMultiplier = (maxHarvests − harvestCount) / maxHarvests
-
-  where harvestCount is the value BEFORE this harvest (i.e. 0 on the first harvest).
-
-  Examples:
-    maxHarvests = 3: first 100%, second 66%, third 33%
-    maxHarvests = 4: first 100%, second 75%, third 50%, fourth 25%
-    maxHarvests = 1: always 100% (single harvest before exhaustion)
-
-  Applied to all quantity rolls from PlantDef.harvestDropTableId at resolution time.
-
   growthProgression Float     Accumulated growth points this stage. Increments each daily tick by
                               dailyGrowthRate (see formula). Resets to 0 when a stage advances.
   carePoints        Int       Accumulated tending care points for this plant's lifetime.
                               Incremented by tending actions via Plot_TendRecord resolution.
                               Used at cross-breeding time to compute carePercentage for
                               mutation direction bias.
+  lastCrossbredAt   DateTime? Null until this crop has been used in a cross-breed action.
+                              Updated on both parent crops when a cross-breed resolves.
+                              Checked by the cross_breed action to enforce the per-plant
+                              daily cooldown (once per plant per day).
 
 See section 5 for the full growth tick formula, pre-flight checks, and examples.
 
@@ -480,6 +511,8 @@ Cross-breeding (one entity, two parent crops):
       - Yarrow × grape vine → different roots → ineligible
   Performed by a single entity. Gated behind ActionType_DisciplineRequirement
   (Farming discipline, scope = "leader").
+
+  mutationChance is always read from the first selected parent crop's PlantDef.
 
   Roll against PlantDef.mutationChance (see PlantDef field definition for formula):
     Mutations → for each mutation that fires, one numeric value is randomly
@@ -509,6 +542,12 @@ Cross-breeding (one entity, two parent crops):
     Failure → offspring inherits one parent's PlantDef unchanged. No new
               PlantDef row created.
 
+  After resolution (success or failure):
+    Both parent PlotCrop.lastCrossbredAt are set to now.
+    The cross_breed action is blocked for either parent crop until
+    lastCrossbredAt + 24 hours (once per plant per day).
+    The parent crops are NOT removed — they remain in their plots.
+
   Exact inheritance formula (weighted average, pick-dominant, etc.)
   to be determined at implementation time.
 
@@ -537,13 +576,46 @@ On tending action resolution:
 4. HARVEST OUTPUT
 ─────────────────────────────────────────────
 
-Two harvest modes, each using a different drop table on PlantDef:
+Two harvest modes — both use PlantDef.harvestDropTableId:
 
   Harvest (without uprooting)
-    Uses PlantDef.harvestDropTableId. PlotCrop remains and regrows.
+    Resolves the drop table with full yield formula applied.
+    PlotCrop remains; currentStage resets to 0 (full regrow); harvestCount increments.
+    Blocked when harvestCount >= PlantDef.maxHarvests.
 
   Uproot
-    Uses PlantDef.harvestDropTableId. PlotCrop is deleted after resolution. 
+    Resolves the drop table with full yield formula applied (same as harvest).
+    PlotCrop is deleted after resolution. No stage check required — crops may be
+    uprooted at any stage, but uprooting before maturity produces no output since
+    the drop table is only rolled on a harvestable crop.
+    Harvesting is for preserving the plant when you want future yields or seeds.
+    Uprooting is a final harvest — identical output, plant removed.
+
+──────────────────────
+HARVEST YIELD FORMULA
+──────────────────────
+
+Applied to every quantity roll from PlantDef.harvestDropTableId at resolution:
+
+  harvest_decay     = (PlantDef.maxHarvests − PlotCrop.harvestCount) / PlantDef.maxHarvests
+                      1.0 on first harvest, declining each successive harvest.
+                      Examples (maxHarvests = 3): first 100%, second 66%, third 33%.
+
+  trait_yield       = PlantDef_Trait.value for "yield" on this PlantDef. Default 1.0.
+                      Values above 1.0 boost quantity; below 1.0 reduce it.
+
+  buff_yield        = 1.0 + SUM(effectValue for all active Plot_Buff rows on this plot
+                      where effectType = "yield")
+                      Positive buffs increase yield; negative debuffs reduce it.
+                      1.0 if no active yield buffs.
+
+  finalQuantity     = floor(base_quantity × harvest_decay × trait_yield × buff_yield)
+
+For propagation item entries specifically (item matches PlantDef.propagationItemId):
+  propagation_yield trait is applied as an additional multiplier on top of the above:
+    finalQuantity = floor(base_quantity × harvest_decay × trait_yield × buff_yield
+                         × propagation_yield_trait)
+  propagation_yield_trait defaults to 1.0 if no PlantDef_Trait row for "propagation_yield".
 
 ──────────────────────
 Base PlantDef output:
@@ -553,14 +625,16 @@ Base PlantDef output:
 Ephemeral PlantDef output:
   The drop tables on the ephemeral PlantDef already have the variant's values
   baked in — higher quantities, different items, etc. The drop table is the
-  source of truth; no modifier application needed at harvest time.
+  source of truth; no modifier application needed at harvest time beyond the
+  yield formula above.
 
   Outputs that differ in item properties (potency, nutrition, decay_resistance):
     Ephemeral Items produced, craftBonus or effective rotCap set from the
     variant's PlantDef_Trait values. Same pattern as crafted ephemeral items.
 
   Outputs that differ only in quantity (yield, propagation_yield):
-    Standard Items produced in greater or lesser quantities. No ephemeral needed.
+    Standard Items produced in greater or lesser quantities via the yield formula.
+    No ephemeral needed.
 
   Propagation item outputs:
     Reference the ephemeral PlantDef's own propagation Item (Item.plantDefId →
@@ -603,14 +677,22 @@ Seasonal behaviour is encoded in env condition rows (block growth_rate for dorma
 seasons; kills survival for frost-kill seasons).
 
   env_condition_growth_modifier =
-    SUM over all active env conditions that have a PlantDef_EnvConditionEffect
-    growth_rate row for this plant:
+    SUM over all active env conditions. Per condition c:
+      Determine the growth_rate row to use (PlantDef takes precedence over PlantType):
+        If PlantDef_EnvConditionEffect has a growth_rate row for (this plant, c) → use it.
+        Else for each PlantType this plant belongs to: if PlantType_EnvConditionEffect
+          has a growth_rate row for (that type, c) → include it. Multiple type rows
+          from different types on the same plant stack additively.
+        If no row at either level → this condition contributes 0 for growth_rate.
       raw(c)       = Σ(increase.value × stackCount) − Σ(decrease.value × stackCount)
       effective(c) = raw(c) × (1.0 − conditionOverride(c))
       conditionOverride(c) = MIN(1.0, SUM of effectValues of env_override upgrades
                              applied to this structure targeting env condition c)
     Each condition is overridden independently.
     override 0 = full value applies; override 1 = fully counteracted (0).
+
+  Note: PlantDef_EnvConditionEffect "block" rows also take precedence over any
+  PlantType_EnvConditionEffect rows for the same (envConditionId, effectTypeId).
 
   totalGrowthRate =
       1.0
@@ -622,7 +704,7 @@ seasons; kills survival for frost-kill seasons).
       + structure_growth_modifier       (SUM of growth_rate upgrade effectValues; 0.0 if none)
       + plot_buff_growth_modifier       (SUM of active Plot_Buff growth_rate effectValues; 0.0 if none)
 
-  dailyGrowthRate = max(totalGrowthRate, floor)
+  dailyGrowthRate = max(totalGrowthRate, 0.0)   // floor = 0.0; growth can stall but never goes negative
   growthProgression += dailyGrowthRate each tick.
   Stage advances when growthProgression >= PlantDef.growthCap.
 
@@ -677,77 +759,121 @@ only rolls once (deduplicated by plantDefId before rolling).
 Each farming activity is a distinct ActionType with its own systemTypeId.
 All are guild-extensible. Seeded as global defaults.
 
+Rate limiting has two independent layers:
+  1. Global per-plot cooldown — ActionSystemType.cooldownHours. Enforced via
+     Plot_TendRecord (lastPerformedAt). One entity tending resets the clock for all.
+  2. Per-entity daily limit — ActionSystemType.entityDailyLimit. Enforced via
+     Action_EntityDailyRecord (count per entity per systemType per UTC day).
+     Null = no per-entity cap.
+
+──────────────────────
+CROP MANAGEMENT
+──────────────────────
+
   plant_crop           systemType = "farming_plant"
-    Entity places a propagation item from storage into an open plot slot.
-    Consumes the StoredItem. Creates a PlotCrop at stage 0.
+    Entity places a propagation item from storage into an empty plot slot.
+    Consumes the StoredItem. Creates a PlotCrop at stage 0, carePoints 0.
     Reads Item.plantDefId to determine which PlantDef to instantiate.
-    Solo or small group (1–N participants; implementation decides cap).
+    Cooldown: none. Entity daily limit: none.
+    Participants: solo or small group.
     Rewards: Farming XP.
 
   harvest_crop         systemType = "farming_harvest"
     Entity harvests a mature PlotCrop (currentStage = growthStages).
-    Resolves PlantDef.harvestDropTableId with yield multiplier applied:
-      yieldMultiplier = (maxHarvests − harvestCount) / maxHarvests
-    PlotCrop remains; currentStage resets to 0; harvestCount increments by 1.
-    Blocked when harvestCount >= PlantDef.maxHarvests — uproot_crop only.
-    Solo or small group.
+    Resolves drop table with full yield formula (see section 4).
+    PlotCrop remains; currentStage resets to 0; harvestCount increments.
+    Blocked when harvestCount >= PlantDef.maxHarvests.
+    Cooldown: none. Entity daily limit: none.
+    Participants: solo or small group.
     Rewards: Farming XP.
 
   uproot_crop          systemType = "farming_uproot"
-    Entity uproots a PlotCrop at any stage (does not require maturity).
-    Resolves PlantDef.harvestDropTableId. PlotCrop is deleted.
-    Solo or small group.
+    Entity uproots a PlotCrop at any growth stage.
+    If currentStage = growthStages: resolves drop table with full yield formula.
+    If not yet mature: no drop table roll — no output.
+    PlotCrop is deleted. Plot_TendRecord and Plot_Buff rows for this plot are deleted.
+    Cooldown: none. Entity daily limit: none.
+    Participants: solo or small group.
     Rewards: Farming XP.
 
   cross_breed          systemType = "farming_crossbreed"
     Entity cross-breeds two mature PlotCrops sharing the same resolved root.
-    Solo only (maxEntities = 1). Can be gated behind ActionType_DisciplineRequirement
-    Once a day per plant only.
-    (Farming discipline, minLevel set by guild, scope = "leader").
-    On success: new ephemeral PlantDef + ephemeral seed Item created.
-    On failure: no new PlantDef; offspring is simply another instance of original plant def.
+    Both crops must have currentStage = growthStages.
+    Blocked if either crop's lastCrossbredAt + 24 hours > now (once per plant per day).
+    On success: new ephemeral PlantDef + ephemeral seed Item created. See section 3.
+    On failure: offspring inherits one parent's PlantDef unchanged.
+    Both parent PlotCrop.lastCrossbredAt updated regardless of outcome.
+    Gated behind ActionType_DisciplineRequirement (Farming, scope = "leader").
+    Cooldown: 24h per plant (via PlotCrop.lastCrossbredAt, not Plot_TendRecord).
+    Entity daily limit: configurable (entityDailyLimit on ActionSystemType).
+    Participants: solo only (maxEntities = 1).
     Rewards: Farming XP (higher than standard harvest).
 
-  tend_plot            systemType = "farming_tend"
+──────────────────────
+SOIL MANAGEMENT
+──────────────────────
+
+  compost_plot         systemType = "farming_compost"
     Entity applies Compost (crafting output) to a Plot, increasing soilQuality.
-    Consumes the Compost StoredItem from storage. Adjusts Plot.soilQuality
-    by a fixed amount (implementation decides increment and cap).
-    Solo or small group.
+    Consumes the Compost StoredItem from storage.
+    Increases Plot.soilQuality by GuildSettings.farmingCompostIncrement,
+    capped at PlotType.soilQualityCap.
+    Cooldown: none (capped by soilQualityCap, not time).
+    Entity daily limit: configurable (entityDailyLimit on ActionSystemType).
+    Participants: solo or small group.
     Rewards: Farming XP.
 
+──────────────────────
 TENDING ACTIONS (care point + buff system)
-───────────────────────────────────────────
-Tending actions are available to all entities. Any entity earns Farming XP on
-completion. Only entities with a matching Ability_PlotBuff write a Plot_Buff.
-All tending actions update Plot_TendRecord and increment PlotCrop.carePoints.
+──────────────────────
 
-Cooldowns and care points are defined on ActionSystemType (cooldownHours,
-progressPoints) — engine-level values, not guild-configurable.
+Available to all entities. Any entity earns Farming XP. Only entities with a
+matching Ability_ActionTrigger write a Plot_Buff. All tending actions update
+Plot_TendRecord (lastPerformedAt) and increment PlotCrop.carePoints.
+
+On tending action resolution:
+  1. Check Plot_TendRecord: lastPerformedAt + cooldownHours > now → blocked.
+  2. Check Action_EntityDailyRecord: entity count >= entityDailyLimit → blocked.
+  3. If allowed: update Plot_TendRecord.lastPerformedAt, add progressPoints to
+     PlotCrop.carePoints, upsert Action_EntityDailyRecord for this entity.
+  4. If entity has a matching Ability_ActionTrigger: upsert Plot_Buff on target plot.
 
   water_crop           systemType = "farming_water"
-    Daily watering. cooldownHours = 24. progressPoints = 1.
-    Ability buff effectType: growth_rate.
-    Solo or small group.
+    Daily watering.
+    Cooldown: 24h global per plot. Entity daily limit: configurable.
+    progressPoints = 1. Ability buff effectType: growth_rate.
+    Participants: solo or small group.
     Rewards: Farming XP.
 
   prune_crop           systemType = "farming_prune"
-    Weekly pruning. cooldownHours = 168. progressPoints = 7.
-    Ability buff effectType: yield.
-    Solo or small group.
+    Weekly pruning.
+    Cooldown: 168h global per plot. Entity daily limit: configurable.
+    progressPoints = 7. Ability buff effectType: yield.
+    Participants: solo or small group.
     Rewards: Farming XP.
 
   fertilize_crop       systemType = "farming_fertilize"
-    Weekly fertilizing. cooldownHours = 168. progressPoints = 7.
-    Ability buff effectType: decay_resistance.
-    Solo or small group.
+    Weekly fertilizing.
+    Cooldown: 168h global per plot. Entity daily limit: configurable.
+    progressPoints = 7. Ability buff effectType: decay_resistance.
+    Participants: solo or small group.
     Rewards: Farming XP.
 
+──────────────────────
+RULES
+──────────────────────
+
 RULE: harvest_crop requires PlotCrop.currentStage = PlantDef.growthStages.
-      uproot_crop has no stage requirement — can remove a crop at any stage. However, doing so before it is ready for harvest will result in no harvest. Binary, there is no 'almost grown' reward, it must be fully grown.
-RULE: cross_breed requires both target PlotCrops to be mature
-      (currentStage = growthStages) and share the same resolved root.
-RULE: Tending actions are blocked if lastPerformedAt + cooldownHours > now
-      (checked via Plot_TendRecord).
+RULE: uproot_crop has no stage requirement. Uprooting before maturity removes
+      the crop with no output — binary, no partial reward.
+RULE: cross_breed requires both target crops to be mature and share the same
+      resolved root. Blocked if either crop was cross-bred within the last 24h.
+RULE: Tending action cooldowns are checked via Plot_TendRecord (global per plot).
+      Per-entity daily limits are checked via Action_EntityDailyRecord.
+RULE: Abandonment has no special penalty mechanic. Untended crops grow at base
+      rate (all modifier contributions from care buffs simply never apply).
+      Minimum possible yield on harvest comes from 0 active buffs and a low
+      PlantDef_Trait.yield — the decay formula still applies normally.
 
 
 ─────────────────────────────────────────────
