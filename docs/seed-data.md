@@ -913,7 +913,11 @@ EventTriggerType                        [ DONE ]
 ──────────────────────────────────────────────
 Values:
   admin
-  activity
+  patrol
+  hunt
+  crafting
+  foraging
+  clean
   weather_onset
   filth
   daily

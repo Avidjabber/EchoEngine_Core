@@ -4380,7 +4380,18 @@ model EventTriggerType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
-  eventDefs EventDef[]
+  eventDefTriggers EventDef_TriggerType[]
+}
+
+model EventDef_TriggerType {
+  eventDefId    Int
+  triggerTypeId Int
+
+  eventDef    EventDef        @relation(fields: [eventDefId],    references: [id], onDelete: Cascade)
+  triggerType EventTriggerType @relation(fields: [triggerTypeId], references: [id], onDelete: Restrict)
+
+  @@id([eventDefId, triggerTypeId])
+  @@index([triggerTypeId])
 }
 
 model EventScope {
@@ -4432,9 +4443,14 @@ model EventCheckMode {
 
 // Top-level event definition.
 //
-// triggerType:
+// triggerTypes:
+//   one or more trigger types may apply to the same event definition.
 //   "admin"         — admin-initiated; participants provided via signup before the chain starts
-//   "activity"      — fires during an ActionInstance; participants pulled from the activity roster
+//   "patrol"        — fires when a patrol activity completes
+//   "hunt"          — fires when a hunt activity completes
+//   "crafting"      — fires when a crafting activity completes
+//   "foraging"      — fires when a foraging activity completes
+//   "clean"         — fires when a cleaning activity completes
 //   "weather_onset" — fires automatically when a matching WeatherState becomes active
 //   "filth"         — fires when faction filth/cap ratio crosses a threshold (see EventDef_FilthTrigger)
 //   "daily"         — Worker rolls once per day per guild; chancePerDay controls probability
@@ -4456,11 +4472,10 @@ model EventDef {
   name        String  @db.VarChar(200)
   description String? @db.VarChar(1000)
 
-  triggerTypeId Int
   scopeId       Int
 
-  baseWeight   Float  @default(1.0)  // base spawn weight for activity/daily selection
-  chancePerDay Float?                // triggerType = "daily" only
+  baseWeight   Float  @default(1.0)
+  chancePerDay Float?
 
   // Eligibility
   requiresLeader            Boolean @default(false)
@@ -4483,7 +4498,7 @@ model EventDef {
   // Content
   steps EventStepDef[]
 
-  triggerType EventTriggerType @relation(fields: [triggerTypeId], references: [id], onDelete: Restrict)
+  triggerTypes EventDef_TriggerType[]
   scope       EventScope       @relation(fields: [scopeId],       references: [id], onDelete: Restrict)
 
   // Back-relations
@@ -4494,7 +4509,6 @@ model EventDef {
   @@unique([guildId, codeName])
   @@index([guildId])
   @@index([guildId, name])
-  @@index([triggerTypeId])
   @@index([scopeId])
 }
 

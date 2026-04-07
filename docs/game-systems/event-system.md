@@ -29,17 +29,20 @@ weather, and the passage of time.
 2. EVENT TRIGGERS
 ─────────────────────────────────────────────
 
-Events can be triggered by several mechanisms (EventTriggerType):
+Events can be triggered by several mechanisms (EventTriggerType). An EventDef may reference one or more trigger types:
 
   admin         — manually fired by a guild admin
-  activity      — fires when a specific ActionType completes
-                  (EventDef_ActionType links event to action type)
+  patrol        — fires when a patrol activity completes
+  hunt          — fires when a hunt activity completes
+  crafting      — fires when a crafting activity completes
+  foraging      — fires when a foraging activity completes
+  clean         — fires when a cleaning activity completes
   weather_onset — fires when a specific WeatherState becomes active
                   (EventDef_WeatherTrigger)
   filth         — fires when guild filth level crosses a threshold
                   (EventDef_FilthTrigger: threshold + chancePerDay + isOngoing)
   daily         — fires on the daily tick with a base chance per day
-                  (EventDef.baseDailyChance)
+                  (EventDef.chancePerDay)
 
 An EventDef can also have prerequisites — other EventDefs that must have
 completed at least once (within an optional time window) before this event
@@ -122,7 +125,7 @@ depending on the event's spawn context.
   EventDef_Prerequisite       — prerequisite event that must have fired first
 
   LOOKUP TABLES (seed)
-  EventTriggerType            — admin | activity | weather_onset | filth | daily
+  EventTriggerType            — admin | patrol | hunt | crafting | foraging | clean | weather_onset | filth | daily
   EventScopeType              — global | faction | action
   EventStepType               — narrative | choice | combat
   EventParticipantScope       — all_participants | random_participant | leader | group
