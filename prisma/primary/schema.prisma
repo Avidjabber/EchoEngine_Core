@@ -307,6 +307,7 @@ model Stat {
   actionStepConfigs            Guild_ActionStep_Config[]          @relation("ActionStepConfigStat")
   speciesActionStepDefaults    Species_ActionStep[]               @relation("SpeciesActionStepDefaultStat")
   guildSpeciesActionStepConfigs Guild_Species_ActionStep_Config[] @relation("GuildSpeciesActionStepStat")
+  combatStatEffectMods         CombatStatEffectDef_StatMod[]      @relation("CombatStatEffectDef_StatMod")
 }
 
 // Symptom labels — shared between ConditionDef (via ConditionDef_SymptomTag) and ItemEffect.
@@ -936,6 +937,7 @@ model Entity {
   housing                Entity_Housing?
   constructionsInitiated Construction[]
   plotBuffs              Plot_Buff[]
+  dailyActionRecords     Action_EntityDailyRecord[]
 
   actionParticipations  ActionInstance_Entity[]
   actionLeaderships     ActionInstance[]          @relation("ActionInstanceLeader")
@@ -4223,7 +4225,6 @@ model ActionType_Step {
   actionType       ActionType @relation(fields: [actionTypeId], references: [id], onDelete: Cascade)
   defaultStat      Stat?      @relation("ActionStepDefaultStat", fields: [defaultStatId], references: [id], onDelete: SetNull)
   guildConfigs     Guild_ActionStep_Config[]
-  speciesBehaviors Species_ActionStep[]
 
   @@unique([actionTypeId, codeName])
   @@index([actionTypeId])
@@ -5390,7 +5391,7 @@ model CombatStatEffectDef_StatMod {
   context     String? @db.VarChar(50)
 
   effectDef CombatStatEffectDef @relation(fields: [effectDefId], references: [id], onDelete: Cascade)
-  stat      Stat                @relation(fields: [statId],       references: [id], onDelete: Restrict)
+  stat      Stat                @relation("CombatStatEffectDef_StatMod", fields: [statId],       references: [id], onDelete: Restrict)
 
   @@index([effectDefId])
   @@index([statId])
@@ -5689,7 +5690,7 @@ model PlantDef {
   biomes                PlantDef_Biome[]
   envConditionEffects   PlantDef_EnvConditionEffect[]
   traits                PlantDef_Trait[]
-  growthStages          PlantDef_GrowthStage[]
+  growthStageLabels     PlantDef_GrowthStage[]
   plotCrops             PlotCrop[]
 
   @@unique([guildId, codeName])
@@ -5893,6 +5894,7 @@ model Plot {
 // Active timed buffs on a plot, written when a skilled farmer tends and has a matching Ability_ActionTrigger.
 // PK is (plotId, sourceEntityId, effectTypeId) — one active buff per effect type per entity per plot.
 model Plot_Buff {
+  id             Int      @id @default(autoincrement())
   plotId         Int
   sourceEntityId Int?  // null for event-system-written debuffs (blights, droughts, etc.) that have no entity source
   effectTypeId   Int
@@ -5904,7 +5906,7 @@ model Plot_Buff {
   entity     Entity?     @relation(fields: [sourceEntityId], references: [id], onDelete: Cascade)
   effectType EffectType  @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
 
-  @@id([plotId, sourceEntityId, effectTypeId])
+  @@unique([plotId, sourceEntityId, effectTypeId])
 }
 
 // A live instance of a plant growing at a plot. One PlotCrop per plot at a time (enforced via Plot).
