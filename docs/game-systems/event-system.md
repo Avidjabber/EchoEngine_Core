@@ -107,13 +107,24 @@ EventParticipantScope determines which participants an effect or reward applies 
 6. GRANTS AND REWARDS
 ─────────────────────────────────────────────
 
-Event steps can grant conditions, items, or location effects to participants via EventGrantType:
+Event steps can grant various effects via EffectType (where isEvent=true):
 
-  condition    — apply a ConditionDef to the target participant(s)
-  item         — add an item to the target participant(s) inventory
-  location_buff — apply a temporary Location_Effect to the event location (positive = buff, negative = debuff)
+  condition             — apply a ConditionDef to targets
+  item                  — add an item to target inventories
+  location_buff         — apply a temporary Location_Effect (positive = buff, negative = debuff)
+  stat_modifier         — apply a temporary stat bonus/penalty
+  proficiency_modifier  — apply a temporary proficiency bonus/penalty
+  faction_rep           — grant or remove faction reputation points
+  discipline_xp         — grant discipline experience points
 
-Grants are defined on EventStepDef and scoped by EventParticipantScope.
+Effects are defined on EventEffect with:
+- probability: chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
+- targetType: what type of target (participants, camp, location, faction, etc.)
+- relationType: what the effect does (spawns, decrease, increase, modify, remove)
+- effectValue: what specifically is affected (structure_durability, null, etc.)
+- value: effect magnitude as percentage (0.3 = 30% damage/buff/etc.)
+
+Each EventOutcomeDef can have multiple EventEffect rows, each with independent probabilities and target types, allowing complex outcomes like "30% chance burn condition on participants AND 30% chance 30% damage to camp structures".
 XP rewards from events are handled via the action or discipline reward system
 depending on the event's spawn context.
 
@@ -137,13 +148,15 @@ depending on the event's spawn context.
   EventScopeType              — global | faction | action
   EventStepType               — narrative | choice | combat
   EventParticipantScope       — all_participants | random_participant | leader | group | housed_entities
-  EventGrantType              — condition | item | location_buff
+  EffectType (isEvent=true)   — condition | item | location_buff | stat_modifier | proficiency_modifier | faction_rep | discipline_xp
+  RelationType (isEvent=true) — spawns | decrease | increase | modify | remove
+  TargetType (isEvent=true)   — participants | camp | location | faction | items
   EventChoiceResolutionType   — individual | group_average | leader_designates
   EventThresholdType          — filth
 
   EFFECTS & MODIFIERS
   Location_Effect             — temporary location-wide buffs/debuffs (crop growth, hunting difficulty, etc.)
-  EventEffect                 — unified event effect system (conditions, items, location effects)
+  EventEffect                 — unified event effect system (conditions, items, location effects, stat/proficiency modifiers, faction rep, discipline XP)
 
   ACTIVE INSTANCES
   ActiveEvent                 — live event instance

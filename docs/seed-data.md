@@ -266,7 +266,7 @@ AbilityEffectType                       [ DONE ]
   xp_grant          grants discipline XP to the ability holder
 
 ──────────────────────────────────────────────
-AbilityTargetType                       [ DONE ]
+TargetType                              [ DONE ]
 ──────────────────────────────────────────────
   name
   ──────────

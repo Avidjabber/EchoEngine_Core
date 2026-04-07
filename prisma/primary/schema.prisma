@@ -210,6 +210,7 @@ model RelationType {
   isCraftingSystem      Boolean @default(false)
   isEnvConditionSystem  Boolean @default(false)
   isOwnershipSystem     Boolean @default(false)
+  isEvent               Boolean @default(false)  // valid for EventEffect relation types
 
   conditionLinks                 ConditionDef_Link[]
   conditionEnvRules              ConditionDef_EnvRule[]
@@ -227,6 +228,7 @@ model RelationType {
   envConditionModifiers          EnvCondition_Modifier[]
   campFactions                   Camp_Faction[]
   locationFactions               Location_Faction[]
+  eventEffects                   EventEffect[]
 }
 
 model EffectType {
@@ -238,6 +240,7 @@ model EffectType {
   isAbility       Boolean @default(false)
   isEnvModifier   Boolean @default(false)  // valid for EnvCondition_Modifier (global world effects e.g. filth, spoilage)
   isLocation      Boolean @default(false)  // valid for Location_Buff (location-wide effects e.g. crop growth, hunting difficulty)
+  isEvent         Boolean @default(false)  // valid for EventEffect (event outcome effects)
 
   plantDefEnvConditionEffect      PlantDef_EnvConditionEffect[]
   plantTypeEnvConditionEffect     PlantType_EnvConditionEffect[]
@@ -250,6 +253,7 @@ model EffectType {
   envConditionModifiers           EnvCondition_Modifier[]
   locationEffects                 Location_Effect[]
   eventLocationBuffEffects        EventEffect[]                 @relation("EventLocationBuffEffect")
+  eventEffects                    EventEffect[]
 }
 
 
@@ -311,6 +315,7 @@ model Stat {
   speciesActionStepDefaults    Species_ActionStep[]               @relation("SpeciesActionStepDefaultStat")
   guildSpeciesActionStepConfigs Guild_Species_ActionStep_Config[] @relation("GuildSpeciesActionStepStat")
   combatStatEffectMods         CombatStatEffectDef_StatMod[]      @relation("CombatStatEffectDef_StatMod")
+  eventEffectStatModifiers     EventEffect[]                       @relation("EventEffectStatModifier")
 }
 
 // Symptom labels — shared between ConditionDef (via ConditionDef_SymptomTag) and ItemEffect.
@@ -1307,6 +1312,7 @@ model ProficiencyDef {
   combatActionConditions       ItemEquipmentProfile_Condition[]
   actionStepConfigs            Guild_ActionStep_Config[]
   guildSpeciesActionStepConfigs Guild_Species_ActionStep_Config[]
+  eventEffects                 EventEffect[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -1360,6 +1366,7 @@ model DisciplineDef {
   craftingInteractionRules      Guild_CraftingInteractionRule[]
   recipeCraftingRequirements    Recipe_CraftingRequirement[]
   guildLevelCaps                Guild_DisciplineLevelCap[]
+  eventEffects                  EventEffect[]
 }
 
 // Per-guild per-discipline level cap override.
@@ -1596,12 +1603,15 @@ model Ability_ProficiencyModifier {
   @@index([proficiencyDefId])
 }
 
-model AbilityTargetType {
-  id    Int    @id @default(autoincrement())
-  name  String @unique @db.VarChar(100)
+model TargetType {
+  id        Int    @id @default(autoincrement())
+  name      String @unique @db.VarChar(100)
+  isAbility Boolean @default(false)  // valid for ability multiplier/presence effects
+  isEvent   Boolean @default(false)  // valid for event effect targets
 
   abilityMultiplierEffect Ability_MultiplierEffect[]
   abilityPresenceEffects  Ability_PresenceEffect[]
+  eventEffects            EventEffect[]
 }
 
 // Rate and yield multipliers, optionally gated by biome or weather.
@@ -1621,7 +1631,7 @@ model Ability_MultiplierEffect {
   abilityDef   AbilityDef    @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
   biome        Biome?        @relation(fields: [biomeId],        references: [id], onDelete: Restrict)
   weatherState WeatherState? @relation(fields: [weatherStateId], references: [id], onDelete: Restrict)
-  abilityTargetType AbilityTargetType @relation(fields: [targetTypeId], references: [id], onDelete: Restrict)
+  abilityTargetType TargetType @relation(fields: [targetTypeId], references: [id], onDelete: Restrict)
 
 
   @@index([abilityDefId])
@@ -1843,7 +1853,7 @@ model Ability_PresenceEffect {
   conditionDefId Int?
 
   // abilityEffectType = "multiplier"
-  multiplierTargetTypeId Int?   // FK → AbilityTargetType; tells the app which table targetId points to
+  multiplierTargetTypeId Int?   // FK → TargetType; tells the app which table targetId points to
   multiplierValue        Float?
   targetId               Int?   // polymorphic narrow: e.g. disciplineDefId for discipline_xp, factionId for faction_rep_gain; null = all
 
@@ -1857,7 +1867,7 @@ model Ability_PresenceEffect {
   abilityEffectType    AbilityEffectType  @relation(fields: [abilityEffectTypeId],     references: [id], onDelete: Restrict)
   stackBehavior        StackBehavior      @relation(fields: [stackBehaviorId],         references: [id], onDelete: Restrict)
   conditionDef         ConditionDef?      @relation(fields: [conditionDefId],          references: [id], onDelete: Restrict)
-  multiplierTargetType AbilityTargetType? @relation(fields: [multiplierTargetTypeId],  references: [id], onDelete: Restrict)
+  multiplierTargetType TargetType? @relation(fields: [multiplierTargetTypeId],  references: [id], onDelete: Restrict)
   effectType           EffectType?        @relation(fields: [effectTypeId],            references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
@@ -4439,14 +4449,7 @@ model EventParticipantScope {
   eventEffects EventEffect[]
 }
 
-model EventEffectType {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
-
-  eventEffects EventEffect[]
-}
-
-model EventCheckMode {
+model EventChoiceResolutionType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
@@ -4695,7 +4698,13 @@ model EventStepDef {
 // Unified event effect — applies to either a narrative step or a choice outcome.
 // Exactly one of stepDefId or outcomeDefId must be set (app-enforced).
 //
-// effectType: "condition" | "item"
+// Core effect fields:
+//   probability   — chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
+//   targetTypeId  — what type of target (participants, camp, location, faction, items)
+//   relationTypeId — what the effect does (spawns, decrease, increase, modify, remove)
+//   effectValue   — what specifically is affected (structure_durability, null, etc.)
+//
+// effectType: "condition" | "item" | "location_buff" | "stat_modifier" | "proficiency_modifier" | "faction_rep" | "discipline_xp"
 //
 // condition fields (effectType = "condition"):
 //   conditionDefId — which condition to apply or remove
@@ -4711,14 +4720,36 @@ model EventStepDef {
 //
 // location_buff fields (effectType = "location_buff"):
 //   locationBuffEffectTypeId — which EffectType to apply as a location buff/debuff
-//   locationBuffValue        — the effect value (positive = buff, negative = debuff)
+//   locationBuffValue        — the effect value as percentage (0.3 = 30% buff, -0.2 = 20% debuff)
 //   locationBuffDurationHours — how long the effect lasts (null = permanent until removed)
+//
+// stat_modifier fields (effectType = "stat_modifier"):
+//   statModifierStatId — which stat to modify
+//   statModifierValue  — modifier value as percentage (0.1 = +10% bonus, -0.15 = -15% penalty)
+//
+// proficiency_modifier fields (effectType = "proficiency_modifier"):
+//   proficiencyModifierProficiencyDefId — which proficiency to modify
+//   proficiencyModifierValue            — modifier value as percentage (0.2 = +20% bonus)
+//   proficiencyModifierHasAdvantage     — grants advantage on rolls
+//   proficiencyModifierHasDisadvantage  — grants disadvantage on rolls
+//
+// faction_rep fields (effectType = "faction_rep"):
+//   factionRepValue — reputation change as percentage (0.15 = +15% rep, -0.1 = -10% rep)
+//
+// discipline_xp fields (effectType = "discipline_xp"):
+//   disciplineXpDisciplineDefId — which discipline gains XP
+//   disciplineXpValue           — XP gain as percentage of level requirement (0.5 = 50% of level XP)
 model EventEffect {
   id           Int @id @default(autoincrement())
   effectTypeId Int
 
   stepDefId    Int?  // FK to EventStepDef; null for outcome effects
   outcomeDefId Int?  // FK to EventOutcomeDef; null for step effects
+
+  probability   Float @default(1.0)  // probability this effect occurs (0.0-1.0)
+  targetTypeId  Int?  // what type of target this effect applies to (participants, camp, location, etc.)
+  relationTypeId Int?  // what the effect does (spawns, decrease, increase, etc.)
+  effectValue   String? @db.VarChar(100)  // what specifically is affected (structure_durability, null, etc.)
 
   // condition effect fields
   conditionDefId Int?
@@ -4734,10 +4765,29 @@ model EventEffect {
 
   // location_buff effect fields
   locationBuffEffectTypeId Int?
-  locationBuffValue        Float?
+  locationBuffValue        Float @default(0.0)  // effect value as percentage (0.3 = 30% buff/debuff)
   locationBuffDurationHours Int?
 
-  effectType    EventEffectType   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+  // stat_modifier effect fields
+  statModifierStatId Int?
+  statModifierValue  Float @default(0.0)  // modifier value as percentage (0.1 = +10% bonus)
+
+  // proficiency_modifier effect fields
+  proficiencyModifierProficiencyDefId Int?
+  proficiencyModifierValue            Float @default(0.0)  // modifier value as percentage (0.2 = +20% bonus)
+  proficiencyModifierHasAdvantage     Boolean @default(false)
+  proficiencyModifierHasDisadvantage  Boolean @default(false)
+
+  // faction_rep effect fields
+  factionRepValue Float @default(0.0)  // reputation change as percentage (0.15 = +15% rep)
+
+  // discipline_xp effect fields
+  disciplineXpDisciplineDefId Int?
+  disciplineXpValue           Float @default(0.0)  // XP gain as percentage (0.5 = 50% of level XP)
+
+  effectType    EffectType   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+  targetType    TargetType? @relation(fields: [targetTypeId], references: [id], onDelete: Restrict)
+  relationType  RelationType? @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
   stepDef       EventStepDef?     @relation(fields: [stepDefId],      references: [id], onDelete: Cascade)
   outcomeDef    EventOutcomeDef?  @relation(fields: [outcomeDefId],   references: [id], onDelete: Cascade)
   conditionDef  ConditionDef?     @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
@@ -4745,8 +4795,13 @@ model EventEffect {
   itemType      ItemType?         @relation(fields: [itemTypeId], references: [id], onDelete: SetNull)
   targetScope   EventParticipantScope? @relation(fields: [targetScopeId], references: [id], onDelete: Restrict)
   locationBuffEffectType EffectType? @relation("EventLocationBuffEffect", fields: [locationBuffEffectTypeId], references: [id], onDelete: Restrict)
+  statModifierStat       Stat?       @relation("EventEffectStatModifier", fields: [statModifierStatId], references: [id], onDelete: Restrict)
+  proficiencyModifierProficiency ProficiencyDef? @relation(fields: [proficiencyModifierProficiencyDefId], references: [id], onDelete: Restrict)
+  disciplineXpDiscipline  DisciplineDef? @relation(fields: [disciplineXpDisciplineDefId], references: [id], onDelete: Restrict)
 
   @@index([effectTypeId])
+  @@index([targetTypeId])
+  @@index([relationTypeId])
   @@index([stepDefId])
   @@index([outcomeDefId])
   @@index([conditionDefId])
@@ -4754,6 +4809,9 @@ model EventEffect {
   @@index([itemTypeId])
   @@index([targetScopeId])
   @@index([locationBuffEffectTypeId])
+  @@index([statModifierStatId])
+  @@index([proficiencyModifierProficiencyDefId])
+  @@index([disciplineXpDisciplineDefId])
 }
 
 
@@ -4773,12 +4831,12 @@ model EventChoiceDef {
   statId      Int?
   proficiencyDefId  Int?
   difficulty  Int?
-  checkModeId Int?  // null = no check; FK to EventCheckMode
+  checkModeId Int?  // null = no check; FK to EventChoiceResolutionType
 
   stepDef   EventStepDef    @relation(fields: [stepDefId],   references: [id], onDelete: Cascade)
   stat      Stat?           @relation(fields: [statId],      references: [id], onDelete: Restrict)
   proficiency ProficiencyDef?     @relation(fields: [proficiencyDefId],  references: [id], onDelete: Restrict)
-  checkMode EventCheckMode? @relation(fields: [checkModeId], references: [id], onDelete: Restrict)
+  checkMode EventChoiceResolutionType? @relation(fields: [checkModeId], references: [id], onDelete: Restrict)
 
   outcomes        EventOutcomeDef[]
   defaultForSteps EventStepDef[]    @relation("StepDefaultChoice")

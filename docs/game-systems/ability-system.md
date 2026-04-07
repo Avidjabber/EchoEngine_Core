@@ -99,7 +99,7 @@ hasAdvantage and hasDisadvantage should not both be true; app layer enforces.
 
 Multiplier applied to a rate or yield. 1.0 = no change, 1.2 = +20%, 0.8 = −20%.
 
-  targetTypeId   — FK → AbilityTargetType. What is being multiplied (see table below).
+  targetTypeId   — FK → TargetType. What is being multiplied (see table below).
                    Also acts as the discriminator for targetId: the app uses targetTypeId.name
                    to know which table targetId references (e.g. "discipline_xp" → DisciplineDef,
                    "faction_rep_gain" → Faction, "energy_cost" → ActionType).
@@ -110,7 +110,7 @@ Multiplier applied to a rate or yield. 1.0 = no change, 1.2 = +20%, 0.8 = −20%
   biomeId        — FK → Biome. Gate by biome; null = all biomes.
   weatherStateId — FK → WeatherState. Gate by weather; null = all weather.
 
-  AbilityTargetType name   │ targetId means       │ Example
+  TargetType name   │ targetId means       │ Example
   ─────────────────────────┼──────────────────────┼──────────────────────────────
   discipline_xp            │ disciplineId         │ +20% Farming XP
   drop_herb                │ —                    │ +30% herb gather yield
@@ -366,7 +366,7 @@ are evaluated once per day for each valid target in scope.
                                                   Valid scopes: colocated_entities,
                                                   colocated_patients, camp_entities.
                                "multiplier"      — applies a rate/yield multiplier to the target
-                                                  entity, using the same AbilityTargetType vocabulary
+                                                  entity, using the same TargetType vocabulary
                                                   as Ability_MultiplierEffect (recovery_rate,
                                                   treatment_received, discipline_xp, etc.).
                                                   Valid scopes: colocated_entities,
@@ -389,7 +389,7 @@ are evaluated once per day for each valid target in scope.
     conditionDefId         Int?   FK → ConditionDef. The condition applied to the target entity.
 
   abilityEffectType = "multiplier":
-    multiplierTargetTypeId Int?   FK → AbilityTargetType. The rate/yield being multiplied
+    multiplierTargetTypeId Int?   FK → TargetType. The rate/yield being multiplied
                                   (recovery_rate, treatment_received, discipline_xp, etc.).
                                   Also acts as the discriminator: the app uses
                                   multiplierTargetTypeId.name to know which table targetId
@@ -504,7 +504,7 @@ to express a range, or use only one side for a floor/ceiling gate.
 
   Lookup tables (seeded):
   AbilityEffectType           — effect categories for ActionTrigger and PresenceEffect
-  AbilityTargetType           — multiplier target categories for MultiplierEffect and PresenceEffect
+  TargetType           — multiplier target categories for MultiplierEffect and PresenceEffect
   AbilityThresholdType        — tracked value types for ThresholdTrigger (hp, nutrition, hydration)
   TargetScope                 — target/scope values for ActionTrigger and PresenceEffect
   TriggerTiming               — when an ActionTrigger fires (completion, success, failure)
