@@ -136,20 +136,20 @@ Grants access to an item's actions without the item being in inventory.
 Routes through the item system — the item defines the action; the ability
 grants access to it. Mirrors ConditionDef_GrantedItem.
 
-  itemId                — FK → Item. The item whose actions become available.
-  grantedToSource       — false = granted to ability holder
-                          true  = granted to Entity_Ability.sourceId entity
-  usesPerGrant          — total uses while this ability is active; null = unlimited
-  usageContext          — when the action is available:
-                            "any"               — usable in and out of combat (default)
-                            "combat_only"       — only during an active combat instance
-                            "out_of_combat_only"— only when not in combat
-  outOfCombatDailyLimit — max uses per day when used outside combat; null = limited
-                          only by energy. Has no effect when usageContext = "combat_only".
+  itemId          — FK → Item. The item whose actions become available.
+  grantedToSource — false = granted to ability holder
+                    true  = granted to Entity_Ability.sourceId entity
+  usesPerGrant    — total uses while this ability is active; null = unlimited.
+                    This is grant-scoped: tied to this specific ability instance.
+                    When the ability expires or is removed, unused charges go with it.
 
-Examples: Combat level 5 unlocks "Precision Strike" (combat_only).
-          Night Vision grants "Scout in Darkness" action (any).
-          Healing spell grants "Mend" (any, outOfCombatDailyLimit = 2).
+usageContext and outOfCombatDailyLimit are defined on ItemEquipmentProfile, not here.
+They are properties of the action itself and apply regardless of how it is accessed
+(held item, ability grant, species loadout).
+
+Examples: Combat level 5 unlocks "Precision Strike" (profile: usageContext = "combat_only").
+          Night Vision grants "Scout in Darkness" action (profile: usageContext = "any").
+          Healing spell grants "Mend" (profile: usageContext = "any", outOfCombatDailyLimit = 2).
 
 ─────────────────────────────────────────────
 4e. Ability_CombatBehavior

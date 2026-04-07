@@ -1605,17 +1605,15 @@ model Ability_MultiplierEffect {
 // Grants access to an item's actions without requiring the item in inventory.
 // Mirrors ConditionDef_GrantedItem — same routing through item action definitions.
 // grantedToSource: false = granted to ability holder; true = granted to sourceEntityId
-// usageContext: "any" = usable in and out of combat; "combat_only" = only during active combat;
-//              "out_of_combat_only" = only when not in combat
-// outOfCombatDailyLimit: max uses per day when used outside combat; null = no hard limit (energy still applies)
+// usageContext and outOfCombatDailyLimit live on ItemEquipmentProfile — they are properties of the
+// action itself, not of the grant. usesPerGrant is grant-scoped: total lifetime uses while this
+// specific ability instance is active; null = unlimited.
 model Ability_GrantedAction {
   id              Int     @id @default(autoincrement())
   abilityDefId    Int
   itemId          Int
   grantedToSource Boolean @default(false)
   usesPerGrant    Int?    // null = unlimited total uses while ability is active
-  usageContext    String  @db.VarChar(30) @default("any")  // "any" | "combat_only" | "out_of_combat_only"
-  outOfCombatDailyLimit Int?  // null = limited only by energy out of combat
 
   abilityDef AbilityDef @relation(fields: [abilityDefId], references: [id], onDelete: Cascade)
   item       Item       @relation(fields: [itemId],       references: [id], onDelete: Cascade)
@@ -2335,6 +2333,16 @@ model ItemEquipmentProfile {
   requiresSomatic      Boolean @default(false)  // action has a somatic component — blocked by conditions with blocksSomatic
   allowedInSpar        Boolean @default(true)
 
+  // Usage context — when this action is available. Applies regardless of how the action is accessed
+  // (held item, ability grant, species loadout, etc.).
+  //   "any"               — usable in and out of combat (default)
+  //   "combat_only"       — only during an active combat instance
+  //   "out_of_combat_only"— only when not in an active combat instance
+  usageContext String @default("any") @db.VarChar(30)
+
+  // Daily and lifetime use limits are defined on Item.maxDailyUses and Item.maxUses.
+  // Per-instance tracking lives on StoredItem.dailyUsesRemaining and StoredItem.usesRemaining.
+
   // Roll modifiers
   hitStatId    Int?  // stat modifier added to the 1d20 hit roll
   damageStatId Int?  // stat modifier added to damage roll
@@ -2346,6 +2354,11 @@ model ItemEquipmentProfile {
   // Optional event trigger on action use
   triggersEventDefId Int?
   triggerDC          Int @default(1)  // minimum d20 roll to fire the event; 1 = always, 20 = nat 20 only
+
+  // Out-of-combat use — null = this action is combat-only (targetScopeId is irrelevant outside a fight).
+  // Non-null = action can be used outside combat; value is the maximum number of entities the user may
+  // select as targets from a flat entity list. 1 = single-target only; 0 is not valid (use null instead).
+  outOfCombatMaxTargets Int?
 
   // Summon fields — populated only when actionType.name = 'summon'; null otherwise
   summonSpeciesId   Int?  // which species to spawn into the encounter
@@ -2638,8 +2651,12 @@ model Item {
   averageVolume     Float @default(0.0) // ml per unit; used by storage fluid calculations for Volume items; 0 = ignored
   rotCap            Int?                // max rot points until fully decayed; null = does not decay.
                                         // 1 point = 1 day at base rate. 60 = lasts 60 days with no modifiers.
-  maxDurability Int?                 // max durability for equipment; null = indestructible
-  maxUses       Int?                 // max uses before depletion; null = unlimited
+  maxDurability Int?  // max durability for equipment; null = indestructible
+  maxUses       Int?  // lifetime use cap; null or 0 = no limit. When set, StoredItem.usesRemaining is
+                      // initialized to this value and decremented on every use. StoredItem deleted at 0.
+  maxDailyUses  Int?  // daily use cap across all contexts; null or 0 = no limit. When set,
+                      // StoredItem.dailyUsesRemaining is initialized to this value and reset by the
+                      // daily tick. Applies in and out of combat; cooldownRounds is an orthogonal limit.
   fuelValue     Int?                 // consumable fuel: units added to a power source's bank on deposit (item destroyed).
                                     // battery (Battery ItemType tag present): max charge capacity — StoredItem.currentFuelLevel
                                     // tracks remaining charge; item is never destroyed on use.
@@ -3222,8 +3239,11 @@ model StoredItem {
   craftBonus     Float  @default(0.0)  // flat bonus accumulated through crafting skill rolls; added to ItemEffect.effectiveness on use
                                         // carries forward to ephemeral outputs when RecipeOutput.craftBonusApplies = true
 
-  currentDurability Int?   // null when item.maxDurability is null; initialized from maxDurability on creation
-  usesRemaining     Int?   // null when item.maxUses is null; initialized from maxUses on creation, decremented on use
+  currentDurability   Int?  // null when item.maxDurability is null; initialized from maxDurability on creation
+  usesRemaining       Int?  // null when item.maxUses is null or 0; initialized from maxUses on acquisition,
+                            // decremented on every use regardless of context. StoredItem deleted when it reaches 0.
+  dailyUsesRemaining  Int?  // null when item.maxDailyUses is null or 0; initialized from maxDailyUses on acquisition
+                            // and reset to maxDailyUses by the daily tick. Applies in and out of combat.
   currentFuelLevel  Float? // battery items only (Battery ItemType tag + fuelValue non-null); initialized to item.fuelValue on creation.
                            // decremented on discharge into a power source; incremented on charge from a power source.
                            // null on all non-battery StoredItems.

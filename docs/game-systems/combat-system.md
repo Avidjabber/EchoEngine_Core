@@ -146,6 +146,59 @@ ensures NPC entities always have actions available.
 Action cooldowns are tracked in ActiveCombat_Participant_ActionCooldown.
 A row exists only while an action is on cooldown; deleted at roundsRemaining = 0.
 
+OUT-OF-COMBAT USE
+──────────────────
+ItemEquipmentProfile.usageContext controls when an action is available:
+  "any"               — usable in and out of combat (default)
+  "combat_only"       — only during an active combat instance
+  "out_of_combat_only"— only when not in an active combat instance
+
+ItemEquipmentProfile.outOfCombatMaxTargets controls out-of-combat targeting:
+  null     — action is combat-only; CombatTargetScope does not apply outside combat.
+  non-null — action may be used outside combat. The user selects up to this many
+             entities from a flat list of active entities. No team or faction
+             filtering applies — any active entity is a valid target.
+
+USE LIMITS
+───────────
+Three independent limits control how often an action can be used; all are enforced
+simultaneously when set:
+
+  cooldownRounds              — (on ItemEquipmentProfile) in-combat frequency cap:
+                                rounds before this action can be used again within
+                                the same combat instance. 0 = no cooldown.
+
+  Item.maxDailyUses           — daily use cap across all contexts (in and out of combat).
+                                null or 0 = no daily limit.
+                                Tracked on StoredItem.dailyUsesRemaining; reset to
+                                maxDailyUses by the daily tick.
+
+  Item.maxUses                — lifetime use cap. null or 0 = no limit.
+                                Tracked on StoredItem.usesRemaining; decremented on
+                                every use regardless of context. When it reaches 0
+                                the StoredItem is deleted.
+
+StoredItem tracking fields (only populated when the corresponding Item field is set):
+  usesRemaining       — remaining lifetime uses for this physical instance.
+                        null when Item.maxUses is null or 0.
+  dailyUsesRemaining  — remaining uses today. null when Item.maxDailyUses is null or 0.
+                        Reset to Item.maxDailyUses on the daily tick.
+
+EXAMPLE — Healing Salve (3 uses per day, 9 uses total then gone):
+  Item.maxUses                   = 9
+  Item.maxDailyUses              = 3
+  ItemEquipmentProfile.usageContext = "any"
+  StoredItem.usesRemaining       initialized to 9; decremented each use
+  StoredItem.dailyUsesRemaining  initialized to 3; decremented each use; reset to 3 on daily tick
+
+EXAMPLE — Fireball Scroll (combat only, unlimited uses but 2 per day, no lifetime cap):
+  Item.maxUses                   = null
+  Item.maxDailyUses              = 2
+  ItemEquipmentProfile.usageContext    = "combat_only"
+  ItemEquipmentProfile.cooldownRounds  = 2
+  StoredItem.usesRemaining       = null
+  StoredItem.dailyUsesRemaining  initialized to 2; reset daily
+
 
 ─────────────────────────────────────────────
 6. NPC AI BEHAVIOR
