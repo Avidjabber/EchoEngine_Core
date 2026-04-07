@@ -1314,7 +1314,6 @@ model DisciplineDef {
   actionInstanceXp              ActionInstance_Entity_DisciplineXp[]
   recipeRewards                 Recipe_DisciplineReward[]
   abilityActionTriggerXpGrants  Ability_ActionTrigger[]
-  abilityPresenceEffects        Ability_PresenceEffect[]
   craftingInteractionRules      Guild_CraftingInteractionRule[]
   recipeCraftingRequirements    Recipe_CraftingRequirement[]
 }
@@ -1337,19 +1336,17 @@ model Entity_Discipline {
 
 // A guild-defined node in the skill tree for a specific discipline.
 // levelRequired: entity's discipline level must be >= this to unlock the node.
-// statPointCost: stat points needed to purchase; 0 = auto-granted when level is reached.
-// isAutoGranted:  explicit flag for querying auto-grants (should match statPointCost = 0).
+// statPointCost: stat points needed to purchase; 0 = free but still requires explicit player purchase.
 model SkillTreeNode {
   id              Int    @id @default(autoincrement())
   guildId         String @db.VarChar(50)
   disciplineDefId Int
-  abilityDefId    Int
+  abilityDefId    Int?   // null = gate-only node (level requirement with no ability grant)
   levelRequired   Int
   statPointCost   Int    @default(0)
-  isAutoGranted   Boolean @default(false)
 
-  disciplineDef  DisciplineDef @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
-  abilityDef     AbilityDef    @relation(fields: [abilityDefId],    references: [id], onDelete: Restrict)
+  disciplineDef  DisciplineDef  @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
+  abilityDef     AbilityDef?    @relation(fields: [abilityDefId],    references: [id], onDelete: Restrict)
 
   // Relations to/from other nodes: REQUIRES, BLOCKS, or UPGRADES (see SkillTreeNode_Relation).
   relations  SkillTreeNode_Relation[] @relation("NodeRelations")
@@ -1548,9 +1545,9 @@ model Ability_MultiplierEffect {
   id                Int    @id @default(autoincrement())
   abilityDefId      Int
   targetTypeId      Int
-  targetId          Int?   // e.g. disciplineId for discipline_xp; null = applies to all of that type
-  multiplier        Float?  // 1.2 = +20%, 0.8 = −20%
-  flatRate          Int?
+  targetId          Int?   // polymorphic narrow: targetTypeId determines which table this points to; null = all
+  multiplier        Float?  // 1.2 = +20%, 0.8 = −20%; null if using flatRate
+  flatRate          Int?    // flat additive bonus (e.g. +1 to harvest yield); null if using multiplier
   valueThresholdMin Float?
   valueThresholdMax Float?
 
@@ -1753,7 +1750,7 @@ model Ability_ThresholdTrigger {
   stackBehaviorId Int
 
   abilityDef   AbilityDef   @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
-  abilitythresholdTypes AbilityThresholdType @relation(fields: [thresholdTypeId], references: [id], onDelete: Restrict)
+  thresholdType AbilityThresholdType @relation(fields: [thresholdTypeId], references: [id], onDelete: Restrict)
   conditionDef ConditionDef @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
   stackBehavior StackBehavior @relation(fields: [stackBehaviorId], references: [id], onDelete: Restrict)
 
@@ -1781,9 +1778,9 @@ model Ability_PresenceEffect {
   conditionDefId Int?
 
   // abilityEffectType = "multiplier"
-  multiplierTargetTypeId Int?   // FK → AbilityTargetType (e.g. discipline_xp, drop_plant); null = not a multiplier effect
+  multiplierTargetTypeId Int?   // FK → AbilityTargetType; tells the app which table targetId points to
   multiplierValue        Float?
-  multiplierId           Int?   // narrows target (e.g. disciplineId); null = all
+  targetId               Int?   // polymorphic narrow: e.g. disciplineDefId for discipline_xp, factionId for faction_rep_gain; null = all
 
   // abilityEffectType = "plot_buff"
   effectTypeId  Int?   // FK → EffectType (growth_rate, harvest_yeild, rot_rate, etc.)
@@ -1796,7 +1793,6 @@ model Ability_PresenceEffect {
   stackBehavior        StackBehavior      @relation(fields: [stackBehaviorId],         references: [id], onDelete: Restrict)
   conditionDef         ConditionDef?      @relation(fields: [conditionDefId],          references: [id], onDelete: Restrict)
   multiplierTargetType AbilityTargetType? @relation(fields: [multiplierTargetTypeId],  references: [id], onDelete: Restrict)
-  disciplineDef        DisciplineDef?     @relation(fields: [multiplierId],            references: [id], onDelete: Restrict)
   effectType           EffectType?        @relation(fields: [effectTypeId],            references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])

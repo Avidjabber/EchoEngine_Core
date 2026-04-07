@@ -139,10 +139,9 @@ NODE SCHEMA
   SkillTreeNode
     guildId         — owning guild
     disciplineDefId — which discipline tree this node belongs to
-    abilityDefId    — the AbilityDef granted when the node is obtained
+    abilityDefId    — the AbilityDef granted when the node is obtained; null = gate-only node (no ability grant)
     levelRequired   — entity's discipline level must reach this to unlock
-    statPointCost   — stat points required to purchase; 0 = auto-granted
-    isAutoGranted   — true when the node is granted automatically on level-up
+    statPointCost   — stat points required to purchase; 0 = free but still requires explicit player purchase
 
   SkillTreeNode_DisciplineRequirement
     nodeId          — the node being gated
@@ -167,13 +166,10 @@ NODE SCHEMA
 NODE LIFECYCLE
 ───────────────
   Locked:       entity's discipline level < levelRequired (or prereqs not met)
-  Unlocked:     level reached AND all prerequisites obtained
-  Auto-granted: isAutoGranted = true → Entity_SkillTreeNode row created immediately
-                on level-up, in the same operation that writes the new level.
-                The corresponding Entity_Ability row (sourceType = "skill_tree",
-                sourceId = nodeId) is also created at the same time.
-  Purchasable:  unlocked + not yet obtained + statPointCost > 0
-                → entity spends stat points from EntityStats.skillPoints
+  Unlocked:     level reached AND all prerequisites obtained; available for purchase
+  Purchasable:  unlocked + not yet obtained; entity spends stat points from
+                EntityStats.skillPoints (0 cost nodes are free but still require
+                explicit purchase — nothing is granted automatically)
 
 RESPEC / NODE REMOVAL
 ──────────────────────
@@ -183,7 +179,6 @@ A purchased node can be removed (respec). On removal:
   - statPointCost for that node is immediately refunded to EntityStats.skillPoints
   - Any nodes that listed this node as a prerequisite are also removed recursively,
     with their costs refunded as well
-  - Auto-granted nodes (isAutoGranted = true) cannot be manually removed
 
 NODE RELATIONS
 ───────────────
@@ -257,8 +252,7 @@ DISCIPLINE PROGRESSION
   awardDisciplineXp(entityId, disciplineDefId, amount)
     - Adds XP to Entity_Discipline
     - If currentXp >= xpRequired(level), increments level and resets currentXp
-    - On level-up: checks for newly auto-grantable nodes and grants them immediately
-    - Returns: new level, new currentXp, list of any nodes auto-granted
+    - Returns: new level, new currentXp, list of newly unlocked nodes (for notification)
 
   getDisciplineLevels(entityId)
     - Returns all Entity_Discipline rows for an entity (excluding isStatProgression row)
@@ -272,7 +266,7 @@ DISCIPLINE PROGRESSION
 SKILL TREE NODE MANAGEMENT (admin / guild setup)
 ──────────────────────────────────────────────────
   createSkillTreeNode(guildId, disciplineDefId, abilityDefId, levelRequired,
-                      statPointCost, isAutoGranted, relations[])
+                      statPointCost, relations[])
     - relations[] is an array of { relationTypeId, targetNodeId } pairs
     - Validates all targetNodeIds belong to same guildId
     - Validates no cycle is introduced in the REQUIRES graph
@@ -305,10 +299,9 @@ ENTITY NODE PURCHASE / RESPEC
       Entity_SkillTreeNode + Entity_Ability rows (no refund)
     - Deducts statPointCost from EntityStats.skillPoints
     - Creates Entity_SkillTreeNode row
-    - Creates Entity_Ability row (sourceType = "skill_tree", sourceId = nodeId)
+    - If abilityDefId is not null: creates Entity_Ability row (sourceType = "skill_tree", sourceId = nodeId)
 
   removeNode(entityId, nodeId)
-    - Rejects if node isAutoGranted = true
     - Collects all nodes that depend on this node via REQUIRES edges (recursive)
     - Removes Entity_SkillTreeNode and Entity_Ability rows for node + dependents
     - Refunds total statPointCost of all removed nodes to EntityStats.skillPoints

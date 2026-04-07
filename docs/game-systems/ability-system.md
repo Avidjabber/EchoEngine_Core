@@ -100,8 +100,13 @@ hasAdvantage and hasDisadvantage should not both be true; app layer enforces.
 Multiplier applied to a rate or yield. 1.0 = no change, 1.2 = +20%, 0.8 = −20%.
 
   targetTypeId   — FK → AbilityTargetType. What is being multiplied (see table below).
-  targetId       — narrows the target; null = applies to all of that type
-  multiplier     — the scaling factor
+                   Also acts as the discriminator for targetId: the app uses targetTypeId.name
+                   to know which table targetId references (e.g. "discipline_xp" → DisciplineDef,
+                   "faction_rep_gain" → Faction, "energy_cost" → ActionType).
+  targetId       — polymorphic narrow; null = applies to all of that targetType.
+  multiplier     — percentage scaling factor (1.2 = +20%, 0.8 = −20%); null if using flatRate.
+  flatRate       — flat additive bonus (e.g. +1 to harvest yield); null if using multiplier.
+                   Use multiplier for proportional scaling; use flatRate for fixed additions.
   biomeId        — FK → Biome. Gate by biome; null = all biomes.
   weatherStateId — FK → WeatherState. Gate by weather; null = all weather.
 
@@ -365,15 +370,25 @@ are evaluated once per day for each valid target in scope.
 
   abilityEffectType = "multiplier":
     multiplierTargetTypeId Int?   FK → AbilityTargetType. The rate/yield being multiplied
-                                  (recovery_rate, treatment_received, discipline_xp, etc.)
+                                  (recovery_rate, treatment_received, discipline_xp, etc.).
+                                  Also acts as the discriminator: the app uses
+                                  multiplierTargetTypeId.name to know which table targetId
+                                  references (e.g. "discipline_xp" → DisciplineDef).
     multiplierValue        Float? The scaling factor. 1.2 = +20%, 0.8 = −20%.
-    multiplierId           Int?   Narrows the target (e.g. a specific disciplineId); null = all.
+    targetId               Int?   Polymorphic narrow. null = applies to all of that type.
 
-  abilityEffectType = "structure_buff" or "plot_buff":
-    effectTypeId   Int?   FK → EffectType. The property being modified
-                          (growth_rate, rot_modifier, filth_reduction, yield, decay_resistance, etc.)
+  abilityEffectType = "structure_buff":
+    effectTypeId   Int?   FK → EffectType. The structure property being modified
+                          (growth_rate, rot_modifier, filth_reduction, yield, etc.)
     effectValue    Float? Delta applied to the property.
-    durationHours  Int?   How long the buff lasts (plot_buff only; structure_buff is persistent).
+    durationHours         Not applicable — structure buffs are persistent while the entity
+                          is housed in the structure. No expiry.
+
+  abilityEffectType = "plot_buff":
+    effectTypeId   Int?   FK → EffectType. The plot property being modified
+                          (growth_rate, yield, decay_resistance, etc.)
+    effectValue    Float? Delta applied to the property.
+    durationHours  Int?   How long the buff lasts before expiring. null = permanent.
 
   If the target does not exist (no plots in the structure, no patients present,
   no structures in camp, etc.) the effect does nothing — no error, no activation.
