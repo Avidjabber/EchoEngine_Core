@@ -141,6 +141,10 @@ model GuildSettings {
   // Stat points are not capped — only discipline levels.
   disciplineLevelCap Int?
 
+  // How many rep points an entity loses from Entity.factionRep per daily tick.
+  // Tunable per guild — high-activity servers may want slower decay; low-activity ones faster.
+  factionRepDecayRate Int @default(5)
+
   disciplineLevelCaps Guild_DisciplineLevelCap[]
 
   createdAt DateTime @default(now()) @db.Timestamptz
@@ -871,7 +875,7 @@ model Entity {
 
   age      Int     @default(0)
   isDeceased Boolean @default(false)
-  factionRep  Int     @default(0)  // individual rep within own faction; 0–500, clamped at app layer; decays daily. Every 100 = +1 to all stat rolls. Distinct from Faction.factionRep (collective score).
+  factionRep  Int     @default(0)  // individual rep within own faction; 0–500, clamped at app layer; decays by GuildSettings.factionRepDecayRate per daily tick. Every 100 = +1 to all stat rolls. Distinct from Faction.factionRep (collective score).
 
   // Hunger and hydration — drained daily by the worker; raised by eating.
   // Worker distributes food from faction storage automatically; manual eating is the fallback.
@@ -1158,10 +1162,13 @@ model FactionStanding {
 model Faction {
   id          Int     @id @default(autoincrement())
   guildId     String
+  codeName    String  @db.VarChar(200)  // snake_case slug; unique per guild; stable lookup key
   name        String  @db.VarChar(200)
   description String? @db.VarChar(1000)
 
-  type String @db.VarChar(100)
+  // Collective faction reputation score — modified by action completions, event outcomes, and admin adjustments.
+  // Distinct from Entity.factionRep (individual score). See faction-system.md section 5.
+  factionRep  Int     @default(0)
 
   // Faction-level event cooldown — null = no event has ever fired for this faction; updated whenever any event fires.
   // Worker skips firing any new event for this faction if now() < lastEventAt + EventDef.cooldownDays.
@@ -1186,6 +1193,7 @@ model Faction {
   standingsFrom            FactionStanding[]           @relation("FactionStandingFrom")
   standingsTo              FactionStanding[]           @relation("FactionStandingTo")
 
+  @@unique([guildId, codeName])
   @@unique([guildId, name])
   @@index([guildId])
 }
