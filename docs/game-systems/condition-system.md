@@ -1,6 +1,6 @@
 CONDITION SYSTEM — DESIGN REFERENCE
 ====================================
-Last updated: 2026-03-30
+Last updated: 2026-04-06
 
 This file is the authoritative reference for how conditions work in EchoPaw.
 Read this before touching any condition seeding or condition-adjacent code.
@@ -52,9 +52,6 @@ LifeCycle
 Permanent
   - No rolls, no timers, no links. Stays forever.
   - Use for: broken leg, deafness, lost eye.
-
-Trait
-  - Like Permanent but represents a character trait, not a wound or illness.
 
 
 ─────────────────────────────────────────────
@@ -157,11 +154,18 @@ Reference caps (approved):
 5. LINKS
 ─────────────────────────────────────────────
 
-worsen   — fires when progression reaches cap. Transitions to a worse condition.
-recover  — fires when progression reaches 0. Transitions to a milder condition.
-spawn    — fires once when progression crosses spawnThreshold × cap. Creates a
-           new parallel condition on the entity (e.g. a wound spawning an infection).
-           The original condition continues — it is NOT replaced.
+block      — parent condition prevents the child from being applied while active.
+             e.g. Nursing blocks Pregnancy from being applied.
+recover    — fires when progression reaches 0. Replaces parent with child.
+             Transitions to a milder condition.
+worsen     — fires when progression reaches cap. Replaces parent with child.
+             Transitions to a worse condition.
+spawn      — fires once when progression crosses spawnThreshold × cap. Creates a
+             new parallel condition on the entity (e.g. a wound spawning an infection).
+             The original condition continues — it is NOT replaced.
+spreads_as — defines what condition is transmitted when this condition spreads via
+             contagion. e.g. GreenCough spreads_as WhiteCough (kits contract the
+             milder form). The contagion roll still uses the parent's contagionResistDC.
 
 Important: ANY condition with a worsen or spawn link MUST have progressionCap set,
 or the link trigger value is undefined and can never fire. This includes Timed
@@ -179,6 +183,64 @@ Used on: Pneumonia, Major Infection, BlackCough, Terminal Dementia.
 
 
 ─────────────────────────────────────────────
+6b. DURATION-BASED CONDITIONS (durationMinutes)
+─────────────────────────────────────────────
+
+Any ConditionDef may set durationMinutes to give the condition a real-time expiry.
+When the condition is applied, EntityCondition.expiresAt is computed as:
+  expiresAt = appliedAt + durationMinutes
+
+The app removes the condition when expiresAt is reached, regardless of combat state
+or progression value. Used for short-lived combat buffs/debuffs (potions, spells, etc.)
+that should wear off after a fixed window. Null = no time-based expiry.
+
+
+─────────────────────────────────────────────
+6c. ENERGY & ACTION COMPONENT EFFECTS
+─────────────────────────────────────────────
+
+ConditionDef has two additional passive effect fields:
+
+  energyDebuf   Float?   Fractional reduction to the entity's maximum energy cap
+                         while the condition is active. e.g. 0.4 = −40% energy cap.
+                         Null = no energy penalty.
+
+  blocksVerbal  Boolean  Prevents the entity from using actions that require a verbal
+                         component (e.g. Muteness). Default false.
+
+  blocksSomatic Boolean  Prevents the entity from using actions that require a somatic
+                         component (e.g. future paralysis mechanics). Default false.
+
+These are checked at action resolution; the entity can still select the action but it
+will be blocked before execution if the required component is suppressed.
+
+
+─────────────────────────────────────────────
+6d. CONDITION CONTEXT (ConditionContext)
+─────────────────────────────────────────────
+
+Every ConditionDef has a conditionContextId (FK → ConditionContext). Context is a
+seeded classification tag used to group conditions by origin or category for UI
+filtering and system-level checks (e.g. "illness", "combat", "injury", "inherent_trait").
+It does not drive any mechanical behaviour directly — it is a display and filter aid.
+
+
+─────────────────────────────────────────────
+6e. DAMAGE RESISTANCE & IMMUNITY (ConditionDef_DamageModifier)
+─────────────────────────────────────────────
+
+A condition can grant resistance or immunity to a damage type while active.
+One row per damage type; multiple rows on the same condition stack independently.
+
+  damageTypeId  Int      FK → DamageType
+  isResistant   Boolean  true  = resistant (entity takes half damage from this type)
+                         false = immune (entity takes no damage from this type)
+
+Used for inherent trait conditions (natural armour, elemental resistances) as well as
+temporary combat conditions (Hardened Scales, Magical Ward).
+
+
+─────────────────────────────────────────────
 7. CONTAGION
 ─────────────────────────────────────────────
 
@@ -187,15 +249,42 @@ Null = not contagious.
 
 Contagion rolls happen on proximity events (patrols, sharing dens, etc.).
 
+If the entity is housed (Entity_Housing) in a structure with a medical type,
+StructureDef_MedicalConfig.contagionResistBonus is added as a flat bonus to
+their contagion resistance CON roll. This represents isolation protocols and
+quarantine — an isolation ward with a high bonus makes disease spread much
+harder even when healthy and sick entities share the same structure.
+
 
 ─────────────────────────────────────────────
-8. ENV RULES (difficultyMod)
+8. ENV RULES
 ─────────────────────────────────────────────
 
-envRules add a flat mod to dailyRollDC when a matching env condition is active.
-Example: GreenCough + Cold env → effective DC becomes 13 + 3 = 16.
-This stacks against the same cat baseline, making cold weather genuinely deadly
-for sick cats.
+ConditionDef_EnvRule rows define how an illness responds to active env conditions.
+Each row has a relationTypeId (FK → RelationType; "worsen" or "improve") and a
+value (Float, >= 0.0 and <= 2.0, enforced app-side).
+
+One ConditionDef can have multiple rules across different env conditions — some
+worsening progression, others aiding recovery.
+
+  worsen  — env condition makes the illness harder to recover from.
+            Increases the effective daily roll DC (or worsening rate).
+  improve — env condition aids recovery.
+            Decreases the effective daily roll DC (or accelerates recovery).
+
+Scaling formula (per active stack):
+  effectiveMod = 1.0 + value × stackCount
+  Value of 0.0 = no effect. Value of 1.0 = full doubling per stack (maximum).
+  value is a signed delta: positive = worsening amplifier; negative = recovery aid.
+
+Example — a respiratory illness:
+  Cold  + worsen  value=0.5  → each Cold stack increases worsening rate by 50%
+  Smoke + worsen  value=0.8  → each Smoke stack increases worsening rate by 80%
+  Warm  + improve value=0.3  → each Warm stack reduces difficulty by 30%
+
+Multiple active env conditions each apply their own modifier independently.
+A location with both Cold (2 stacks) and Smoke (1 stack) active would stack
+the Cold modifier twice and the Smoke modifier once, then both are applied.
 
 
 ─────────────────────────────────────────────
@@ -222,13 +311,19 @@ infection, it just means the check happens sooner and more aggressively.
 10. RUNTIME STATE — EntityCondition
 ─────────────────────────────────────────────
 
-Each active condition on a cat is one EntityCondition row. Key runtime fields:
+Each active condition on a cat is one EntityCondition row.
 
-  progressionValue  Float   Current position on the 0 → cap scale. Starts at
-                            cap/2 for Progressive/Chronic. Incremented/decremented
-                            by the daily CON roll result. Decremented further by
-                            medication (EntityTreatmentLog.progressionChange).
-                            Floors at 0.0; never stored above cap.
+CORE FIELDS
+────────────
+  conditionDefId    Int     FK → ConditionDef
+  bodyPartId        Int?    FK → BodyPart. Allows the same condition on different body parts
+                            (e.g. scratch on tail AND scratch on leg are separate rows).
+                            Null for non-injury conditions.
+
+  progressionValue  Float   Current position on the 0 → cap scale. Starts at cap/2 for
+                            Progressive/Chronic (set by app at creation). Incremented/
+                            decremented by the daily CON roll. Decremented further by
+                            treatment. Floors at 0.0; never stored above cap.
 
   discoveryLevel    Int     The highest examination roll made on this entity so far
                             (across all medicine cats, all days). Determines which
@@ -238,23 +333,47 @@ Each active condition on a cat is one EntityCondition row. Key runtime fields:
 
   lastTreatedAt     DateTime? Denormalized timestamp of the most recent treatment.
                             Used for quick "has this condition been treated today?"
-                            checks without querying the full log. The log is still
-                            the source of truth for history.
+                            checks. The full log (EntityTreatmentLog) is the source
+                            of truth for history.
 
   onsetAt           DateTime? When the condition first appeared on the entity.
+
+  expiresAt         DateTime? Set at application when ConditionDef.durationMinutes is
+                            not null: expiresAt = appliedAt + durationMinutes. App
+                            removes the condition when this timestamp is reached.
+                            Null = no real-time expiry on this instance.
 
   sourceEntityId    Int?    The entity whose combat action applied this condition.
                             Null for natural onset (illness, environmental, out-of-combat).
                             Used by ConditionBehaviorEffect redirect target "source" to
-                            resolve which entity to redirect toward/away from. Also
-                            identifies the other party in linked condition pairs.
+                            resolve which entity to redirect toward/away from.
 
   linkedConditionId Int?    Self-referential FK to a paired EntityCondition on another
                             entity. Used for mutually dependent conditions (e.g. "Grappling"
                             on A linked to "Grappled" on B). When either is removed, the
                             app removes the linked partner as well.
-                            Set at application time from ItemEquipmentProfile_Condition
-                            rows that share a linkedProfileConditionId.
+
+COMBAT-SCOPED FIELDS
+─────────────────────
+These fields are only relevant for conditions applied during combat.
+
+  combatInstancedOnly  Boolean  true = condition exists only for the duration of the combat;
+                                automatically removed when the combat ends. Default false.
+
+  appliedInCombatId    Int?     FK → ActiveCombat. The combat in which this condition was applied.
+
+  appliedByActionId    Int?     FK → ActiveCombat_Action. The specific action that created this
+                                condition. Null for out-of-combat onset.
+
+  combatRoundApplied   Int?     The round number when the condition was applied.
+
+  combatRoundExpires   Int?     The round on which this condition expires. Null = lasts until
+                                combat ends (if combatInstancedOnly) or indefinitely.
+
+  resolvedFlatModifier Int?     Snapshotted skill-derived modifier set at application time.
+                                Used by ConditionDef_CombatEffect rows where flatModifier is
+                                null — the engine reads this value instead of a static number.
+                                Allows the strength of a condition to vary by the applier's skill.
 
 
 ─────────────────────────────────────────────
@@ -315,6 +434,13 @@ After treatment:
 The daily CON roll and treatment are independent — both apply on the same day.
 Order of operations: CON roll first, then treatment on top.
 
+If the entity is housed (Entity_Housing) in a structure with a medical type, the
+progression delta from the CON roll is multiplied by StructureDef_MedicalConfig
+.recoveryModifier before being applied. This applies to Progressive and Chronic
+conditions only. Order of operations: CON roll → apply recoveryModifier → apply
+treatment. A recoveryModifier of 0.8 means the raw CON roll delta is scaled to
+80% before treatment adds its own reduction on top.
+
 
 ─────────────────────────────────────────────
 13. COMBAT BEHAVIOR EFFECTS (ConditionBehaviorEffect)
@@ -329,22 +455,22 @@ a behavior. Multiple rows on the same condition stack independently.
                 "incoming" — triggers on actions directed AT the condition holder
                              (e.g. Being Guarded redirects incoming attacks to source).
 
-  actionTypeId  Which action type (attack, heal, buff, debuff) this affects.
-                Null = affects all action types.
+  actionTypeId      Int?  FK → ItemActionType. Which action type (attack, heal, buff, debuff)
+                          this affects. Null = affects all action types.
 
-  behaviorType  (seed table — ConditionBehaviorType)
-    redirect    Moves the action to a different target. Requires redirectTarget.
+  behaviorTypeId    Int   FK → ConditionBehaviorType
+    redirect    Moves the action to a different target. Requires redirectTargetId.
                 triggerChance controls probability (1.0 = always, 0.5 = 50%).
     cancel      Prevents the action entirely. triggerChance = probability of cancel.
                 Used for Parry, Block, Evasion mechanics.
-    bias        Shifts AI targeting weight. Requires redirectTarget and biasWeight.
+    bias        Shifts AI targeting weight. Requires redirectTargetId and biasWeight.
                 Positive biasWeight = toward target (Taunt).
                 Negative biasWeight = away from target (Fear, Intimidate).
     restrict    Limits what actions the entity may use. Requires restrictActionTypeId.
                 restrictIsBlock = false → entity may ONLY use this action type (Provoked).
                 restrictIsBlock = true  → entity may NOT use this action type (Silenced).
 
-  redirectTarget  (seed table — BehaviorRedirectTarget)
+  redirectTargetId  Int?  FK → BehaviorRedirectTarget
     source        EntityCondition.sourceEntityId — whoever applied this condition.
                   Covers Taunt (redirect attacker's strikes toward the taunter),
                   Guard (redirect incoming attacks to the guardian),

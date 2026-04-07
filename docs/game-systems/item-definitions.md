@@ -1,6 +1,6 @@
 ITEM DEFINITIONS — DESIGN REFERENCE
 ====================================
-Last updated: 2026-03-29
+Last updated: 2026-04-04
 
 This file is the authoritative reference for how item definitions work in EchoPaw.
 Read this before writing item seeding code, item-adjacent queries, or any system
@@ -77,7 +77,8 @@ Every item has exactly one Item row.
                              Only meaningful for Volume items; feeds storage
                              fluidCapacity. Ignored for Count and Weight items.
 
-  decayDays         Int?     Base days until fully decayed. Null = never decays.
+  rotCap            Int?     Max rot points until fully decayed. Null = never decays.
+                             1 point = 1 day at base rate. 60 = lasts 60 days with no modifiers.
   maxDurability     Int?     Max durability for equipment. Null = indestructible.
   maxUses           Int?     Max uses before the item is depleted. Null = unlimited.
   fuelValue         Int?     Fuel units provided when used as a heat/cooking source.
@@ -140,7 +141,10 @@ Seeded types:
   Tool      non-combat usable tool
   Plant     flora — gathered, used in medicine and processing
   Medicine  usable in the medicine/treatment system (herbs, bandages, splints)
-  Fuel      can be used as a heat/cooking fuel source
+  Fuel_Burnable   conventional combustible fuel (wood, coal, tallow)
+  Fuel_Electric   electrical energy source (batteries, charged cells)
+  Fuel_Steam      pressurised steam (boilers, steam canisters)
+  Fuel_Alchemical alchemical or magical energy source (reagent canisters, mana cells)
   Food      consumable item
   Ore       raw unrefined ore; drives smelting system participation
   Ingot     smelted metal bar; drives forging system participation
@@ -238,30 +242,57 @@ RULE: Combat actions (attacks, spells, rank abilities) do NOT use ItemAction.
 7. STORAGE AND STORED ITEMS
 ─────────────────────────────────────────────
 
-Storage is a container owned by a group or entity. StoredItem is a physical
-instance of an Item sitting inside a Storage.
+Storage is a pure item container. All capacity limits, type restrictions, and
+expiration modifiers live on the owner join table, not on Storage itself.
 
   Storage — key fields:
-    weightCapacity     Float?  Null = no weight limit. Enforced as:
-                                 Count  → sum of (StoredItem.quantity × Item.averageWeight)
-                                 Weight → sum of StoredItem.quantity directly
-                               Volume items do not consume weightCapacity.
-    fluidCapacity      Float?  Null = no fluid limit (ml). Enforced as:
-                                 Volume → sum of StoredItem.quantity directly
-                               Count and Weight items do not consume fluidCapacity.
+    guildId  — owning guild
+    name     — display name
+
+  Ownership is determined by exactly one of two join tables:
+
+  Entity_Storage — personal entity inventory
+    entityId        FK → Entity
+    storageId       FK → Storage
+    weightCapacity  Float?  Null = no weight limit.
+    fluidCapacity   Float?  Null = no fluid limit (ml).
+    Entity storage accepts all item types. No type restrictions apply.
+    No expirationModifier — items decay at their natural rate in entity storage.
+
+  Structure_Storage — camp structure inventory; join between Structure and Storage.
+    structureId        FK → Structure (1:1)
+    storageId          FK → Storage   (1:1)
+    weightCapacity     Float?  Null = no weight limit.
+    fluidCapacity      Float?  Null = no fluid limit (ml).
     expirationModifier Float   Multiplier on item spoilage rates. >1.0 = spoils faster.
-    isPrimaryStorage   Boolean The group's designated primary storage for accepted types.
-    acceptsAll         Boolean True = accepts any item type (personal entity storage).
+                               Driven by StructureDef_StorageConfig base value + rot_modifier
+                               upgrade deltas. Recomputed when upgrades are applied.
+    isPrimaryStorage   Boolean Faction's designated primary storage for its accepted types.
+    securityRating     Int     Effective sum of security_rating upgrade deltas. Read by the
+                               event system to weight theft/raid events at this camp.
+    acceptedTypes      via Structure_Storage_ItemType — an item must match at least one
+                       accepted type to be stored here.
 
-  Storage_ItemType — which ItemType tags a storage accepts. An item must match at
-  least one accepted type to be stored. Ignored when acceptsAll = true.
+  Structure_Storage_ItemType — accepted item types for a structure storage
+    storageId   FK → Structure_Storage (via storageId)
+    itemTypeId  FK → ItemType
 
-  StoredItem — key fields:
+  Capacity enforcement:
+    weightCapacity: Count  → sum of (StoredItem.quantity × Item.averageWeight)
+                    Weight → sum of StoredItem.quantity
+                    Volume items do not consume weightCapacity.
+    fluidCapacity:  Volume → sum of StoredItem.quantity
+                    Count and Weight items do not consume fluidCapacity.
+
+  StoredItem — one physical item instance inside a Storage. FK → Storage via storageId.
     quantity          Amount in the item's measurement unit:
                         Count  → number of units (e.g. 5 leaves)
                         Weight → grams (e.g. 80g of paste)
                         Volume → millilitres (e.g. 150ml of oil)
-    storedAt          Timestamp used to calculate decay progress.
+    rotProgression    Accumulated rot points. Increments each daily tick by the effective
+                      rot rate (1.0 at base, modified by storage.expirationModifier and
+                      active spoilage env conditions). Rot% = rotProgression / item.rotCap.
+                      Only relevant when item.rotCap is non-null.
     craftBonus        Flat bonus accumulated through crafting skill rolls. Carried
                       forward to recipe outputs when RecipeOutput.craftBonusApplies = true.
     currentDurability Tracks remaining durability. Null when maxDurability is null.
@@ -270,9 +301,12 @@ instance of an Item sitting inside a Storage.
     chosenProfileId   Which ItemEquipmentProfile was selected at equip time.
     equippedAt        Timestamp set when equipped; null when not equipped.
 
-  Decay formula (app-side):
-    decay% = days_elapsed / (item.decayDays × storage.expirationModifier × season_modifier)
-    Only relevant when item.decayDays is non-null.
+  Rot formula (app-side, per daily tick):
+    Structure storage:  rotProgression += 1.0 × structure_storage.expirationModifier × spoilage_mod
+    Entity storage:     rotProgression += 1.0 × spoilage_mod
+    spoilage_mod = effectiveMod from active spoilage EnvCondition_Modifier at the location.
+    rot% = rotProgression / item.rotCap. Item is fully rotten when rotProgression >= item.rotCap.
+    Only relevant when item.rotCap is non-null.
 
   RULE: currentDurability and usesRemaining must always be null if their respective
         Item.maxDurability / Item.maxUses are null, and non-null otherwise.
@@ -378,10 +412,12 @@ those systems use ItemType instead.
   "How is this item's quantity measured?"            → Item.measurementTypeId → MeasurementType
   "How much does one unit of this item weigh?"       → Item.averageWeight (grams; always present)
   "How much volume does one unit occupy?"            → Item.averageVolume (ml; Volume items only)
-  "Where can this item be stored?"                   → ItemType tags + Storage_ItemType
-  "How much can a storage hold by weight?"           → Storage.weightCapacity
-  "How much fluid can a storage hold?"               → Storage.fluidCapacity
-  "Does this item decay?"                            → Item.decayDays (null = never decays)
+  "Where can this item be stored?"                   → ItemType tags + Structure_Storage_ItemType
+                                                       (entity storage accepts all types)
+  "How much can a structure storage hold by weight?" → Structure_Storage.weightCapacity
+  "How much can a structure storage hold by fluid?"  → Structure_Storage.fluidCapacity
+  "How much can an entity inventory hold?"           → Entity_Storage.weightCapacity / fluidCapacity
+  "Does this item decay?"                            → Item.rotCap (null = never decays)
   "Is this item dangerous to use?"                   → ItemWarning + Item_Warning
   "Does this item spawn a condition on use?"         → ItemWarning (conditionDefId + triggeredByInteractionId)
   "What does eating/applying this herb do?"          → ItemAction → ItemEffect (symptoms)

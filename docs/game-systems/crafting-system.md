@@ -1,6 +1,6 @@
 CRAFTING SYSTEM — DESIGN REFERENCE
 ===================================
-Last updated: 2026-03-29 (per-entity discovery, minCraftingLevel, craftingXpReward, Compost interaction)
+Last updated: 2026-04-06
 
 This file is the authoritative reference for how the crafting and ingredient
 processing systems work in EchoPaw. Read this before writing recipe seeding
@@ -126,28 +126,20 @@ separate from ItemInteraction, which covers medicine use and item consumption.
     Carve     shapes bone, stone, or wood using a cutting tool
     Weave     interlaces fiber, vine, or reed into cloth or cord
     Tan       processes raw hide into leather (requires tanning rack — not yet implemented)
-    Compost   breaks down rotten food, spoiled herbs, and plant scraps into compost
-              (output feeds the farming system — not yet implemented)
-
-  Smithing / forging (structure system not yet implemented):
-    Smelt     melts ore into ingots (requires forge or furnace structure)
-    Forge     shapes a heated ingot into tools, weapons, or armor (requires forge structure)
-    Temper    hardens metal through heat cycles (requires forge structure)
-    Kiln      fires clay items into ceramics (requires kiln structure)
+  Smithing / forging (structure requirements configured per-guild via Guild_CraftingInteractionRule):
+    Smelt     melts ore into ingots
+    Forge     shapes a heated ingot into tools, weapons, or armor
+    Temper    hardens metal through heat cycles
+    Kiln      fires clay items into ceramics
 
 A CraftingInteraction has no behavior of its own. Behavior is defined by the
 recipe that uses it. The same verb (Dry) can have different skill requirements,
 inputs, and outputs depending on which recipe is matched.
 
-Note: Smelt, Forge, Temper, Kiln, and Tan are seeded now so recipes can be
-authored and discovered ahead of the structure system being built. Until
-structures are implemented, the app should gate these recipes behind a
-structure check that is always treated as unmet.
-
-Note: Compost is seeded ahead of the farming system. It requires no structure,
-but has no defined output items yet. Until the farming system is built, Compost
-recipes should be treated as having no outputs — ingredients are consumed and
-nothing is produced.
+Note: Composting is NOT a CraftingInteraction. It is handled entirely by the
+compost structure system (StructureDef_CompostConfig, Structure_CompostDeposit,
+Item_CompostOutput). Items are deposited directly into a compost structure and
+convert on a timer — no recipe or crafting action is involved.
 
 
 ─────────────────────────────────────────────
@@ -157,7 +149,9 @@ nothing is produced.
 Recipe is the root table. One row per distinct crafting operation.
 
   guildId               "global" for seeded recipes; guild snowflake for custom.
-  name                  Unique within a guild.
+  codeName              snake_case slug; unique per guild. Used as the stable reference
+                        key in seed files and bulk uploads.
+  name                  Display name; unique within a guild.
   craftingInteractionId The verb used to trigger this recipe.
   requiresDiscovery     true = hidden until the entity discovers it via
                         experimentation or an admin grants it directly.
@@ -170,10 +164,17 @@ Recipe is the root table. One row per distinct crafting operation.
                         entity must have to attempt this recipe. Checked before
                         the skill roll — an entity below the minimum cannot
                         attempt the recipe at all.
-  craftingXpReward      XP granted to the entity on a successful craft.
-                        0 = no XP (default). Leaf drying and similar trivial
-                        recipes may grant a small amount; more complex recipes
-                        (berry drying, concoctions) grant more.
+  disciplineRewards     Recipe_DisciplineReward rows — one per discipline that
+                        this recipe should credit XP to on a successful craft.
+                        Any number of disciplines can be rewarded. Include the
+                        stat progression DisciplineDef row to grant stat point XP.
+                        Examples:
+                          Dry Yarrow   → Healing, Crafting, StatProgression
+                          Dry Meat     → Farming, StatProgression
+                          Forge Sword  → Crafting, StatProgression
+                          Brew Tea     → Healing, StatProgression
+                        The "Crafting Session" ActionType has no DisciplineReward
+                        rows of its own — all XP flows from the recipes executed.
 
 Discovery tracking:
   Entity_DiscoveredRecipe records which entities have discovered a recipe.
@@ -359,13 +360,13 @@ any number of outputs — seeded items, ephemeral items, or a mix of both.
                     Assemble the display name: "{preName} {source.name} {postName}".
                     Either or both can be null (unchanged / omitted).
 
-  decayDaysMultiplier Float?
-                    Multiplied against the source item's decayDays.
+  rotCapMultiplier  Float?
+                    Multiplied against the source item's rotCap.
                     null = unchanged. 10.0 = lasts 10× longer after drying.
 
-  decayVariance     Float?
+  rotVariance       Float?
                     Overrides the source item's weightVariance field, which
-                    controls the spread of actual decay timing.
+                    controls the spread of daily rot rate.
                     null = inherit from source.
 
   effectivenessMultiplier Float?
@@ -417,11 +418,11 @@ recipe-specified modifications applied.
 
   PROPERTY COPY
     The app copies all scalar fields from the source Item:
-      averageWeight, weightVariance, decayDays, maxUses, fuelValue, etc.
+      averageWeight, weightVariance, rotCap, maxUses, fuelValue, etc.
     Then applies recipe modifiers in this order:
       outputMeasurementTypeId   replaces measurementTypeId if non-null.
-      decayDaysMultiplier       multiplied against copied decayDays; null = unchanged.
-      decayVariance             replaces copied weightVariance if non-null.
+      rotCapMultiplier          multiplied against copied rotCap; null = unchanged.
+      rotVariance               replaces copied weightVariance if non-null.
       effectivenessMultiplier   multiplied against all copied ItemEffect /
                                 ItemConditionEffect effectiveness values; null = unchanged.
       RecipeOutput_FoodOverride sparse patch of food profile fields; only
@@ -466,7 +467,34 @@ schema.
 
 
 ─────────────────────────────────────────────
-12. QUICK REFERENCE — WHICH TABLE FOR WHAT
+12. RELATIONSHIP TO OTHER SYSTEMS
+─────────────────────────────────────────────
+
+  Disciplines — Recipe_DisciplineReward defines which disciplines gain XP and
+                how much on a successful craft. The same recipe can reward any
+                combination: Heal, Craft, Farm, StatProgression, etc.
+                The "Crafting Session" ActionType carries no DisciplineReward
+                rows — all XP is recipe-driven. See discipline-system.md.
+
+  Actions     — The "Crafting Session" ActionType (systemType = "crafting") is
+                purely an energy cost and time gate. It triggers the crafting UI
+                on resolution. See action-system.md.
+
+  Items       — All recipe inputs and outputs are Item rows. Crafting does not
+                introduce a separate item model. See item-definitions.md.
+
+  Farming     — Compost outputs (soil additives) feed into plot soil quality when
+                the farming system is built. Composting itself is handled by the
+                compost structure system, not the crafting system. See farming-system.md.
+
+  Conditions  — Crafted medicine items interact with the condition system via
+                ItemAction → ItemEffect / ItemConditionEffect. The crafting system
+                produces the items; the condition system applies them.
+                See condition-system.md.
+
+
+─────────────────────────────────────────────
+13. QUICK REFERENCE — WHICH TABLE FOR WHAT
 ─────────────────────────────────────────────
 
   "What unit does this ingredient use?"               → IngredientType.measurementTypeId → MeasurementType
@@ -476,7 +504,7 @@ schema.
   "How many times can I run this recipe at once?"     → Recipe.maxBatchSize (null = unlimited)
   "Has this entity discovered this recipe?"           → Entity_DiscoveredRecipe
   "What crafting level is required for this recipe?"  → Recipe.minCraftingLevel (null = none)
-  "How much XP does this recipe grant on success?"    → Recipe.craftingXpReward
+  "What XP does this recipe grant, and to which disciplines?" → Recipe_DisciplineReward
   "What does this slot accept?"                       → RecipeSlotOption (itemId or requiredTags)
   "Can I use an already-dried item here?"             → RecipeSlotOption_ExcludedTag (Dried tag excluded)
   "Is this slot a reusable tool?"                     → RecipeSlot.consumedOnUse = false
@@ -489,10 +517,110 @@ schema.
   "Does quality carry through processing?"            → RecipeOutput.craftBonusApplies
   "What item does this recipe output?"                → RecipeOutput.outputItemId (null = ephemeral)
   "What is the ephemeral item named?"                 → RecipeOutput.preName / postName + source Item.name
-  "Does processing change the item's decay timing?"  → RecipeOutput.decayDaysMultiplier
-  "Does processing change decay spread?"             → RecipeOutput.decayVariance
+  "Does processing change the item's rot rate?"      → RecipeOutput.rotCapMultiplier
+  "Does processing change rot spread?"              → RecipeOutput.rotVariance
   "Does processing change treatment potency?"        → RecipeOutput.effectivenessMultiplier
   "Does processing change nutritional values?"       → RecipeOutput_FoodOverride (sparse patch)
   "Does processing change how quantity is measured?" → RecipeOutput.outputMeasurementTypeId
   "What tags does the output item have?"             → source Item_IngredientType + AddTag - RemoveTag
+  "Is this interaction enabled for this guild?"        → Guild_CraftingInteractionConfig.isEnabled (no row = enabled)
+  "Does this interaction require a structure/skill?"  → Guild_CraftingInteractionRule WHERE relationTypeId → "requires"
+  "Does this structure improve my output?"            → Guild_CraftingInteractionRule WHERE relationTypeId → "improves"
+  "Does this specific recipe require a structure/skill?" → Recipe_CraftingRequirement WHERE relationTypeId → "requires"
+  "Does a structure improve this specific recipe?"    → Recipe_CraftingRequirement WHERE relationTypeId → "improves"
+  "What interactions does this structure support?"   → StructureDef_CraftingConfig_Interaction
+  "Does this upgrade unlock a new interaction?"      → StructureDef_Upgrade_CraftingInteraction
   "Is this item safe to delete normally?"            → yes; Item.isEphemeral only affects cleanup timing
+
+
+─────────────────────────────────────────────
+14. CRAFTING STRUCTURES
+─────────────────────────────────────────────
+
+Crafting structures (StructureType = "crafting") provide a physical location
+that gates or improves specific crafting interactions. They are optional —
+if a guild defines no rules, all interactions are available anywhere.
+
+STRUCTURE BONUSES
+──────────────────
+Each crafting-type StructureDef has a StructureDef_CraftingConfig row:
+
+  craftingRollBonus    Int   — flat bonus added to crafting skill rolls at this structure
+  outputQuantityBonus  Float — additive multiplier on output quantity (0.1 = +10%)
+
+These apply whenever the entity performs any supported interaction at this structure.
+
+SUPPORTED INTERACTIONS
+───────────────────────
+Which interactions a structure supports is defined in StructureDef_CraftingConfig_Interaction
+(one row per supported interaction). Additional interactions can be unlocked by applying
+upgrades — see StructureDef_Upgrade_CraftingInteraction.
+
+GUILD VISIBILITY (Guild_CraftingInteractionConfig)
+───────────────────────────────────────────────────
+Guilds can hide specific crafting interactions entirely from their crafting UI.
+No row = interaction is visible (default). A row with isEnabled = false suppresses
+the interaction and all its recipes for that guild.
+
+Set during server setup. Useful for removing interactions that don't fit a guild's
+theme (e.g. hiding all smithing interactions for a guild that has no metalworking).
+
+GUILD RULES (Guild_CraftingInteractionRule)
+────────────────────────────────────────────
+Per-guild rules gate or improve an entire crafting interaction type — every recipe that uses
+that interaction inherits the gate automatically. This is the preferred place to enforce
+structure or discipline requirements that apply to all recipes of a given type (e.g. all
+Forge recipes require a forge structure and Crafting level 3). Recipe_CraftingRequirement
+should only be used for requirements specific to one recipe that differ from the interaction rule.
+
+If no rules exist for a guild+interaction, the interaction is available anywhere with no bonuses.
+
+  relationTypeId  Int   FK → RelationType ("requires" | "improves")
+                "requires" — the target must be present in the faction's active camp.
+                "improves" — the target is present and contributing bonuses. The bonus
+                             amounts are NOT stored on the rule row — the worker reads them
+                             from StructureDef_CraftingConfig (for structure targets) or
+                             StructureDef_Upgrade_Effect rows (for upgrade targets).
+                             The rule is purely a pointer.
+
+  orGroup       null    — standalone rule (AND logic). All null-group requires rows must be satisfied.
+                non-null — OR group. At least one row with the same orGroup must be satisfied.
+                           Different orGroup values on the same interaction are AND'd together.
+
+  structureDefId  Int? — requires/improves via a specific structure def in camp.
+  upgradeId       Int? — requires/improves via a specific upgrade applied to a structure in camp.
+  disciplineDefId Int? — requires a discipline at minLevel or above (used with minLevel).
+  minLevel        Int? — minimum discipline level; only meaningful when disciplineDefId is set.
+  skillTreeNodeId Int? — requires the crafting entity to have obtained a specific skill tree node.
+
+Exactly one target type must be set per row. discipline+level and skillTreeNode requirements
+apply to the crafting entity; structure and upgrade requirements apply to the camp.
+
+Example — smelt requires a workshop AND (a forge OR an anvil), improved by a blast furnace upgrade:
+
+  relationType   structureDefId   upgradeId    orGroup
+  requires       workshop_id      null         null
+  requires       forge_id         null         1
+  requires       anvil_id         null         1
+  improves       null             blast_furn   null
+
+  Bonuses from the blast furnace upgrade are read from its StructureDef_Upgrade_Effect rows.
+
+RECIPE-LEVEL REQUIREMENTS (Recipe_CraftingRequirement)
+─────────────────────────────────────────────────────────
+Individual recipes can also carry their own requirements using the same
+relationTypeId / orGroup pattern. Both recipe-level and interaction-level
+rules are evaluated at craft time — all must pass.
+
+The same four target types are available: structureDefId, upgradeId,
+disciplineDefId + minLevel, and skillTreeNodeId.
+
+"improves" rows work the same way as interaction-level rules: the worker
+reads bonus values from the referenced structure's StructureDef_CraftingConfig
+or the upgrade's StructureDef_Upgrade_Effect rows. No bonus values are stored
+on the requirement row itself.
+
+This allows guild-specific recipes to require structures, upgrades, disciplines,
+or specific skills independently of the interaction-level rules. Example: a
+guild's "Advanced Alloy" recipe always requires the blast furnace upgrade and
+Metalworking discipline level 5, regardless of broader smelt interaction rules.

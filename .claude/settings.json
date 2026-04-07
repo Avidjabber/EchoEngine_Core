@@ -1,7 +1,22 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(xargs grep:*)",
+      "Bash(find /d/CodingProjects/EchoEngine_Core/apps/api/src -type f -name \"*.ts\" ! -path \"*/generated/*\" -exec grep -l \"Discipline\\\\|Ability\\\\|Skill\" {} \\\\;)",
+      "Bash(npx prisma:*)",
+      "Bash(grep -n \"^model\\\\|^  //\" d:/CodingProjects/EchoEngine_Core/prisma/primary/schema.prisma)",
+      "Bash(grep -n \"leaderCatId\" /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)",
+      "Bash(grep -n \"maxCats\\\\|minCats\" /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)",
+      "Bash(grep -n \"baseClanRepReward\\\\|clanRep\" /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)",
+      "Bash(grep -n \"Clan rep\\\\|clan reputation\" /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)",
+      "Bash(wc -l /d/CodingProjects/EchoEngine_Core/docs/game-systems/*.md)",
+      "Bash(python scripts/reorganize_schema.py)",
+      "Bash(git checkout:*)",
+      "Bash(python scripts/strip_seed_comments.py)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }
