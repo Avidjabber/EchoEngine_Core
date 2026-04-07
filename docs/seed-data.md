@@ -1179,6 +1179,7 @@ ActionSystemType                        [ DONE ]
   -- and Action_EntityDailyRecord tracking only, no ActionType row points to them)
   farming_crop       Crop work UI: plant, harvest, uproot, or cross-breed a PlotCrop
   farming_tend       Tending UI: water, prune, or fertilize a PlotCrop
+  farming_compost    Deposit compost items into a compost structure; increases soil quality
   farming_plant      [internal] Plant a propagation item into an open plot slot
   farming_harvest    [internal] Harvest a mature PlotCrop
   farming_uproot     [internal] Uproot a PlotCrop at any stage
@@ -1209,5 +1210,6 @@ and ActionType_DisciplineReward.
   treat          Treat Patient        healing        false              true                       false                  null    Main XP flows from healing subsystem
   diagnose       Diagnose             diagnose       false              true                       false                  null    Reveals hidden symptoms; may identify condition
   clean          Clean Camp           clean          false              true                       false                  null
-  crop_work      Crop Work            farming_crop   false              true                       false                  null    Plant, harvest, uproot, or cross-breed; see farming-system.md
-  tend_crops     Tend Crops           farming_tend   false              true                       false                  null    Water, prune, or fertilize; tending sub-type tracked on Plot_TendRecord
+  crop_work      Crop Work            farming_crop     false              true                       false                  null    Plant, harvest, uproot, or cross-breed; see farming-system.md
+  tend_crops     Tend Crops           farming_tend     false              true                       false                  null    Water, prune, or fertilize; tending sub-type tracked on Plot_TendRecord
+  compost        Deposit to Compost   farming_compost  false              true                       false                  null    Deposits items into a compost structure; gatable via DisciplineRequirement

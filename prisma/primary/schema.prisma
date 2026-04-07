@@ -2756,6 +2756,21 @@ model CraftingInteraction {
   structureConfigs     StructureDef_CraftingConfig_Interaction[]
   upgradeUnlocks       StructureDef_Upgrade_CraftingInteraction[]
   guildRules           Guild_CraftingInteractionRule[]
+  guildConfigs         Guild_CraftingInteractionConfig[]
+}
+
+// Per-guild visibility config for a crafting interaction.
+// No row = interaction is enabled (shown) for that guild.
+// Add a row with isEnabled = false to hide the interaction and all its recipes from the guild's crafting UI.
+model Guild_CraftingInteractionConfig {
+  guildId               String  @db.VarChar(50)
+  craftingInteractionId Int
+  isEnabled             Boolean @default(true)
+
+  craftingInteraction CraftingInteraction @relation(fields: [craftingInteractionId], references: [id], onDelete: Cascade)
+
+  @@id([guildId, craftingInteractionId])
+  @@index([craftingInteractionId])
 }
 
 // Output quantity modes (global seed).

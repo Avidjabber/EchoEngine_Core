@@ -192,8 +192,12 @@ flows differently depending on the system:
                          On success: new ephemeral PlantDef + ephemeral seed Item created.
                          On failure: offspring inherits one parent's PlantDef unchanged.
 
-    Adding compost to a plot is an item interaction, not a crop_work action.
     See farming-system.md section 7 for full crop action reference.
+
+  systemType = "farming_compost"
+    Deposit compost items into a compost structure, increasing Plot.soilQuality.
+    Consumes a Compost StoredItem from storage. May be gated via
+    ActionType_DisciplineRequirement if the guild requires a Farming level.
 
   systemType = "farming_tend"
     Tend Crops action. Presents a picker: water, prune, or fertilize.

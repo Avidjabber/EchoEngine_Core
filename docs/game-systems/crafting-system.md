@@ -523,6 +523,7 @@ schema.
   "Does processing change nutritional values?"       → RecipeOutput_FoodOverride (sparse patch)
   "Does processing change how quantity is measured?" → RecipeOutput.outputMeasurementTypeId
   "What tags does the output item have?"             → source Item_IngredientType + AddTag - RemoveTag
+  "Is this interaction enabled for this guild?"        → Guild_CraftingInteractionConfig.isEnabled (no row = enabled)
   "Does this interaction require a structure/skill?"  → Guild_CraftingInteractionRule WHERE relationTypeId → "requires"
   "Does this structure improve my output?"            → Guild_CraftingInteractionRule WHERE relationTypeId → "improves"
   "Does this specific recipe require a structure/skill?" → Recipe_CraftingRequirement WHERE relationTypeId → "requires"
@@ -555,9 +556,23 @@ Which interactions a structure supports is defined in StructureDef_CraftingConfi
 (one row per supported interaction). Additional interactions can be unlocked by applying
 upgrades — see StructureDef_Upgrade_CraftingInteraction.
 
+GUILD VISIBILITY (Guild_CraftingInteractionConfig)
+───────────────────────────────────────────────────
+Guilds can hide specific crafting interactions entirely from their crafting UI.
+No row = interaction is visible (default). A row with isEnabled = false suppresses
+the interaction and all its recipes for that guild.
+
+Set during server setup. Useful for removing interactions that don't fit a guild's
+theme (e.g. hiding all smithing interactions for a guild that has no metalworking).
+
 GUILD RULES (Guild_CraftingInteractionRule)
 ────────────────────────────────────────────
-Per-guild rules control whether an interaction requires a structure and what improves it.
+Per-guild rules gate or improve an entire crafting interaction type — every recipe that uses
+that interaction inherits the gate automatically. This is the preferred place to enforce
+structure or discipline requirements that apply to all recipes of a given type (e.g. all
+Forge recipes require a forge structure and Crafting level 3). Recipe_CraftingRequirement
+should only be used for requirements specific to one recipe that differ from the interaction rule.
+
 If no rules exist for a guild+interaction, the interaction is available anywhere with no bonuses.
 
   relationTypeId  Int   FK → RelationType ("requires" | "improves")
