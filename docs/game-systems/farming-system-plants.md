@@ -195,8 +195,8 @@ modifier for each. Ephemeral PlantDefs carry their own rows.
 
   plantDefId          Int    FK → PlantDef
   plotTypeId          Int    FK → PlotType
-  growthRateModifier  Float  Signed delta added to the growth total. 0.0 = neutral.
-                             0.3 = +30%. -0.2 = -20% (worse plot for this plant).
+  growthRateModifier  Float  Added to the growth rate. 0.0 = no effect.
+                             0.3 = faster growth. -0.2 = slower growth (worse plot for this plant).
 
 RULE: No rows = plant can be placed in any plot type at 0.0 (neutral).
 RULE: If rows exist, plant may only be placed in matching plot types.
@@ -216,9 +216,8 @@ ephemeral variants do not exist in the wild.
                              in this biome. Scaled at runtime by PlantDef_EnvConditionEffect
                              spawn_rate rows for each active env condition at the location.
                              Only meaningful on base (non-ephemeral) PlantDefs.
-  growthRateModifier  Float  Signed delta added to the cultivated growth total when this
-                             plant is grown at a location in this biome. 0.0 = neutral.
-                             Meaningful on both base and ephemeral PlantDefs.
+  growthRateModifier  Float  Added to the growth rate for crops grown at a location in this
+                             biome. 0.0 = no effect. Meaningful on both base and ephemeral PlantDefs.
                              Ephemeral PlantDefs inherit and may mutate this value;
                              spawnRate is not inherited (ephemerals don't appear in the wild).
 
@@ -279,8 +278,8 @@ STACKING FORMULA (per effectType, across all active conditions and their stacks)
 RULE: Only one row per (plantDefId, envConditionId, effectType) — DB-enforced unique.
 RULE: spawn_rate and spawn_weight rows are only read from the base (non-ephemeral)
       PlantDef. Ephemeral variants do not appear in the wild.
-RULE: growth_rate netModifier is combined with biome, plot type, and soil quality
-      in the growth formula. No separate season delta — seasonal effects are
+RULE: growth_rate modifier is combined with biome, plot type, and soil quality
+      in the growth formula. There is no separate season modifier — seasonal effects are
       just env condition rows referencing the seasonal env condition.
 
 
@@ -295,7 +294,7 @@ Seeded lookup table of heritable trait definitions. Static — never altered via
   description   String?
 
 Seeded values:
-  growth_rate          Signed delta added to the growth total. 0.0 = no inherent speed modifier.
+  growth_rate          Added to the growth rate. 0.0 = no effect.
   yield                Multiplier on harvest quantity rolls. 1.0 = default.
   potency              Feeds into StoredItem.craftBonus on herb/medicine outputs.
   nutrition            Feeds into StoredItem.craftBonus on food outputs.
@@ -335,9 +334,8 @@ there are no globally seeded values. Examples: "Open Farmland", "Hydroponics Bay
   guildId        String   Owning guild.
   name           String   Display name. Unique per guild.
   description    String?  Optional flavour text.
-  soilQualityCap Float    Maximum soilQuality delta achievable via composting. Default 1.0
-                          (+100% maximum contribution from soil). A hydroponics bay might
-                          allow 1.5; rocky terrain might cap at 0.3.
+  soilQualityCap Float    Maximum soilQuality achievable via composting. Default 1.0.
+                          A hydroponics bay might allow 1.5; rocky terrain might cap at 0.3.
 
 ──────────────────────
 PlotType_EnvCondition
@@ -372,18 +370,21 @@ owning StructureDef_FarmingConfig — see structure-system.md section 4a.
 
   structureId       Int      FK → Structure. The farming structure this plot belongs to.
   name              String?  Optional label (e.g. "Plot 1", "East Bed").
-  soilQuality       Float    Signed delta added to the growth and harvest totals.
-                             0.0 = neutral (no contribution). Positive = enriched soil.
-                             Negative = degraded soil (slows growth but does not block it).
-                             Initialized from StructureDef_FarmingConfig.defaultSoilQuality.
+  soilQuality       Float    Added to the growth rate. 0.0 = no effect. Positive = enriched
+                             soil (grows faster). Negative = degraded soil (grows slower,
+                             does not block). Initialized from StructureDef_FarmingConfig.defaultSoilQuality.
 
 Location and PlotType are derived at runtime via Plot → Structure → Camp and
 Plot → Structure → StructureDef → StructureDef_FarmingConfig respectively.
 
 Soil quality interaction (app-maintained on daily tick):
-  - Filth env condition active   → soilQuality degrades slowly (decrements delta)
-  - Toxic env condition active   → soilQuality degrades faster
+  - Filth env condition active   → soilQuality decreases slowly
+  - Toxic env condition active   → soilQuality decreases faster
   - Compost applied (crafting)   → soilQuality increases, capped at PlotType.soilQualityCap
+
+On PlotCrop removal (uproot or replant):
+  Delete Plot_TendRecord rows for this plot. Delete Plot_Buff rows for this plot.
+  The slot starts clean for the next crop.
 
 ──────────────────────
 Plot_Buff
@@ -397,7 +398,7 @@ target a plot. Both use the same table — effectValue may be positive or negati
   plotId          Int      FK → Plot
   sourceEntityId  Int      FK → Entity. Who applied the buff.
   effectType      String   growth_rate | yield | decay_resistance
-  effectValue     Float    Additive delta applied while buff is active.
+  effectValue     Float    Applied while buff is active. Positive = buff, negative = debuff.
   appliedAt       DateTime
   expiresAt       DateTime appliedAt + ability-defined durationHours.
 
@@ -457,9 +458,10 @@ HARVEST YIELD DECAY FORMULA
 
   growthProgression Float     Accumulated growth points this stage. Increments each daily tick by
                               dailyGrowthRate (see formula). Resets to 0 when a stage advances.
-  carePoints        Int       Accumulated tending care points since planting. Default 0.
-                              Incremented by tending actions. Used at cross-breeding time
-                              to compute carePercentage for mutation direction bias.
+  carePoints        Int       Accumulated tending care points for this plant's lifetime.
+                              Incremented by tending actions via PlotCrop_TendRecord resolution.
+                              Used at cross-breeding time to compute carePercentage for
+                              mutation direction bias.
 
 See section 5 for the full growth tick formula, pre-flight checks, and examples.
 
@@ -511,17 +513,19 @@ Cross-breeding (one entity, two parent crops):
   to be determined at implementation time.
 
 ──────────────────────
-PlotCrop_TendRecord
+Plot_TendRecord
 ──────────────────────
 
-Tracks when each tending action type was last performed on a crop. Enforces
-the per-systemType cooldown and prevents care point double-dipping.
+Tracks when each tending action type was last performed on a plot slot. Enforces
+the per-systemType cooldown. The lock is crop-level: one entity tending resets
+the clock for all entities on that slot.
+Rows are deleted when the PlotCrop is removed (uproot or replant).
 
-  plotCropId       Int     FK → PlotCrop
+  plotId           Int     FK → Plot
   systemType       String  FK → ActionSystemType. e.g. "farming_water"
   lastPerformedAt  DateTime
 
-PK is (plotCropId, systemType).
+PK is (plotId, systemType).
 
 On tending action resolution:
   1. Check: lastPerformedAt + ActionSystemType.cooldownHours > now → blocked, show cooldown.
@@ -598,46 +602,44 @@ Before advancing growth, check kills:
 Seasonal behaviour is encoded in env condition rows (block growth_rate for dormant
 seasons; kills survival for frost-kill seasons).
 
-  env_condition_growth_delta =
+  env_condition_growth_modifier =
     SUM over all active env conditions that have a PlantDef_EnvConditionEffect
     growth_rate row for this plant:
-      rawDelta(c) = Σ(increase.value × stackCount) − Σ(decrease.value × stackCount)
-      effectiveDelta(c) = rawDelta(c) × (1.0 − conditionOverride(c))
+      raw(c)       = Σ(increase.value × stackCount) − Σ(decrease.value × stackCount)
+      effective(c) = raw(c) × (1.0 − conditionOverride(c))
       conditionOverride(c) = MIN(1.0, SUM of effectValues of env_override upgrades
                              applied to this structure targeting env condition c)
     Each condition is overridden independently.
-    override 0 = full delta applies; override 1 = delta fully counteracted (0).
+    override 0 = full value applies; override 1 = fully counteracted (0).
 
-  totalGrowthMod =
+  totalGrowthRate =
       1.0
-      + biome_delta                     (PlantDef_Biome; 0.0 if no row)
-      + plotType_delta                  (PlantDef_PlotType; 0.0 if no row)
-      + soilQuality                     (Plot.soilQuality delta)
-      + env_condition_growth_delta      (net from all active conditions; 0.0 if none)
-      + growth_rate_trait_delta         (PlantDef_Trait growth_rate; 0.0 if no row)
-      + structure_growth_delta          (SUM of growth_rate upgrade effectValues; 0.0 if none)
-      + plot_buff_growth_delta          (SUM of active Plot_Buff growth_rate effectValues; 0.0 if none)
+      + biome_modifier                  (PlantDef_Biome.growthRateModifier; 0.0 if no row)
+      + plotType_modifier               (PlantDef_PlotType.growthRateModifier; 0.0 if no row)
+      + soilQuality                     (Plot.soilQuality; 0.0 if not set)
+      + env_condition_growth_modifier   (net from all active conditions; 0.0 if none)
+      + trait_modifier                  (PlantDef_Trait growth_rate; 0.0 if no row)
+      + structure_growth_modifier       (SUM of growth_rate upgrade effectValues; 0.0 if none)
+      + plot_buff_growth_modifier       (SUM of active Plot_Buff growth_rate effectValues; 0.0 if none)
 
-  dailyGrowthRate = max(totalGrowthMod, floor)
+  dailyGrowthRate = max(totalGrowthRate, floor)
   growthProgression += dailyGrowthRate each tick.
   Stage advances when growthProgression >= PlantDef.growthCap.
 
 Example — good conditions (spring env active, native biome, composted, thriving variant):
   growthCap = 3
-  env_delta (spring boost)=0.3, biome_delta=0.2, plotType_delta=0.1, soilQuality=0.2
-  growth_rate_trait=0.1
+  env_condition=0.3, biome=0.2, plotType=0.1, soilQuality=0.2, trait=0.1
   dailyGrowthRate = 1.0 + 0.3 + 0.2 + 0.1 + 0.2 + 0.1 = 1.9 points/day
   → stage advances after 3 / 1.9 ≈ 1.6 days
 
 Example — unfavourable conditions (cold env active, wrong biome, neglected soil):
   growthCap = 3
-  env_delta (cold penalty)=-0.2, biome_delta=0.0, plotType_delta=0.0, soilQuality=-0.1
-  growth_rate_trait=0.0
+  env_condition=-0.2, biome=0.0, plotType=0.0, soilQuality=-0.1, trait=0.0
   dailyGrowthRate = 1.0 − 0.2 − 0.1 = 0.7 points/day
   → stage advances after 3 / 0.7 ≈ 4.3 days
 
 Example — bad plot type, no other penalties:
-  growthCap = 3, plotType_delta=-0.3, everything else 0.0
+  growthCap = 3, plotType=-0.3, everything else 0.0
   dailyGrowthRate = 0.7 points/day → stage advances after ≈ 4.3 days
 
 

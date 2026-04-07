@@ -5261,7 +5261,7 @@ model PlantDef_Biome {
   plantDefId          Int
   biomeId             Int
   spawnRate           Float @default(0.0)  // base weight per foraging attempt; scaled by PlantDef_EnvConditionEffect spawn_rate rows; only read from base PlantDef
-  growthRateModifier  Float @default(0.0)  // signed delta for cultivated growth in this biome; 0.0 = neutral; ephemerals inherit and may mutate this value
+  growthRateModifier  Float @default(0.0)  // added to growth rate for crops in this biome; 0.0 = no effect; ephemerals inherit and may mutate this value
 
   plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
   biome    Biome    @relation(fields: [biomeId],    references: [id], onDelete: Restrict)
@@ -5322,7 +5322,7 @@ model PlantDef_EnvConditionEffect {
 model PlantDef_PlotType {
   plantDefId          Int
   plotTypeId          Int
-  growthRateModifier  Float @default(0.0)  // signed delta; 0.0 = neutral; 0.3 = +30%; -0.2 = -20%
+  growthRateModifier  Float @default(0.0)  // added to growth rate; 0.0 = no effect; negative values reduce it
 
   plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Cascade)
   plotType PlotType @relation(fields: [plotTypeId], references: [id], onDelete: Restrict)
@@ -5369,17 +5369,20 @@ model PlotType_EnvCondition {
 // A single growing slot within a farming structure. One Plot = one PlotCrop at a time.
 // Created when a farming structure is built (basePlotCount rows) and when plot_count upgrades complete.
 // PlotType is derived via Plot → Structure → StructureDef → StructureDef_FarmingConfig.
+// carePoints, TendRecord rows, and Buff rows all live on Plot (not on the crop).
+// On PlotCrop removal (uproot or replant): reset carePoints = 0, delete Plot_TendRecord rows, delete Plot_Buff rows.
 model Plot {
   id          Int     @id @default(autoincrement())
   structureId Int                  // FK → Structure (farming-type)
   name        String? @db.VarChar(100)
-  soilQuality Float   @default(0.0)  // signed delta added to the growth/yield total; 0.0 = neutral; positive = enriched; negative = degraded
+  soilQuality Float   @default(0.0)  // added to growth rate; 0.0 = no effect; positive = enriched; negative = degraded
 
   createdAt DateTime @default(now()) @db.Timestamptz
 
-  structure Structure  @relation(fields: [structureId], references: [id], onDelete: Cascade)
-  buffs     Plot_Buff[]
-  crops     PlotCrop[]
+  structure   Structure         @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  buffs       Plot_Buff[]
+  crops       PlotCrop[]
+  tendRecords Plot_TendRecord[]
 }
 
 // Active timed buffs on a plot, written when a skilled farmer tends and has a matching Ability_ActionTrigger.
@@ -5400,34 +5403,36 @@ model Plot_Buff {
 }
 
 // A live instance of a plant growing at a plot. One PlotCrop per plot at a time (enforced via Plot).
+// Owns the plant's lifecycle metrics: care points, growth state, harvest count, planted timestamp.
+// Tending cooldown records and buffs live on Plot (per-slot), but carePoints lives here because
+// it tracks this specific plant's care history and pairs directly with plantedAt for cross-breeding.
 model PlotCrop {
-  id           Int      @id @default(autoincrement())
-  plotId       Int      @unique   // one crop per plot at a time
-  plantDefId   Int
-  plantedAt        DateTime @default(now()) @db.Timestamptz  // used for care percentage at cross-breeding time
-  currentStage     Int      @default(0)    // 0 = seedling; PlantDef.growthStages = harvestable
-  growthProgression Float   @default(0.0) // accumulated growth points this stage; increments each daily tick by
-                                           // dailyGrowthRate (see formula). When >= PlantDef.growthCap, stage advances and resets to 0.
-  harvestCount     Int      @default(0)    // increments each harvest; blocks harvest_crop when >= PlantDef.maxHarvests
-  carePoints       Int      @default(0)    // accumulated tending care points; used at cross-breeding for mutation bias
+  id                Int      @id @default(autoincrement())
+  plotId            Int      @unique   // one crop per plot at a time
+  plantDefId        Int
+  plantedAt         DateTime @default(now()) @db.Timestamptz  // when this plant was put in the ground; denominator for cross-breeding care percentage
+  currentStage      Int      @default(0)    // 0 = seedling; PlantDef.growthStages = harvestable
+  growthProgression Float    @default(0.0)  // accumulated growth points this stage; resets when a stage advances
+  harvestCount      Int      @default(0)    // increments each harvest; blocks harvest_crop when >= PlantDef.maxHarvests
+  carePoints        Int      @default(0)    // accumulated tending care points for this plant's lifetime; used at cross-breeding for mutation bias
 
-  plot        Plot            @relation(fields: [plotId],      references: [id], onDelete: Cascade)
-  plantDef    PlantDef        @relation(fields: [plantDefId],  references: [id], onDelete: Restrict)
-  tendRecords PlotCrop_TendRecord[]
+  plot     Plot     @relation(fields: [plotId],     references: [id], onDelete: Cascade)
+  plantDef PlantDef @relation(fields: [plantDefId], references: [id], onDelete: Restrict)
 }
 
-// Tracks when each tending action type was last performed on a crop.
-// Enforces per-systemType cooldown and prevents care point double-dipping.
-// PK is (plotCropId, systemType).
-model PlotCrop_TendRecord {
-  plotCropId      Int
+// Tracks when each tending action type was last performed on a plot slot.
+// Enforces the per-systemType cooldown (crop-level lock — one entity tending resets the clock for all).
+// Deleted when the PlotCrop is removed; carePoints on Plot is reset at the same time.
+// PK is (plotId, systemType).
+model Plot_TendRecord {
+  plotId          Int
   systemType      String   @db.VarChar(50)   // FK → ActionSystemType
   lastPerformedAt DateTime @db.Timestamptz
 
-  plotCrop         PlotCrop         @relation(fields: [plotCropId],  references: [id], onDelete: Cascade)
-  actionSystemType ActionSystemType @relation(fields: [systemType],  references: [id], onDelete: Restrict)
+  plot             Plot             @relation(fields: [plotId],    references: [id], onDelete: Cascade)
+  actionSystemType ActionSystemType @relation(fields: [systemType], references: [id], onDelete: Restrict)
 
-  @@id([plotCropId, systemType])
+  @@id([plotId, systemType])
 }
 
 // ============================================================
