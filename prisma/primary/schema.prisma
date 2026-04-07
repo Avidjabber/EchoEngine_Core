@@ -296,13 +296,17 @@ model Stat {
 
   envConditionModifiers  EnvCondition_StatModifier[]
   conditionStatEffects   ConditionDef_StatEffect[]
-  eventChoiceDefs      EventChoiceDef[]
-  proficiencyDefs                  ProficiencyDef[]
-  profilesAsDamageStat ItemEquipmentProfile[] @relation("ProfileDamageStat")
-  profilesAsHitStat    ItemEquipmentProfile[] @relation("ProfileHitStat")
-  profilesAsHealStat   ItemEquipmentProfile[] @relation("ProfileHealStat")
-  conditionCombatEffects       ConditionDef_CombatEffect[]
+  eventChoiceDefs        EventChoiceDef[]
+  proficiencyDefs        ProficiencyDef[]
+  profilesAsDamageStat   ItemEquipmentProfile[]   @relation("ProfileDamageStat")
+  profilesAsHitStat      ItemEquipmentProfile[]   @relation("ProfileHitStat")
+  profilesAsHealStat     ItemEquipmentProfile[]   @relation("ProfileHealStat")
+  conditionCombatEffects ConditionDef_CombatEffect[]
   abilityStatModifiers   Ability_StatModifier[]
+  actionStepDefaults           ActionType_Step[]                  @relation("ActionStepDefaultStat")
+  actionStepConfigs            Guild_ActionStep_Config[]          @relation("ActionStepConfigStat")
+  speciesActionStepDefaults    Species_ActionStep[]               @relation("SpeciesActionStepDefaultStat")
+  guildSpeciesActionStepConfigs Guild_Species_ActionStep_Config[] @relation("GuildSpeciesActionStepStat")
 }
 
 // Symptom labels — shared between ConditionDef (via ConditionDef_SymptomTag) and ItemEffect.
@@ -777,7 +781,8 @@ model Species {
   defaultAbilities      Species_DefaultAbility[]
   equipmentLoadout    Species_EquipmentLoadout[]
   speciesTypes        Species_SpeciesType[]
-  summonedByProfiles  ItemEquipmentProfile[]     @relation("ProfileSummonSpecies")
+  summonedByProfiles        ItemEquipmentProfile[]             @relation("ProfileSummonSpecies")
+  speciesActionStepConfigs  Guild_Species_ActionStep_Config[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -1275,10 +1280,9 @@ model Rank_DefaultItem {
 
 
 
-// Skills (guild-extensible; guildId = "global" for seeded skills)
-//
-// Each skill is governed by exactly one stat (D&D style). Roll = 1d20 + stat modifier.
-// If the entity is proficient in the skill, add the guild proficiency bonus on top.
+// Guild-scoped proficiency definitions. Seeded at guild initialization; guilds and modules may add their own.
+// Each proficiency is governed by exactly one stat (D&D style).
+// Roll = 1d20 + stat modifier + guild proficiency bonus (if entity is proficient).
 model ProficiencyDef {
   id          Int     @id @default(autoincrement())
   guildId     String  @db.VarChar(50)
@@ -1292,9 +1296,11 @@ model ProficiencyDef {
   entityProficiencies          Entity_Proficiency[]
   conditionEffects             ConditionDef_ProficiencyEffect[]
   abilityProficiencyModifiers  Ability_ProficiencyModifier[]
-  envConditionMods           EnvCondition_ProficiencyModifier[]
-  eventChoiceDefs            EventChoiceDef[]
-  combatActionConditions      ItemEquipmentProfile_Condition[]
+  envConditionMods             EnvCondition_ProficiencyModifier[]
+  eventChoiceDefs              EventChoiceDef[]
+  combatActionConditions       ItemEquipmentProfile_Condition[]
+  actionStepConfigs            Guild_ActionStep_Config[]
+  guildSpeciesActionStepConfigs Guild_Species_ActionStep_Config[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -4119,6 +4125,7 @@ model ActionType {
   disciplineRewards      ActionType_DisciplineReward[]
   disciplineRequirements ActionType_DisciplineRequirement[]
   entityUsage            Entity_ActionUsage[]
+  steps                  ActionType_Step[]
 }
 
 // Per-guild configuration for a global action type.
@@ -4196,6 +4203,93 @@ model ActionType_DisciplineRequirement {
   @@id([guildId, actionTypeId, disciplineId])
   @@index([actionTypeId])
   @@index([disciplineId])
+}
+
+// Engine-defined resolution steps for an action type. Each step represents one roll in the
+// action's resolution sequence. Steps are global — every guild uses the same step structure
+// per action type; only the proficiency or stat used for each step is guild-configurable.
+//
+// stepOrder: resolution sequence (lower = resolved first).
+// description: what this roll determines in the resolution narrative.
+// defaultStatId: engine-suggested fallback stat if a guild has not configured this step.
+//   null = flat d20 with no modifier.
+model ActionType_Step {
+  id           Int    @id @default(autoincrement())
+  actionTypeId Int
+  codeName      String @db.VarChar(100)  // snake_case slug; unique per action type
+  description   String @db.VarChar(500)  // what this roll determines
+  defaultStatId Int?                     // engine-suggested stat fallback; null = flat d20
+
+  actionType       ActionType @relation(fields: [actionTypeId], references: [id], onDelete: Cascade)
+  defaultStat      Stat?      @relation("ActionStepDefaultStat", fields: [defaultStatId], references: [id], onDelete: SetNull)
+  guildConfigs     Guild_ActionStep_Config[]
+  speciesBehaviors Species_ActionStep[]
+
+  @@unique([actionTypeId, codeName])
+  @@index([actionTypeId])
+  @@index([defaultStatId])
+}
+
+// Per-guild proficiency or stat assignment for an action resolution step.
+// Exactly one of proficiencyDefId or statId should be set:
+//   proficiencyDefId set — roll = 1d20 + governing stat modifier + proficiency bonus (if proficient)
+//   statId set, proficiencyDefId null — roll = 1d20 + stat modifier (no proficiency bonus)
+//   neither set — falls back to ActionType_Step.defaultStatId, then flat d20 if that is also null
+model Guild_ActionStep_Config {
+  guildId          String @db.VarChar(50)
+  stepId           Int
+
+  proficiencyDefId Int?  // guild-chosen proficiency; null = use statId or engine default
+  statId           Int?  // raw stat roll; only set when proficiencyDefId is null
+
+  step           ActionType_Step @relation(fields: [stepId],           references: [id], onDelete: Cascade)
+  proficiencyDef ProficiencyDef? @relation(fields: [proficiencyDefId], references: [id], onDelete: Restrict)
+  stat           Stat?           @relation("ActionStepConfigStat", fields: [statId], references: [id], onDelete: Restrict)
+
+  @@id([guildId, stepId])
+  @@index([stepId])
+  @@index([proficiencyDefId])
+  @@index([statId])
+}
+
+// Engine-defined prey-side step types. Global lookup table — same role as CraftingInteraction.
+// codeNames are shared with ActionType_Step so the engine can cross-reference during resolution.
+// Guilds connect their species to these steps and assign proficiency via Guild_Species_ActionStep_Config.
+model Species_ActionStep {
+  id            Int    @id @default(autoincrement())
+  codeName      String @unique @db.VarChar(100)
+  description   String @db.VarChar(500)
+  defaultStatId Int?   // engine-suggested stat fallback; null = flat d20
+
+  defaultStat  Stat?                            @relation("SpeciesActionStepDefaultStat", fields: [defaultStatId], references: [id], onDelete: SetNull)
+  guildConfigs Guild_Species_ActionStep_Config[]
+
+  @@index([defaultStatId])
+}
+
+// Per-guild join table connecting a species to a prey-side step with a proficiency or stat assignment.
+// Exactly one of proficiencyDefId or statId should be set:
+//   proficiencyDefId set — roll = 1d20 + governing stat modifier + proficiency bonus (if proficient)
+//   statId set, proficiencyDefId null — roll = 1d20 + stat modifier (no proficiency bonus)
+//   neither set — falls back to Species_ActionStep.defaultStatId, then flat d20 if that is also null
+model Guild_Species_ActionStep_Config {
+  guildId             String @db.VarChar(50)
+  speciesId           Int
+  speciesActionStepId Int
+
+  proficiencyDefId Int?  // guild-chosen proficiency for this species on this step
+  statId           Int?  // raw stat roll; only set when proficiencyDefId is null
+
+  species           Species            @relation(fields: [speciesId],           references: [id], onDelete: Cascade)
+  speciesActionStep Species_ActionStep @relation(fields: [speciesActionStepId], references: [id], onDelete: Cascade)
+  proficiencyDef    ProficiencyDef?    @relation(fields: [proficiencyDefId],    references: [id], onDelete: Restrict)
+  stat              Stat?              @relation("GuildSpeciesActionStepStat",  fields: [statId], references: [id], onDelete: Restrict)
+
+  @@id([guildId, speciesId, speciesActionStepId])
+  @@index([speciesId])
+  @@index([speciesActionStepId])
+  @@index([proficiencyDefId])
+  @@index([statId])
 }
 
 // Tracks how many times an entity has started each action type on a given calendar day.

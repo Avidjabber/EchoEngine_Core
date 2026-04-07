@@ -1251,3 +1251,73 @@ and ActionType_DisciplineReward.
   crop_work      Crop Work            farming_crop     false              true                       false                  null    Plant, harvest, uproot, or cross-breed; see farming-system.md
   tend_crops     Tend Crops           farming_tend     false              true                       false                  null    Water, prune, or fertilize; tending sub-type tracked on Plot_TendRecord
   compost        Deposit to Compost   farming_compost  false              true                       false                  null    Deposits items into a compost structure; gatable via DisciplineRequirement
+
+
+──────────────────────────────────────────────
+ActionType_Step                         [ DONE ]
+──────────────────────────────────────────────
+Engine-defined resolution steps per action type. Global — every guild uses the same step
+definitions for a given action type. Guilds assign which proficiency or stat to use per step
+via Guild_ActionStep_Config. Species-side step participation is seeded in Species_ActionStep;
+guild-side proficiency for species rolls lives in Guild_Species_ActionStep_Config.
+
+All crafting steps default to Intelligence. Each recipe invokes exactly one interaction.
+
+  actionType  codeName  defaultStat  description
+  ──────────  ────────  ───────────  ──────────────────────────────────────────────────────────────────
+  crafting    brew      INT          Crafter rolls to steep and extract properties from ingredients
+  crafting    dry       INT          Crafter rolls to dry ingredients without losing potency
+  crafting    grind     INT          Crafter rolls to grind ingredients to the correct consistency
+  crafting    mash      INT          Crafter rolls to mash ingredients into a workable pulp
+  crafting    bake      INT          Crafter rolls to bake ingredients at the correct heat and duration
+  crafting    render    INT          Crafter rolls to render animal fat cleanly without scorching
+  crafting    crush     INT          Crafter rolls to apply the right pressure to break down ingredients
+  crafting    butcher   INT          Crafter rolls to cleanly butcher and recover usable parts
+  crafting    craft     INT          Crafter rolls to assemble components into the finished item
+  crafting    carve     INT          Crafter rolls to shape the material precisely with a cutting tool
+  crafting    weave     INT          Crafter rolls to interlace fibers into a consistent, durable form
+  crafting    tan       INT          Crafter rolls to treat the hide through the tanning process
+  crafting    smelt     INT          Crafter rolls to correctly melt and refine the raw ore
+  crafting    forge     INT          Crafter rolls to shape the heated metal into the desired form
+  crafting    temper    INT          Crafter rolls to complete the tempering cycle without cracking the metal
+  crafting    kiln      INT          Crafter rolls to fire the clay or ceramic at the correct temperature
+
+Hunter-side steps (locate_prey, pursuit) are resolved via Guild_ActionStep_Config.
+Prey-side steps (avoid_detection, escape) are resolved via Guild_Species_ActionStep_Config
+using the Species_ActionStep codeName to cross-reference.
+
+  actionType     codeName         defaultStat  description
+  ─────────────  ───────────────  ───────────  ──────────────────────────────────────────────────────────────────
+  hunting        locate_prey      WIS          Hunter rolls to detect prey in the location
+
+  actionType     codeName         defaultStat  description
+  ─────────────  ───────────────  ───────────  ──────────────────────────────────────────────────────────────────
+  border_patrol  patrol_start     WIS          
+
+  actionType     codeName         defaultStat  description
+  ─────────────  ───────────────  ───────────  ──────────────────────────────────────────────────────────────────
+  foraging       locate_plants    WIS          
+  foraging       locate_items     WIS          
+
+  actionType     codeName         defaultStat  description
+  ─────────────  ───────────────  ───────────  ──────────────────────────────────────────────────────────────────
+  border_patrol  patrol_start     WIS          
+
+  actionType     codeName         defaultStat  description
+  ─────────────  ───────────────  ───────────  ──────────────────────────────────────────────────────────────────
+  treat          treat_patient    INT          
+  diagnose       diagnose_patient INT          
+
+──────────────────────────────────────────────
+Species_ActionStep                      [ DONE ]
+──────────────────────────────────────────────
+Engine-defined lookup table of prey-side step types. Same role as CraftingInteraction —
+a global slug list the engine dispatches on. Guilds connect their species to these steps
+and assign proficiency/stat via Guild_Species_ActionStep_Config.
+
+  codeName          defaultStat  description
+  ────────────────  ───────────  ──────────────────────────────────────────
+  avoid             DEX          Prey rolls to avoid being noticed
+  counter_avoid     DEX          Hunter rolls to find this specific prey
+  escape            DEX          Prey rolls to outpace the pursuer
+  counter_escape    DEX          Hunter rolls to successfully counter the prey's escape attempt

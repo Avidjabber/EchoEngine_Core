@@ -282,12 +282,78 @@ EXAMPLE — Advanced Herb Gathering (all participants must qualify):
 
 
 ─────────────────────────────────────────────
-7. SCHEMA SUMMARY
+7. ACTION RESOLUTION STEPS
+─────────────────────────────────────────────
+
+Some action types (hunting, foraging, etc.) resolve through a sequence of rolls rather than a
+single outcome. Each roll is defined as a step on the action type and guild-configured to use
+whichever proficiency or stat fits the guild's RP setting.
+
+ActionType_Step defines the engine-side structure: what each roll is and what it determines in
+the narrative. Resolution order is hardcoded in the engine. Steps are global — every guild uses
+the same step definitions for a given action type.
+
+  codeName      — snake_case slug the engine dispatches on (e.g. "locate_prey", "avoid_detection")
+  description   — what this roll determines in the resolution narrative
+  defaultStatId — engine-suggested fallback stat if a guild has not configured this step;
+                  null = flat d20 with no modifier
+
+Guild_ActionStep_Config is the per-guild assignment of proficiency or stat to each step (the
+hunter/actor side):
+
+  proficiencyDefId set — roll = 1d20 + governing stat modifier + proficiency bonus (if proficient)
+  statId set (no proficiencyDefId) — roll = 1d20 + stat modifier only; no proficiency bonus
+  neither set — engine falls back to ActionType_Step.defaultStatId, then flat d20
+
+This produces four tables total — two for the actor/hunter side, two for the species/prey side:
+
+This produces four tables — two for the actor/hunter side, two for the species/prey side:
+
+  ActionType_Step                 — global: engine defines the step sequence per action type with defaultStatId fallback
+  Guild_ActionStep_Config         — guild: assigns proficiency/stat the hunter uses per step
+  Species_ActionStep              — global: lookup table of prey-side step types (codeName + defaultStatId); same role as
+                                    CraftingInteraction — a slug list the engine dispatches on
+  Guild_Species_ActionStep_Config — guild: join table connecting species + prey step + proficiency/stat assignment
+
+The codeName on Species_ActionStep matches the codeName on ActionType_Step so the engine can
+cross-reference during resolution — e.g. when it reaches the avoid_detection step in a hunt,
+it looks up the prey species' Guild_Species_ActionStep_Config row for avoid_detection.
+
+Guild_ActionStep_Config and Guild_Species_ActionStep_Config share the same fallback chain:
+  proficiencyDefId set — roll = 1d20 + governing stat modifier + proficiency bonus (if proficient)
+  statId set (no proficiencyDefId) — roll = 1d20 + stat modifier only; no proficiency bonus
+  neither set — falls back to the definition table's defaultStatId, then flat d20 if also null
+
+EXAMPLE — Hunting (four steps):
+  locate_prey      defaultStat=WIS  "Hunter rolls to detect prey in the location"
+  avoid_detection  defaultStat=DEX  "Prey rolls to avoid being noticed"
+  pursuit          defaultStat=DEX  "Hunter rolls to close the distance before prey flees"
+  escape           defaultStat=DEX  "Prey rolls to outpace the hunter"
+
+  Guild_ActionStep_Config (hunter side, Warriors Cats guild):
+    locate_prey     → proficiency: tracking
+    avoid_detection → proficiency: perception
+    pursuit         → proficiency: hunting
+    escape          → stat: DEX
+
+  Guild_Species_ActionStep_Config (prey side, Warriors Cats guild):
+    mouse  + avoid_detection → proficiency: stealth
+    mouse  + escape          → proficiency: stealth
+    rabbit + avoid_detection → proficiency: athletics
+    rabbit + escape          → proficiency: athletics
+
+
+─────────────────────────────────────────────
+8. SCHEMA SUMMARY
 ─────────────────────────────────────────────
 
   ActionSystemType              — seeded reference table; one row per bot subsystem
   ActionType                    — bot-defined universal definition; systemTypeId FK → ActionSystemType
+  ActionType_Step               — engine-defined resolution steps; global; PK autoincrement, @@unique([actionTypeId, codeName])
   Guild_ActionConfig            — per-guild costs and limits; PK is (guildId, actionTypeId)
+  Guild_ActionStep_Config           — per-guild proficiency/stat assignment per step (actor/hunter side); PK is (guildId, stepId)
+  Species_ActionStep                — global lookup table of prey-side step types; PK autoincrement, codeName unique
+  Guild_Species_ActionStep_Config   — per-guild join: species + prey step + proficiency/stat; PK is (guildId, speciesId, speciesActionStepId)
   ActionType_DisciplineReward   — per-guild XP rewards; PK is (guildId, actionTypeId, disciplineId, recipientScope)
                                   allowing the same discipline to reward winners and losers at different amounts
   ActionType_DefaultItem        — items shadow-equipped during the action
