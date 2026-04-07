@@ -237,6 +237,7 @@ model EffectType {
   isSpecies       Boolean @default(false)
   isAbility       Boolean @default(false)
   isEnvModifier   Boolean @default(false)  // valid for EnvCondition_Modifier (global world effects e.g. filth, spoilage)
+  isLocation      Boolean @default(false)  // valid for Location_Buff (location-wide effects e.g. crop growth, hunting difficulty)
 
   plantDefEnvConditionEffect      PlantDef_EnvConditionEffect[]
   plantTypeEnvConditionEffect     PlantType_EnvConditionEffect[]
@@ -247,6 +248,8 @@ model EffectType {
   abilityPresenceEffects          Ability_PresenceEffect[]
   plotBuffs                       Plot_Buff[]
   envConditionModifiers           EnvCondition_Modifier[]
+  locationEffects                 Location_Effect[]
+  eventLocationBuffEffects        EventEffect[]                 @relation("EventLocationBuffEffect")
 }
 
 
@@ -937,6 +940,7 @@ model Entity {
   housing                Entity_Housing?
   constructionsInitiated Construction[]
   plotBuffs              Plot_Buff[]
+  locationEffects        Location_Effect[]
   dailyActionRecords     Action_EntityDailyRecord[]
 
   actionParticipations  ActionInstance_Entity[]
@@ -3928,6 +3932,7 @@ model Location {
   actionInstances   ActionInstance[]
   eventTriggers     EventDef_Location[]
   camps             Camp[]
+  effects           Location_Effect[]
 
   @@unique([guildId, name])
   @@index([guildId])
@@ -4517,6 +4522,7 @@ model EventDef {
   // Back-relations
   profileTriggers ItemEquipmentProfile[]
   cooldowns       EventCooldown[]
+  unresolvedStates EventUnresolvedState[]
   activeEvents       ActiveEvent[]
 
   @@unique([guildId, codeName])
@@ -4702,6 +4708,11 @@ model EventStepDef {
 //   minQuantity / maxQuantity — rolled quantity range
 //   isGain        — true = items added; false = items removed/consumed
 //   targetScopeId — who receives/loses the item
+//
+// location_buff fields (effectType = "location_buff"):
+//   locationBuffEffectTypeId — which EffectType to apply as a location buff/debuff
+//   locationBuffValue        — the effect value (positive = buff, negative = debuff)
+//   locationBuffDurationHours — how long the effect lasts (null = permanent until removed)
 model EventEffect {
   id           Int @id @default(autoincrement())
   effectTypeId Int
@@ -4721,6 +4732,11 @@ model EventEffect {
   isGain      Boolean @default(true)
   targetScopeId Int?
 
+  // location_buff effect fields
+  locationBuffEffectTypeId Int?
+  locationBuffValue        Float?
+  locationBuffDurationHours Int?
+
   effectType    EventEffectType   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
   stepDef       EventStepDef?     @relation(fields: [stepDefId],      references: [id], onDelete: Cascade)
   outcomeDef    EventOutcomeDef?  @relation(fields: [outcomeDefId],   references: [id], onDelete: Cascade)
@@ -4728,6 +4744,7 @@ model EventEffect {
   item          Item?             @relation(fields: [itemId],     references: [id], onDelete: SetNull)
   itemType      ItemType?         @relation(fields: [itemTypeId], references: [id], onDelete: SetNull)
   targetScope   EventParticipantScope? @relation(fields: [targetScopeId], references: [id], onDelete: Restrict)
+  locationBuffEffectType EffectType? @relation("EventLocationBuffEffect", fields: [locationBuffEffectTypeId], references: [id], onDelete: Restrict)
 
   @@index([effectTypeId])
   @@index([stepDefId])
@@ -4736,6 +4753,7 @@ model EventEffect {
   @@index([itemId])
   @@index([itemTypeId])
   @@index([targetScopeId])
+  @@index([locationBuffEffectTypeId])
 }
 
 
@@ -4876,6 +4894,23 @@ model EventCooldown {
   factionId    Int?
 
   lastEventAt DateTime @db.Timestamptz
+
+  eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
+
+  @@unique([eventDefId, factionId])
+  @@index([eventDefId])
+  @@index([factionId])
+}
+
+// Tracks unresolved event states that can boost related event weights.
+// Used for events like "dangerous enemy encounters" that become more likely if unresolved.
+model EventUnresolvedState {
+  id         Int  @id @default(autoincrement())
+  eventDefId Int  // the event that was unresolved
+  factionId    Int?  // null = guild-wide unresolved state
+
+  unresolvedCount Int @default(1)  // how many times this event has been unresolved
+  weightBoost     Float @default(0.1)  // how much to boost related event weights per unresolved instance
 
   eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
 
@@ -5947,6 +5982,24 @@ model Plot_Buff {
   effectType EffectType  @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
 
   @@unique([plotId, sourceEntityId, effectTypeId])
+}
+
+// Temporary modifiers applied to locations by events or abilities.
+// Used for location-wide effects like crop growth bonuses/debuffs or hunting difficulty changes.
+model Location_Effect {
+  id             Int      @id @default(autoincrement())
+  locationId     Int
+  sourceEntityId Int?  // null for event-system-written effects
+  effectTypeId   Int
+  effectValue    Float   // positive = buff, negative = debuff
+  appliedAt      DateTime @default(now()) @db.Timestamptz
+  expiresAt      DateTime @db.Timestamptz
+
+  location   Location    @relation(fields: [locationId],     references: [id], onDelete: Cascade)
+  entity     Entity?     @relation(fields: [sourceEntityId], references: [id], onDelete: Cascade)
+  effectType EffectType  @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+
+  @@unique([locationId, sourceEntityId, effectTypeId])
 }
 
 // A live instance of a plant growing at a plot. One PlotCrop per plot at a time (enforced via Plot).

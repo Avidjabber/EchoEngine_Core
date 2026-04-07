@@ -47,6 +47,8 @@ Events can be triggered by several mechanisms (EventTriggerType). An EventDef ma
 
 An event may also require signup even if it is triggered by another mechanism; set `EventDef.requiresSignup = true` to force participant enrollment before the event begins.
 
+Events can have their weights boosted by unresolved related events; see EventUnresolvedState for tracking persistent event states that increase likelihood over time.
+
 An EventDef can also have prerequisites — other EventDefs that must have
 completed at least once (within an optional time window) before this event
 is eligible to fire (EventDef_Prerequisite).
@@ -105,10 +107,11 @@ EventParticipantScope determines which participants an effect or reward applies 
 6. GRANTS AND REWARDS
 ─────────────────────────────────────────────
 
-Event steps can grant conditions or items to participants via EventGrantType:
+Event steps can grant conditions, items, or location effects to participants via EventGrantType:
 
-  condition — apply a ConditionDef to the target participant(s)
-  item      — add an item to the target participant(s) inventory
+  condition    — apply a ConditionDef to the target participant(s)
+  item         — add an item to the target participant(s) inventory
+  location_buff — apply a temporary Location_Effect to the event location (positive = buff, negative = debuff)
 
 Grants are defined on EventStepDef and scoped by EventParticipantScope.
 XP rewards from events are handled via the action or discipline reward system
@@ -127,15 +130,20 @@ depending on the event's spawn context.
   EventDef_ThresholdTrigger   — configurable threshold trigger config
   EventDef_Prerequisite       — prerequisite event that must have fired first
   EventCooldown               — per-event completion history for event-specific cooldowns
+  EventUnresolvedState        — tracks unresolved events that boost related event weights
 
   LOOKUP TABLES (seed)
   EventTriggerType            — admin | patrol | hunt | crafting | foraging | clean | weather_onset | threshold | daily
   EventScopeType              — global | faction | action
   EventStepType               — narrative | choice | combat
   EventParticipantScope       — all_participants | random_participant | leader | group | housed_entities
-  EventGrantType              — condition | item
+  EventGrantType              — condition | item | location_buff
   EventChoiceResolutionType   — individual | group_average | leader_designates
   EventThresholdType          — filth
+
+  EFFECTS & MODIFIERS
+  Location_Effect             — temporary location-wide buffs/debuffs (crop growth, hunting difficulty, etc.)
+  EventEffect                 — unified event effect system (conditions, items, location effects)
 
   ACTIVE INSTANCES
   ActiveEvent                 — live event instance
