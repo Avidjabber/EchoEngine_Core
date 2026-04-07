@@ -1,6 +1,6 @@
 POWER SYSTEM — DESIGN REFERENCE
 ================================
-Last updated: 2026-04-05
+Last updated: 2026-04-06
 
 This file is the authoritative reference for how the power system works in
 EchoPaw. Read this before writing power-source seeding, crafting/farming
@@ -58,36 +58,38 @@ A power-source StructureDef has exactly one StructureDef_FuelConfig row.
 StructureDef_FuelConfig
 ──────────────────────
 
-  generatorType        "active"  — fueled by item deposits.
-                                   Items with a fuelTypeId matching one of the
-                                   source's input types are destroyed on deposit;
-                                   their fuelValue is added to Structure.currentFuel.
-                       "passive" — fueled automatically by the worker each tick
-                                   based on active env conditions. No item deposits.
-                                   Rate defined per condition in
+  isActive             Boolean. True = source is a passive generator (fueled
+                                   automatically by the worker each tick based on
+                                   active env conditions; no item deposits). False =
+                                   source is an active generator (fueled by item
+                                   deposits; items matching an input fuel type are
+                                   destroyed on deposit and their fuelValue added to
+                                   Structure.currentFuel).
+                                   Rate for passive sources defined per condition in
                                    StructureDef_FuelConfig_EnvCondition.
 
-  scope                Determines which consumers this source can satisfy.
+  scopeId              FK → TargetScope (isPowerScope = true). Determines which
+                       consumers this source can satisfy.
 
-                       "structure" — satisfies only the structure this power source
-                                     is built into. Requires the StructureDef to be
-                                     a multi-type def that includes the power type
-                                     alongside the powered type(s). The power source
-                                     powers that structure and nothing else.
+                       structure — satisfies only the structure this power source
+                                   is built into. Requires the StructureDef to be
+                                   a multi-type def that includes the power type
+                                   alongside the powered type(s). The power source
+                                   powers that structure and nothing else.
 
-                       "camp"      — satisfies all isPowered structures and upgrades
-                                     in the same camp whose fuel type requirements
-                                     are met. Multiple camp-scope sources in the same
-                                     camp are drained in powerSortOrder order (lowest
-                                     first; ties broken by Structure.id).
+                       camp      — satisfies all isPowered structures and upgrades
+                                   in the same camp whose fuel type requirements
+                                   are met. Multiple camp-scope sources in the same
+                                   camp are drained in powerSortOrder order (lowest
+                                   first; ties broken by Structure.id).
 
-                       "location"  — satisfies all isPowered structures and upgrades
-                                     across every camp at the same location. Useful
-                                     for large shared infrastructure.
+                       location  — satisfies all isPowered structures and upgrades
+                                   across every camp at the same location. Useful
+                                   for large shared infrastructure.
 
-                       "faction"   — satisfies all isPowered structures and upgrades
-                                     across the entire faction, regardless of location.
-                                     Reserved for high-tier infrastructure.
+                       faction   — satisfies all isPowered structures and upgrades
+                                   across the entire faction, regardless of location.
+                                   Reserved for high-tier infrastructure.
 
   fuelCapacity         Float. Maximum fuel units the source can hold.
                        1 unit = 1 hour of consumption at rate 1.0.
@@ -160,8 +162,8 @@ StructureDef_Upgrade_AcceptedFuelType — same, for powered upgrades.
 
 Matching rule: a source satisfies a consumer if:
   1. The source is active (isFuelActive = true, currentFuel > 0).
-  2. The source's scope covers the consumer (same camp, location, or faction;
-     or the consumer is explicitly linked via Structure_FuelTarget).
+  2. The source's scope covers the consumer (structure-scoped: same Structure row;
+     camp-scoped: same camp; location-scoped: same location; faction-scoped: same faction).
   3. The consumer's AcceptedFuelType set is empty, OR at least one of the
      source's output types appears in the consumer's accepted types.
 
@@ -238,7 +240,7 @@ Upgrade effectTypes valid for power-type StructureDefs (isFuel = true):
 ─────────────────────────────────────────────
 
   FuelType                            — static seed: Burnable | Electric | Steam | Alchemical
-  StructureDef_FuelConfig             — generator type, scope, capacity, base generation rate
+  StructureDef_FuelConfig             — isActive (passive vs active generator), scopeId (FK → TargetScope), capacity, base generation rate
   StructureDef_FuelConfig_InputFuelType  — fuel item types a source accepts as deposits
   StructureDef_FuelConfig_OutputFuelType — fuel types a source produces
   StructureDef_FuelConfig_EnvCondition   — env conditions driving passive generation rate
