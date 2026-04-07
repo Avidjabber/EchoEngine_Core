@@ -597,9 +597,10 @@ CombatOutcome                           [ DONE ]
 ──────────────────────────────────────────────
 CombatActionCategory                    [ DONE ]
 ──────────────────────────────────────────────
-  name          actionsAllowedPerRound  description
-  Main Action   1                       Standard action — one allowed per turn.
-  Bonus Action  1                       Supplemental action — one allowed per turn alongside a Main Action.
+  name              actionsAllowedPerRound  description
+  Main Action       1                       Standard action — one allowed per turn.
+  Bonus Action      1                       Supplemental action — one allowed per turn alongside a Main Action.
+  Item Interaction  1                       Item use slot — one allowed per turn (using, throwing, or activating a held item).
 
 
 ──────────────────────────────────────────────

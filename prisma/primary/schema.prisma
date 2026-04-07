@@ -5025,6 +5025,16 @@ model ActiveCombat_Participant {
   isAiControlled Boolean @default(false)
   // AI targeting behaviour is read at decision time from entity.species.combatBehavior — no snapshot needed.
 
+  // Who controls this participant's turns. Null = AI (if isAiControlled) or the entity's natural owner.
+  // Set to a Discord user ID when a specific player or admin is assigned control of a summoned or
+  // mid-combat-joined entity that isn't their own. Admin vs. player distinction is resolved at the app
+  // layer via Discord role; the schema only records which user is responsible for the turn decision.
+  controllerUserId String? @db.VarChar(50)
+
+  // Round this participant entered combat. 1 for all original participants; > 1 for mid-combat summons
+  // or player-character joins. Used for narrative reconstruction and any mechanics gated on entry timing.
+  joinedAtRound Int @default(1)
+
   dropTableId Int?  // null for player entities; snapshotted from species.dropTableId at spawn time
 
   inSecondWind   Boolean @default(false)
