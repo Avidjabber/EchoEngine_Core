@@ -212,26 +212,24 @@ RelationType
 ──────────────────────────────────────────────
 Developer-seeded only. Boolean flags control which systems each value is valid for.
 
-  name        isConditionSystem  isStructureSystem  isSkillSystem  isItemSystem  isCraftingSystem   isEnvConditionSystem  isOwnershipSystem  isEvent
-  ──────────  ─────────────────  ─────────────────  ─────────────  ────────────  ────────────────   ────────────────────  ────────────────── ───────
-  requires    false              true               true           false         true               true                  false              false
-  block       true               true               true           false         false              true                  false              false
-  upgrades    false              true               true           false         false              false                 false              false
-  treat       false              false              false          true          false              false                 false              false
-  worsen      true               false              false          true          false              false                 false              false
-  cure        false              false              false          true          false              false                 false              false
-  transform   false              false              false          true          false              false                 false              false
-  recover     true               false              false          false         false              false                 false              false
-  spawn       true               false              false          false         false              false                 false              true
-  spreads_as  true               false              false          false         false              false                 false              false
-  improves    false              false              true           false         true               false                 false              false
-  increase    false              false              true           false         true               true                  false              true
-  decrease    false              false              true           false         true               true                  false              true
-  kills       false              false              true           false         true               true                  false              false
-  owns        false              false              false          false         false              false                 true               false
-  contesting  false              false              false          false         false              false                 true               false
-  modify      false              false              false          false         false              false                 false              true
-  remove      false              false              false          false         false              false                 false              true
+  name        isConditionSystem  isStructureSystem  isSkillSystem  isItemSystem  isCraftingSystem   isEnvConditionSystem  isOwnershipSystem
+  ──────────  ─────────────────  ─────────────────  ─────────────  ────────────  ────────────────   ────────────────────  ─────────────────
+  requires    false              true               true           false         true               true                  false
+  block       true               true               true           false         false              true                  false
+  upgrades    false              true               true           false         false              false                 false
+  treat       false              false              false          true          false              false                 false
+  worsen      true               false              false          true          false              false                 false
+  cure        false              false              false          true          false              false                 false
+  transform   false              false              false          true          false              false                 false
+  recover     true               false              false          false         false              false                 false
+  spawn       true               false              false          false         false              false                 false
+  spreads_as  true               false              false          false         false              false                 false
+  improves    false              false              true           false         true               false                 false
+  increase    false              false              true           false         true               true                  false
+  decrease    false              false              true           false         true               true                  false
+  kills       false              false              true           false         true               true                  false
+  owns        false              false              false          false         false              false                 true
+  contesting  false              false              false          false         false              false                 true
 
 
 ──────────────────────────────────────────────
@@ -273,31 +271,25 @@ AbilityEffectType                       [ DONE ]
 TargetType                              [ DONE ]
 ──────────────────────────────────────────────
 isAbility = true — valid for Ability_MultiplierEffect / Ability_PresenceEffect.
-isEvent   = true — valid for EventEffect.targetTypeId (what the effect is targeting).
 
-  name                 isAbility  isEvent
-  ──────────           ─────────  ───────
-  discipline_xp        true       false
-  drop_plant           true       false
-  drop_species         true       false
-  drop_forage          true       false
-  drop_item            true       false
-  crafting_yield       true       false
-  crafting_quantity    true       false
-  recovery_rate        true       false
-  energy_cost          true       false
-  treatment_given      true       false
-  treatment_recieved   true       false
-  constuction_speed    true       false
-  faction_rep          true       false
-  scouting_range       true       false
-  healing_recieved     true       false
-  healing_given        true       false
-  participants         false      true    — event participants (for condition, item, stat/proficiency modifiers, xp)
-  camp                 false      true    — camp structures (for structure_damage) or camp-wide effects
-  location             false      true    — the location the action/event is occurring in (for location_buff)
-  faction              false      true    — the owning faction (for faction_rep)
-  items                false      true    — items in participant inventories (for item remove effects)
+  name                 isAbility
+  ──────────           ─────────
+  discipline_xp        true
+  drop_plant           true
+  drop_species         true
+  drop_forage          true
+  drop_item            true
+  crafting_yield       true
+  crafting_quantity    true
+  recovery_rate        true
+  energy_cost          true
+  treatment_given      true
+  treatment_recieved   true
+  constuction_speed    true
+  faction_rep          true
+  scouting_range       true
+  healing_recieved     true
+  healing_given        true
 
 ──────────────────────────────────────────────
 AbilityThresholdType                    [ DONE ]

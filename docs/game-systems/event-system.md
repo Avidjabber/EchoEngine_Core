@@ -25,25 +25,35 @@ There is no separate step-history table; the chain progresses forward only.
 
 
 ─────────────────────────────────────────────
-2. EVENT TRIGGERS
+2. EVENT TRIGGERS & FIRING PIPELINE
 ─────────────────────────────────────────────
+
+Every trigger opportunity (except admin) goes through the same two-stage pipeline:
+
+  1. Universal 5% gate — hardcoded, not configurable. If the roll fails, no
+     event fires for this opportunity.
+  2. Weighted selection — the worker collects all eligible EventDefs for the
+     current context and picks one via weighted selection. Effective weight =
+     EventDef.baseWeight + sum of active EventWeightModifier rows. Higher weight
+     means more likely to be selected when an event does fire, not more likely
+     to trigger the gate.
 
 Events can be triggered by several mechanisms (EventTriggerType). An EventDef
 may reference one or more trigger types via EventDef_TriggerType:
 
-  admin         — manually fired by a guild admin; participants provided via
-                  signup before the chain starts
-  patrol        — fires when a patrol activity completes
-  hunt          — fires when a hunt activity completes
-  crafting      — fires when a crafting activity completes
-  foraging      — fires when a foraging activity completes
-  clean         — fires when a cleaning activity completes
-  weather_onset — fires when a specific WeatherState becomes active
+  admin         — manually fired by a guild admin; exempt from the 5% gate;
+                  participants provided via signup before the chain starts
+  patrol        — one opportunity per patrol activity completion
+  hunt          — one opportunity per hunt activity completion
+  crafting      — one opportunity per crafting activity completion
+  foraging      — one opportunity per foraging activity completion
+  clean         — one opportunity per cleaning activity completion
+  weather_onset — one opportunity when a specific WeatherState becomes active
                   (EventDef_WeatherTrigger)
-  threshold     — fires when a configurable threshold condition is met with a
-                  daily chance roll (EventDef_ThresholdTrigger)
-  daily         — worker rolls once per day; EventDef.chancePerDay controls probability
-  hourly        — worker rolls once per hour; EventDef.chancePerHour controls probability
+  threshold     — one opportunity per daily tick while threshold conditions are
+                  met and triggerDays has elapsed (EventDef_ThresholdTrigger)
+  daily         — one opportunity per day per guild
+  hourly        — one opportunity per hour per guild
 
 An EventDef may also have prerequisites — other EventDefs that must have
 completed at least once (within an optional time window) before this event is
@@ -112,7 +122,7 @@ step type when resolving a step — no step handles multiple concerns.
   The first participant to click decides; the event navigates directly to
   that choice's nextStepId. No randomness, no checks — deterministic.
   If expiresAfterMinutes is set and no one clicks within the window,
-  the event cancels (ActiveEvent.isActive = false). There is no fallback.
+  the event cancels (worker deletes the ActiveEvent row and posts a notice). There is no fallback.
 
   CHOICE_LEADER
   Identical to choice_solo in structure and expiry behavior, but only the
@@ -263,10 +273,8 @@ Effect types (EffectType with isEvent = true):
                            the worker sums all active modifiers at roll time
 
 Core fields on EventEffect:
-  probability    — chance this effect fires (0.0–1.0); each row is independent
-  targetType     — participants | camp | location | faction | items
-  relationType   — spawn | increase | decrease | modify | remove
-  effectValue    — optional string tag (e.g. "structure_durability")
+  probability  — chance this effect fires (0.0–1.0); each row is independent
+  effectTypeId — drives the worker switch; all effect data is in the type-specific fields
 
 Effect-type-specific magnitude fields:
   condition:             conditionDefId, remove
@@ -288,13 +296,13 @@ Effect-type-specific magnitude fields:
 ─────────────────────────────────────────────
 
 When an exit step with marksUnresolved = true is reached, the worker upserts
-an EventUnresolvedState row for that event:
+an EventUnresolvedState row for that event, incrementing unresolvedCount.
 
-  unresolvedCount — incremented each time this event reaches an unresolved exit
-  weightBoost     — added to the event's effective weight per unresolved instance
+Effective weight boost = unresolvedCount × EventDef.unresolvedWeightBoost
 
 This creates escalating scenarios: each time a threat is ignored, the same
-encounter becomes more likely next time.
+encounter becomes more likely next time. The per-escalation value is configured
+on EventDef so different events can have different escalation rates.
 
 
 ─────────────────────────────────────────────
@@ -305,8 +313,8 @@ EventDef_ThresholdTrigger configures threshold-based event firing:
 
   thresholdTypeId     — what is monitored (e.g. filth)
   thresholdValue      — the level at which the trigger becomes active
-  chancePerDay        — daily roll probability once trigger conditions are met
-  triggerDays         — consecutive days threshold must be met before rolls begin
+  triggerDays         — consecutive days threshold must be met before the daily
+                        5% gate roll begins (null = gate rolls immediately)
   triggerOnHigh       — true = trigger when value > threshold (e.g. high filth)
   isOngoing           — true = event persists and re-applies effects each tick
                         until resolution conditions are met
@@ -368,7 +376,9 @@ Currently seeded threshold types: filth
                           event_weight_modifier effects; worker sums all active rows at roll time
 
   ACTIVE INSTANCES
-  ActiveEvent         — live event instance; campId set for camp-scoped events;
-                        expiresAt set when a timed choice step is active;
-                        isActive = false when event ends for any reason
+  ActiveEvent         — live event instance; row exists only while the event is in
+                        progress; campId set for camp-scoped events; expiresAt set
+                        when a timed choice step is active; worker deletes the row
+                        on completion, expiry, or cancellation and posts a closing
+                        notice to Discord before deletion
   ActiveEvent_Participant — entity enrolled in a live event

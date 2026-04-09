@@ -210,7 +210,6 @@ model RelationType {
   isCraftingSystem      Boolean @default(false)
   isEnvConditionSystem  Boolean @default(false)
   isOwnershipSystem     Boolean @default(false)
-  isEvent               Boolean @default(false)  // valid for EventEffect relation types
 
   conditionLinks                 ConditionDef_Link[]
   conditionEnvRules              ConditionDef_EnvRule[]
@@ -228,7 +227,6 @@ model RelationType {
   envConditionModifiers          EnvCondition_Modifier[]
   campFactions                   Camp_Faction[]
   locationFactions               Location_Faction[]
-  eventEffects                   EventEffect[]
 }
 
 model EffectType {
@@ -1622,11 +1620,9 @@ model TargetType {
   id        Int    @id @default(autoincrement())
   name      String @unique @db.VarChar(100)
   isAbility Boolean @default(false)  // valid for ability multiplier/presence effects
-  isEvent   Boolean @default(false)  // valid for event effect targets
 
   abilityMultiplierEffect Ability_MultiplierEffect[]
   abilityPresenceEffects  Ability_PresenceEffect[]
-  eventEffects            EventEffect[]
 }
 
 // Rate and yield multipliers, optionally gated by biome or weather.
@@ -4486,12 +4482,19 @@ model EventParticipantScope {
 //   "clean"         — fires when a cleaning activity completes
 //   "weather_onset" — fires automatically when a matching WeatherState becomes active
 //   "threshold"     — fires when a configurable threshold condition is met (EventDef_ThresholdTrigger)
-//   "daily"         — Worker rolls once per day per guild; chancePerDay controls probability
+//   "daily"         — worker gets one trigger opportunity per day per guild
+//   "hourly"        — worker gets one trigger opportunity per hour per guild
+//
+// All trigger types (except "admin") go through a universal 5% gate before weighted selection.
+// If the gate passes, the worker collects all eligible EventDefs for the context and picks one
+// via weighted selection (baseWeight + active EventWeightModifier rows). No per-event probability
+// fields — weight controls relative likelihood among eligible events, not absolute firing chance.
 //
 // scope:
-//   "global" — posted guild-wide; not tied to any faction or activity
-//   "faction"  — scoped to one faction
-//   "action" — scoped to a specific ActionInstance
+//   "global"  — posted guild-wide; not tied to any faction or activity
+//   "faction" — scoped to one faction
+//   "action"  — scoped to a specific ActionInstance
+//   "camp"    — scoped to a specific Camp; worker fires one ActiveEvent per qualifying camp
 //
 // Eligibility (checked before the chain begins against the provided participant list):
 //   requiresLeader            — at least one participant must have Rank.canLeadEvents = true
@@ -4507,9 +4510,8 @@ model EventDef {
 
   scopeId       Int
 
-  baseWeight    Float  @default(1.0)
-  chancePerDay  Float?
-  chancePerHour Float?
+  baseWeight            Float @default(1.0)   // base weight for weighted selection; modifiers stack on top
+  unresolvedWeightBoost Float @default(0.1)  // how much each unresolved exit adds to effective weight
 
   // Eligibility
   requiresLeader            Boolean @default(false)
@@ -4588,9 +4590,9 @@ model EventDef_ActionType {
 }
 
 // Filth threshold trigger.
-// chancePerDay scales linearly above filthThreshold.
+// When conditions are met, the worker applies the universal 5% gate on each daily tick.
 // isOngoing: true = event persists and re-applies effects each tick until resolution conditions are met.
-// triggerDays: consecutive days threshold must be met before chance rolls begin.
+// triggerDays: consecutive days threshold must be met before the daily gate roll begins.
 // triggerOnHigh: true = trigger when value > threshold, false = trigger when value < threshold.
 // resolutionThreshold: separate threshold for ending ongoing events (null = same as thresholdValue).
 // resolutionDays: consecutive days resolution threshold must be met to end event.
@@ -4598,10 +4600,9 @@ model EventDef_ActionType {
 model EventDef_ThresholdTrigger {
   eventDefId Int @id
 
-  thresholdTypeId    Int     // what type of threshold this monitors (filth, population, etc.)
-  thresholdValue     Float   // the threshold value (0.0–1.0 for ratios, absolute values for counts)
-  chancePerDay       Float   // fixed daily chance (0.0-1.0) once trigger conditions are met; 1.0 = 100%
-  isOngoing          Boolean @default(false)
+  thresholdTypeId Int   // what type of threshold this monitors (filth, population, etc.)
+  thresholdValue  Float // the threshold value (0.0–1.0 for ratios, absolute values for counts)
+  isOngoing       Boolean @default(false)
 
   triggerDays        Int?    // consecutive days above/below thresholdValue before chance rolls begin (null = immediate)
   triggerOnHigh      Boolean @default(true)  // true = trigger on high values, false = trigger on low values
@@ -4820,10 +4821,8 @@ model EventStepRandomBranch {
 // stepDefId must reference an effect-type step (app-enforced).
 //
 // Core effect fields:
-//   probability   — chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
-//   targetTypeId  — what type of target (participants, camp, location, faction, items)
-//   relationTypeId — what the effect does (spawns, decrease, increase, modify, remove)
-//   effectValue   — what specifically is affected (structure_durability, null, etc.)
+//   probability  — chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
+//   effectTypeId — drives the worker switch; all effect data lives in the type-specific fields below
 //
 // effectType: "condition" | "item" | "location_buff" | "stat_modifier" | "proficiency_modifier" | "faction_rep" | "discipline_xp"
 //
@@ -4884,10 +4883,7 @@ model EventEffect {
 
   stepDefId Int  // FK to an effect-type EventStepDef
 
-  probability   Float @default(1.0)  // probability this effect occurs (0.0-1.0)
-  targetTypeId  Int?  // what type of target this effect applies to (participants, camp, location, etc.)
-  relationTypeId Int?  // what the effect does (spawns, decrease, increase, etc.)
-  effectValue   String? @db.VarChar(100)  // what specifically is affected (structure_durability, null, etc.)
+  probability Float @default(1.0)  // probability this effect occurs (0.0-1.0)
 
   // condition effect fields
   conditionDefId Int?
@@ -4940,10 +4936,8 @@ model EventEffect {
   // item droptable grant (effectType = "item" only)
   dropTableId Int?  // roll from this DropTable; mutually exclusive with itemId / itemTypeId (app-enforced)
 
-  effectType    EffectType   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
-  targetType    TargetType? @relation(fields: [targetTypeId], references: [id], onDelete: Restrict)
-  relationType  RelationType? @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
-  stepDef      EventStepDef  @relation(fields: [stepDefId],      references: [id], onDelete: Cascade)
+  effectType EffectType   @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
+  stepDef    EventStepDef @relation(fields: [stepDefId],    references: [id], onDelete: Cascade)
   conditionDef ConditionDef? @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
   item          Item?             @relation(fields: [itemId],     references: [id], onDelete: SetNull)
   itemType      ItemType?         @relation(fields: [itemTypeId], references: [id], onDelete: SetNull)
@@ -4957,8 +4951,6 @@ model EventEffect {
   eventWeightTargetEventDef        EventDef?       @relation("EventEffectWeightTarget",       fields: [eventWeightTargetEventDefId],     references: [id], onDelete: Restrict)
 
   @@index([effectTypeId])
-  @@index([targetTypeId])
-  @@index([relationTypeId])
   @@index([stepDefId])
   @@index([conditionDefId])
   @@index([itemId])
@@ -4975,15 +4967,11 @@ model EventEffect {
 
 
 
-// A running or resolved event chain instance.
+// A live event chain instance. Row exists only while the event is in progress.
+// Worker deletes the row when the event ends (natural completion, choice expiry, or interruption),
+// posting a closing notice to Discord before deletion.
 //
-// status:
-//   "active"    — chain is progressing; currentStepId is set
-//   "completed" — all steps resolved naturally
-//   "expired"   — a choice step's time window elapsed with no default choice to fall back on
-//
-// currentStepId is the sole runtime state for the chain. History of which choices/outcomes
-// led here is derivable by traversing the step graph from the starter step.
+// currentStepId is the sole runtime state for the chain.
 model ActiveEvent {
   id         Int    @id @default(autoincrement())
   eventDefId Int
@@ -4993,12 +4981,10 @@ model ActiveEvent {
   actionInstanceId Int?  @unique
   campId           Int?  // set when scope = "camp"; identifies which camp this event is scoped to
 
-  isActive      Boolean   @default(true)  // false = event has ended (completed or expired)
-  currentStepId Int?      // which EventStepDef the chain is currently on; null when event ends
+  currentStepId Int?      // which EventStepDef the chain is currently on
 
-  startedAt   DateTime  @default(now()) @db.Timestamptz
-  completedAt DateTime? @db.Timestamptz
-  expiresAt   DateTime? @db.Timestamptz  // set when the current step has a response window
+  startedAt DateTime  @default(now()) @db.Timestamptz
+  expiresAt DateTime? @db.Timestamptz  // set when the current step has a response window
 
   eventDef       EventDef        @relation(fields: [eventDefId],       references: [id], onDelete: Restrict)
   currentStep    EventStepDef?   @relation(fields: [currentStepId],    references: [id], onDelete: SetNull)
@@ -5071,18 +5057,20 @@ model EventDef_Location {
 }
 
 // Per-faction (or per-guild for global events) cooldown tracking.
-// factionId = null means guild-wide cooldown (guild derived from eventDef.guildId).
+// One row per (guildId, eventDefId, factionId) — upserted each time the event fires.
+// factionId = null means guild-wide cooldown (global/threshold/daily/hourly scoped events).
 model EventCooldown {
-  id         Int  @id @default(autoincrement())
+  id         Int    @id @default(autoincrement())
+  guildId    String @db.VarChar(50)
   eventDefId Int
-  factionId    Int?
+  factionId  Int?
 
-  lastEventAt DateTime @db.Timestamptz
+  lastFiredAt DateTime @db.Timestamptz
 
   eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
 
-  @@unique([eventDefId, factionId])
-  @@index([eventDefId])
+  @@unique([guildId, eventDefId, factionId])
+  @@index([guildId, eventDefId])
   @@index([factionId])
 }
 
@@ -5093,8 +5081,7 @@ model EventUnresolvedState {
   eventDefId Int  // the event that was unresolved
   factionId    Int?  // null = guild-wide unresolved state
 
-  unresolvedCount Int @default(1)  // how many times this event has been unresolved
-  weightBoost     Float @default(0.1)  // how much to boost related event weights per unresolved instance
+  unresolvedCount Int @default(1)  // incremented each time this event reaches an unresolved exit
 
   eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
 
