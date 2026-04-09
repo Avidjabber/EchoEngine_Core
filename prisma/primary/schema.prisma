@@ -4610,6 +4610,12 @@ model EventDef_ThresholdTrigger {
   resolutionDays     Int?    // consecutive days at resolution threshold to end event (null = manual resolution only)
   resolutionOnLow    Boolean? // true = resolve on low values, false = resolve on high values (null = opposite of triggerOnHigh)
 
+  // false (default): on resolution the worker explicitly removes all EntityCondition rows tied to this event
+  // true: worker only deletes the ActiveEvent row; applied conditions expire naturally on their own timer.
+  //       Use this when the condition should linger after the cause is resolved
+  //       (e.g. filth sickness: camp cleaned, but entities are still sick for 3 more days).
+  conditionsLingerOnResolution Boolean @default(false)
+
   thresholdType EventThresholdType @relation(fields: [thresholdTypeId], references: [id], onDelete: Restrict)
   eventDef      EventDef           @relation(fields: [eventDefId],     references: [id], onDelete: Cascade)
 }
@@ -4821,8 +4827,11 @@ model EventStepRandomBranch {
 // stepDefId must reference an effect-type step (app-enforced).
 //
 // Core effect fields:
-//   probability  — chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
-//   effectTypeId — drives the worker switch; all effect data lives in the type-specific fields below
+//   probability   — chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
+//   effectTypeId  — drives the worker switch; all effect data lives in the type-specific fields below
+//   targetScopeId — who the effect applies to; overrides the step-level effectScopeId for this
+//                   specific effect. Valid for per-entity effects: condition, item, faction_rep,
+//                   stat_modifier, proficiency_modifier, discipline_xp. Null = use step effectScopeId.
 //
 // effectType: "condition" | "item" | "location_buff" | "stat_modifier" | "proficiency_modifier" | "faction_rep" | "discipline_xp"
 //
@@ -4836,7 +4845,6 @@ model EventStepRandomBranch {
 //                                     or a random globally seeded item of that type (isGain=true)
 //   minQuantity / maxQuantity — rolled quantity range
 //   isGain        — true = items added; false = items removed/consumed
-//   targetScopeId — who receives/loses the item
 //
 // location_buff fields (effectType = "location_buff"):
 //   locationBuffEffectTypeId — which EffectType to apply as a location buff/debuff;
@@ -4855,7 +4863,8 @@ model EventStepRandomBranch {
 //   proficiencyModifierHasDisadvantage  — grants disadvantage on rolls
 //
 // faction_rep fields (effectType = "faction_rep"):
-//   factionRepValue — reputation change as percentage (0.15 = +15% rep, -0.1 = -10% rep)
+//   factionRepValue — flat reputation point change (positive = gain, negative = loss);
+//                     applied per entity when targetScopeId is set, or to the faction collectively
 //
 // discipline_xp fields (effectType = "discipline_xp"):
 //   disciplineXpDisciplineDefId — which discipline gains XP
@@ -4883,7 +4892,8 @@ model EventEffect {
 
   stepDefId Int  // FK to an effect-type EventStepDef
 
-  probability Float @default(1.0)  // probability this effect occurs (0.0-1.0)
+  probability   Float @default(1.0)  // probability this effect occurs (0.0-1.0)
+  targetScopeId Int?                 // overrides step effectScopeId for this effect; valid for per-entity effect types
 
   // condition effect fields
   conditionDefId Int?
@@ -4895,7 +4905,6 @@ model EventEffect {
   minQuantity Float @default(1.0)
   maxQuantity Float @default(1.0)
   isGain      Boolean @default(true)
-  targetScopeId Int?
 
   // location_buff effect fields
   locationBuffEffectTypeId Int?
@@ -4996,6 +5005,7 @@ model ActiveEvent {
   activeCombats     ActiveCombat[]
   appliedConditions EntityCondition[]        @relation("EventAppliedConditions")
   weightModifiers   EventWeightModifier[]    @relation("EventWeightModifierSource")
+  locationEffects   Location_Effect[]
 
   @@index([guildId])
   @@index([eventDefId])
@@ -6157,20 +6167,33 @@ model Plot_Buff {
 
 // Temporary modifiers applied to locations by events or abilities.
 // Used for location-wide effects like crop growth bonuses/debuffs or hunting difficulty changes.
+// Worker sums all non-expired rows per (locationId, effectTypeId) to get the net modifier.
+//
+// Source columns are mutually exclusive:
+//   sourceEntityId     — set for entity-sourced effects (abilities, items)
+//   sourceActiveEventId — set for event-sourced effects; onDelete: SetNull so the row
+//                         survives the ActiveEvent deletion and expires naturally
+// Both null = admin/manual effect.
 model Location_Effect {
-  id             Int      @id @default(autoincrement())
-  locationId     Int
-  sourceEntityId Int?  // null for event-system-written effects
-  effectTypeId   Int
-  effectValue    Float   // positive = buff, negative = debuff
-  appliedAt      DateTime @default(now()) @db.Timestamptz
-  expiresAt      DateTime @db.Timestamptz
+  id                  Int      @id @default(autoincrement())
+  locationId          Int
+  sourceEntityId      Int?     // null for event/admin-written effects
+  sourceActiveEventId Int?     // set when an event effect step wrote this row
+  effectTypeId        Int
+  effectValue         Float    // positive = buff, negative = debuff
+  appliedAt           DateTime @default(now()) @db.Timestamptz
+  expiresAt           DateTime @db.Timestamptz
 
-  location   Location    @relation(fields: [locationId],     references: [id], onDelete: Cascade)
-  entity     Entity?     @relation(fields: [sourceEntityId], references: [id], onDelete: Cascade)
-  effectType EffectType  @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
+  location      Location     @relation(fields: [locationId],          references: [id], onDelete: Cascade)
+  entity        Entity?      @relation(fields: [sourceEntityId],      references: [id], onDelete: Cascade)
+  activeEvent   ActiveEvent? @relation(fields: [sourceActiveEventId], references: [id], onDelete: SetNull)
+  effectType    EffectType   @relation(fields: [effectTypeId],        references: [id], onDelete: Restrict)
 
-  @@unique([locationId, sourceEntityId, effectTypeId])
+  // One row per (location, source, effectType) combination — prevents duplicate stacking from the same source.
+  // Multiple events can each hold their own row; the worker sums them.
+  @@unique([locationId, sourceEntityId, sourceActiveEventId, effectTypeId])
+  @@index([locationId, effectTypeId])
+  @@index([sourceActiveEventId])
 }
 
 // A live instance of a plant growing at a plot. One PlotCrop per plot at a time (enforced via Plot).

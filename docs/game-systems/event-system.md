@@ -1,6 +1,6 @@
 EVENT SYSTEM — DESIGN REFERENCE
 =================================
-Last updated: 2026-04-09 (step type redesign, check steps, choice variants, isLocation EffectTypes, worked example)
+Last updated: 2026-04-09 (step type redesign, check steps, choice variants, isLocation EffectTypes, worked examples)
 
 This file is the authoritative reference for how events work in EchoPaw.
 Read this before touching EventDef seeding, event resolution, or any system
@@ -273,17 +273,21 @@ Effect types (EffectType with isEvent = true):
                            the worker sums all active modifiers at roll time
 
 Core fields on EventEffect:
-  probability  — chance this effect fires (0.0–1.0); each row is independent
-  effectTypeId — drives the worker switch; all effect data is in the type-specific fields
+  probability   — chance this effect fires (0.0–1.0); each row is independent
+  effectTypeId  — drives the worker switch; all effect data is in the type-specific fields
+  targetScopeId — overrides the step-level effectScopeId for this specific effect; valid for
+                  any per-entity effect type (condition, item, faction_rep, stat_modifier,
+                  proficiency_modifier, discipline_xp); null = inherit from step effectScopeId
 
 Effect-type-specific magnitude fields:
   condition:             conditionDefId, remove
-  item:                  itemId | itemTypeId | dropTableId, minQuantity, maxQuantity, isGain, targetScopeId
+  item:                  itemId | itemTypeId | dropTableId, minQuantity, maxQuantity, isGain
   location_buff:         locationBuffEffectTypeId, locationBuffValue, locationBuffDurationHours
   stat_modifier:         statModifierStatId, statModifierValue
   proficiency_modifier:  proficiencyModifierProficiencyDefId, proficiencyModifierValue,
                          proficiencyModifierHasAdvantage, proficiencyModifierHasDisadvantage
-  faction_rep:           factionRepValue
+  faction_rep:           factionRepValue (flat rep points; per-entity when targetScopeId is set,
+                         collective faction grant when null)
   discipline_xp:         disciplineXpDisciplineDefId, disciplineXpValue
   structure_damage:      structureDamageValue, structureDamageIsMultiplier, structureDamageCount,
                          structureDamageStructureTypeId
@@ -311,20 +315,38 @@ on EventDef so different events can have different escalation rates.
 
 EventDef_ThresholdTrigger configures threshold-based event firing:
 
-  thresholdTypeId     — what is monitored (e.g. filth)
-  thresholdValue      — the level at which the trigger becomes active
-  triggerDays         — consecutive days threshold must be met before the daily
-                        5% gate roll begins (null = gate rolls immediately)
-  triggerOnHigh       — true = trigger when value > threshold (e.g. high filth)
-  isOngoing           — true = event persists and re-applies effects each tick
-                        until resolution conditions are met
-  resolutionThreshold — separate threshold for ending the ongoing event
-  resolutionDays      — consecutive days at resolution threshold to end event
-  resolutionOnLow     — true = resolve when value < resolutionThreshold
+  thresholdTypeId              — what is monitored (e.g. filth)
+  thresholdValue               — the level at which the trigger becomes active
+  triggerDays                  — consecutive days threshold must be met before the
+                                 daily 5% gate roll begins (null = gate rolls immediately)
+  triggerOnHigh                — true = trigger when value > threshold (e.g. high filth)
+  isOngoing                    — true = event persists and re-applies effects each tick
+                                 until resolution conditions are met
+  resolutionThreshold          — separate threshold for ending the ongoing event
+  resolutionDays               — consecutive days at resolution threshold to end event
+  resolutionOnLow              — true = resolve when value < resolutionThreshold
+  conditionsLingerOnResolution — controls what happens to applied conditions on resolution:
+                                 false (default): worker explicitly removes all EntityCondition
+                                   rows tied to this event when it resolves
+                                 true: worker only deletes the ActiveEvent row; applied
+                                   conditions expire naturally on their own timer. Use this
+                                   when the condition should outlast its cause — e.g. filth
+                                   sickness: the camp is cleaned but entities remain sick for
+                                   the remainder of their 3-day condition window.
 
 Ongoing events: conditions applied by ongoing events have
-EntityCondition.sourceActiveEventId set. When the event resolves, the worker
-removes all EntityCondition rows with that sourceActiveEventId.
+EntityCondition.sourceActiveEventId set (FK is SetNull — rows survive ActiveEvent deletion).
+
+On resolution, the worker's behavior depends on conditionsLingerOnResolution:
+  false — worker explicitly deletes all EntityCondition rows where sourceActiveEventId
+          matches, then deletes the ActiveEvent row.
+  true  — worker deletes only the ActiveEvent row; the FK nulls out automatically;
+          conditions tick down and expire on their own expiresAt.
+
+Daily re-application for ongoing events: each tick where the threshold is still met,
+the worker re-applies all effect steps, which upserts EntityCondition rows and resets
+their expiresAt. This is what keeps a 3-day sickness condition "refreshed" for as long
+as the camp remains dirty — each day the timer resets to now + 3 days.
 
 Currently seeded threshold types: filth
 
@@ -488,3 +510,269 @@ rows on one step, and a marksUnresolved exit.
     the event is scoped to — no explicit location FK is needed on the step rows.
   - Step 6 has two EventEffect rows on the same step; the worker applies both.
   - Discord button label lengths: 21 / 14 / 23 chars — all within the 80-char limit.
+
+
+─────────────────────────────────────────────
+13. WORKED EXAMPLE — FILTH SICKNESS OUTBREAK
+─────────────────────────────────────────────
+
+A camp-scoped ongoing threshold event. While filth remains critically high, every
+entity in the camp is inflicted with a Filth Sickness condition that refreshes
+daily. When the camp is finally cleaned, the event resolves — but entities remain
+sick for the remainder of their 3-day condition window rather than recovering
+instantly.
+
+This example illustrates: threshold triggers, isOngoing re-application, camp scope,
+condition effects, and conditionsLingerOnResolution.
+
+  ── EventDef ──────────────────────────────────────────────────────────────
+  codeName              filth_sickness_outbreak
+  name                  Filth Sickness Outbreak
+  scopeId               camp
+  baseWeight            1.0
+  cooldownDays          0    (ongoing; cooldown not meaningful here)
+  requiresLeader        false
+
+  ── EventDef_TriggerType ──────────────────────────────────────────────────
+  triggerTypeId → threshold
+
+  ── EventDef_ThresholdTrigger ─────────────────────────────────────────────
+  thresholdTypeId              → filth
+  thresholdValue                 0.6     (fires when filth > 60%)
+  isOngoing                      true
+  triggerDays                    3       (must exceed threshold for 3 consecutive days)
+  triggerOnHigh                  true
+  resolutionThreshold            0.3     (resolves when filth < 30%)
+  resolutionDays                 2       (must stay below 30% for 2 consecutive days)
+  resolutionOnLow                true
+  conditionsLingerOnResolution   true    (conditions expire naturally; not wiped on resolve)
+
+  ── EventStepDef ──────────────────────────────────────────────────────────
+
+  Step 1 — sortOrder 10 — narrative (isStarter = true)
+    prompt:    "The camp's filth has reached a critical level. The stench
+                permeates everything, and illness has begun to take hold
+                among those living here."
+    nextStepId → step 2
+
+  Step 2 — sortOrder 20 — effect
+    prompt:    "Sickness spreads through the camp."
+    effectScopeId → all_participants
+    nextStepId    → null  (chain pauses here; worker re-applies this step each day)
+    effects (EventEffect rows):
+      [A] effectTypeId → condition
+          conditionDefId → [Filth Sickness]
+          remove           false
+          probability      1.0
+
+  ── Daily re-application ──────────────────────────────────────────────────
+  Each morning tick, the worker checks the camp's filth value:
+    still > 0.6 — re-applies step 2's effects; upserts EntityCondition for
+                  every camp entity, resetting expiresAt = now + 3 days.
+    dropped      — checks resolutionDays counter; if met, resolves the event.
+
+  ── Resolution ────────────────────────────────────────────────────────────
+  When filth stays below 0.3 for 2 consecutive days:
+    - Worker deletes the ActiveEvent row.
+    - FK onDelete: SetNull nulls out sourceActiveEventId on all EntityCondition
+      rows — rows are NOT deleted.
+    - Entities recover naturally as their individual expiresAt timestamps pass
+      (up to 3 days from the last re-application tick).
+
+  ── Notes ─────────────────────────────────────────────────────────────────
+  - Step 1 (narrative) runs once on first trigger as the outbreak announcement.
+    The worker only re-applies effect steps on subsequent daily ticks — narrative
+    steps are not repeated.
+  - No player interaction at any point. The event is fully automated.
+  - The 3-day condition duration is what creates the "linger" — the worker is
+    simply stopped from resetting the timer. Entities in the best case recover
+    within 3 days of the camp crossing the resolution threshold.
+
+
+─────────────────────────────────────────────
+14. WORKED EXAMPLE — STORM STRIKES
+─────────────────────────────────────────────
+
+A camp-scoped event that fires the moment a violent storm weather state becomes
+active. No player input is involved — the chain resolves automatically via a
+weighted random branch that determines how badly the storm hits the camp.
+
+This example illustrates: weather_onset triggers, narrative_random branching,
+EventStepRandomBranch weight tables, item removal, and structure damage effects.
+
+  ── EventDef ──────────────────────────────────────────────────────────────
+  codeName     storm_strikes
+  name         Storm Strikes
+  scopeId      camp
+  baseWeight   2.0
+  cooldownDays 1
+
+  ── EventDef_TriggerType ──────────────────────────────────────────────────
+  triggerTypeId → weather_onset
+
+  ── EventDef_WeatherTrigger ───────────────────────────────────────────────
+  weatherStateId   → [Violent Storm]
+  required           true   (event only eligible while this weather state is active)
+  triggersOnOnset   true   (fires at the moment the weather state activates)
+  weightMod          0.0
+
+  ── EventStepDef ──────────────────────────────────────────────────────────
+
+  Step 1 — sortOrder 10 — narrative (isStarter = true)
+    prompt:    "A violent storm tears through the camp overnight, battering
+                structures and tearing at exposed stores."
+    nextStepId → step 2
+
+  Step 2 — sortOrder 20 — narrative_random
+    prompt:    "When dawn breaks, the camp takes stock of the damage."
+    branches (EventStepRandomBranch rows):
+      weight 5  description "no damage"         → step 3
+      weight 3  description "supplies spoiled"  → step 4
+      weight 1  description "structure hit"     → step 5
+
+  Step 3 — sortOrder 30 — exit
+    prompt:         "The camp holds firm. The storm passes without serious damage."
+    marksUnresolved  false
+
+  Step 4 — sortOrder 40 — effect
+    prompt:    "The storm tears through your food stores. Much of it is
+                exposed and spoiled beyond saving."
+    nextStepId → step 6
+    effects (EventEffect rows):
+      [A] effectTypeId → item
+          itemTypeId     → [Food]
+          isGain           false
+          minQuantity      2.0
+          maxQuantity      5.0
+
+  Step 5 — sortOrder 50 — effect
+    prompt:    "One of your structures takes a serious hit, its walls cracked
+                and supports weakened by the force of the storm."
+    nextStepId → step 6
+    effects (EventEffect rows):
+      [A] effectTypeId               → structure_damage
+          structureDamageValue         0.15
+          structureDamageIsMultiplier  true   (15% of maxDurability)
+          structureDamageCount         1      (one randomly selected structure)
+
+  Step 6 — sortOrder 60 — exit
+    prompt:         "The storm passes. The camp endures, though not without cost."
+    marksUnresolved  false
+
+  ── Notes ─────────────────────────────────────────────────────────────────
+  - Steps 4 and 5 converge at step 6 — shared exit for all damaged outcomes.
+    Step 3 is a separate exit for the clean outcome.
+  - The narrative_random branch is resolved by the worker with no player input.
+    Seeder-controlled weights (5 / 3 / 1) give roughly 56% / 33% / 11% odds.
+  - No EventStepChoice rows needed — narrative_random uses EventStepRandomBranch,
+    not choice buttons.
+  - weather_onset fires on the hourly worker when a new weather state is detected —
+    it still goes through the standard 5% gate like any other trigger type. Admin
+    is the only trigger exempt from the gate.
+
+
+─────────────────────────────────────────────
+15. WORKED EXAMPLE — THE MISSING CHILD
+─────────────────────────────────────────────
+
+On a random hourly tick, word spreads through a camp that a child has gone missing.
+The event opens a signup window for 1–11 volunteers. Once the group assembles, they
+vote on whether to search inside the camp or beyond its walls — each path walks
+through a few narrative beats before the child is found and brought home.
+
+This example illustrates: hourly triggers, camp scope, requiresSignup with min/max
+bounds, choice_consensus with an expiry window, two parallel narrative paths that
+converge at a shared effect and exit.
+
+  ── EventDef ──────────────────────────────────────────────────────────────
+  codeName        missing_child
+  name            The Missing Child
+  scopeId         camp
+  baseWeight      0.5
+  requiresSignup  true
+  minParticipants 1
+  maxParticipants 11
+  cooldownDays    14
+
+  ── EventDef_TriggerType ──────────────────────────────────────────────────
+  triggerTypeId → hourly
+
+  ── EventStepDef ──────────────────────────────────────────────────────────
+
+  Step 1 — sortOrder 10 — narrative (isStarter = true)
+    prompt:    "Word spreads quickly through the camp — a child has gone
+                missing. No one has seen them since this morning. Volunteers
+                are being called to help search."
+    nextStepId → step 2
+    (signup window is open while this step is displayed; chain advances
+     once the window closes or minParticipants is met)
+
+  Step 2 — sortOrder 20 — choice_consensus
+    prompt:             "Where does the group begin the search?"
+    expiresAfterMinutes: 20
+    choices (EventStepChoice rows):
+      sortOrder 1  "Search inside the camp"        → step 3
+      sortOrder 2  "Search outside the camp walls" → step 6
+
+  ── INSIDE PATH ───────────────────────────────────────────────────────────
+
+  Step 3 — sortOrder 30 — narrative
+    prompt:    "The group fans out through the camp, checking shelters,
+                storage huts, and shaded corners one by one."
+    nextStepId → step 4
+
+  Step 4 — sortOrder 40 — narrative
+    prompt:    "Near the supply huts, someone spots a small muddy footprint
+                pressed into the soft earth — and then another."
+    nextStepId → step 5
+
+  Step 5 — sortOrder 50 — narrative
+    prompt:    "Following the trail, you find the child curled up asleep
+                behind a stack of cured pelts, completely unaware of the
+                commotion they caused."
+    nextStepId → step 9
+
+  ── OUTSIDE PATH ──────────────────────────────────────────────────────────
+
+  Step 6 — sortOrder 60 — narrative
+    prompt:    "The group slips through the camp perimeter and fans out into
+                the surrounding terrain, calling out as they go."
+    nextStepId → step 7
+
+  Step 7 — sortOrder 70 — narrative
+    prompt:    "A set of small tracks leads toward the treeline — recently
+                made, pressed deep into soft earth after last night's rain."
+    nextStepId → step 8
+
+  Step 8 — sortOrder 80 — narrative
+    prompt:    "You follow the trail into the edge of the woods and find the
+                child sitting beneath a tree, proudly clutching a fistful of
+                wildflowers they had gone to pick as a surprise."
+    nextStepId → step 9
+
+  ── SHARED RESOLUTION ─────────────────────────────────────────────────────
+
+  Step 9 — sortOrder 90 — effect
+    prompt:    "The child is brought safely home. Relief washes over the camp
+                as word spreads that they have been found."
+    nextStepId → step 10
+    effects (EventEffect rows):
+      [A] effectTypeId  → faction_rep
+          factionRepValue  50
+          targetScopeId  → all_participants   (each volunteer receives 50 rep individually)
+
+  Step 10 — sortOrder 100 — exit
+    prompt:         "Life in the camp returns to normal."
+    marksUnresolved  false
+    endsAction       false
+
+  ── Notes ─────────────────────────────────────────────────────────────────
+  - Steps 5 and 8 (the "found" narratives) both route to step 9 — the two
+    paths are otherwise fully independent.
+  - choice_consensus with expiresAfterMinutes = 20 means the group has 20
+    minutes to vote. If votes are cast, the plurality wins (sortOrder tiebreak).
+    If no votes are cast before expiry, the event cancels.
+  - Button label lengths: 26 / 30 chars — both within Discord's 80-char limit.
+  - This event fires on the hourly worker, passes the 5% gate, and is then
+    eligible for any camp in the guild. Because it is camp-scoped, the worker
+    fires a separate ActiveEvent per qualifying camp if multiple camps exist.
