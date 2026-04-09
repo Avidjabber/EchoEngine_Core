@@ -176,15 +176,18 @@ step type when resolving a step — no step handles multiple concerns.
   ActiveCombat via the linked CombatEncounterDef. The chain pauses
   until combat resolves, then navigates to winStepId (players win) or
   loseStepId (players lose). Either may be null (event ends on that
-  outcome). Win rewards and loss consequences live on the reward steps
+  outcome). Win rewards and loss consequences live on the effect steps
   those IDs point to — not on the combat step itself.
 
-  REWARD
+  EFFECT
   Applies all EventEffect rows attached to this step, then displays a
   summary of what happened. Anyone clicks 'next' or 'finish' to advance.
-  Points to nextStepId (null = event ends naturally after rewards).
+  Points to nextStepId (null = event ends naturally).
   This is the ONLY step type that applies effects. effectScopeId sets
-  the default participant scope for all effects on this step.
+  the default participant scope for all effects on this step. Effects
+  can be positive (items, buffs, XP) or negative (conditions, structure
+  damage, spawn weight penalties) — the step type is the mechanism,
+  not the tone.
 
   EXIT
   Terminal step. No nextStepId. Displays optional closing text. Sets:
@@ -212,7 +215,7 @@ step type when resolving a step — no step handles multiple concerns.
   item_check         passStepId (has item) or failStepId (does not) — automatic
   threshold_check    passStepId or failStepId based on world-state comparison — automatic
   combat             winStepId or loseStepId (FKs on EventStepDef)
-  reward             nextStepId (FK on EventStepDef)
+  effect             nextStepId (FK on EventStepDef)
   exit               terminal — no outgoing navigation
 
 
@@ -221,7 +224,7 @@ step type when resolving a step — no step handles multiple concerns.
 ─────────────────────────────────────────────
 
 EventParticipantScope determines which participants an effect applies to.
-Used as the default scope on reward steps (EventStepDef.effectScopeId):
+Used as the default scope on effect steps (EventStepDef.effectScopeId):
 
   all_participants   — every entity in the event
   random_participant — one randomly selected participant
@@ -232,11 +235,11 @@ Used as the default scope on reward steps (EventStepDef.effectScopeId):
 
 
 ─────────────────────────────────────────────
-8. EFFECTS (REWARD STEPS ONLY)
+8. EFFECTS (EFFECT STEPS ONLY)
 ─────────────────────────────────────────────
 
-EventEffect rows attach exclusively to reward steps (EventEffect.stepDefId
-must reference a reward-type EventStepDef). Multiple effects may be on the
+EventEffect rows attach exclusively to effect steps (EventEffect.stepDefId
+must reference an effect-type EventStepDef). Multiple effects may be on the
 same step; each has an independent probability.
 
 Effect types (EffectType with isEvent = true):
@@ -251,10 +254,13 @@ Effect types (EffectType with isEvent = true):
   proficiency_modifier  — apply a temporary proficiency modifier, advantage, or disadvantage
   faction_rep           — grant or remove faction reputation points
   discipline_xp         — grant discipline experience points
-  structure_damage      — deal damage to structures in the camp; flat HP or fraction of
-                          maxDurability; targets all structures, random N, or a specific type
+  structure_damage       — deal damage to structures in the camp; flat HP or fraction of
+                           maxDurability; targets all structures, random N, or a specific type
   action_output_modifier — multiply the output quantity of the triggering action (e.g. 2.0 =
                            2x output); only valid for action-scoped events
+  event_weight_modifier  — add a positive or negative modifier to another event's effective
+                           spawn weight; written to EventWeightModifier with optional expiry;
+                           the worker sums all active modifiers at roll time
 
 Core fields on EventEffect:
   probability    — chance this effect fires (0.0–1.0); each row is independent
@@ -274,6 +280,7 @@ Effect-type-specific magnitude fields:
   structure_damage:      structureDamageValue, structureDamageIsMultiplier, structureDamageCount,
                          structureDamageStructureTypeId
   action_output_modifier: outputMultiplier
+  event_weight_modifier: eventWeightTargetEventDefId, eventWeightValue, eventWeightDurationHours
 
 
 ─────────────────────────────────────────────
@@ -339,13 +346,14 @@ Currently seeded threshold types: filth
   EventScopeType      — global | faction | action | camp
   EventStepType       — narrative | narrative_random | choice_solo | choice_leader |
                         choice_consensus | proficiency_check | condition_check |
-                        item_check | threshold_check | combat | reward | exit
+                        item_check | threshold_check | combat | effect | exit
   EventParticipantScope — all_participants | random_participant | leader |
                           group | housed_entities
   EventThresholdType  — filth
   EffectType (isEvent=true)    — condition | item | location_buff | stat_modifier |
                                  proficiency_modifier | faction_rep | discipline_xp |
-                                 structure_damage | action_output_modifier
+                                 structure_damage | action_output_modifier |
+                                 event_weight_modifier
   EffectType (isLocation=true) — spawn_rate | spawn_weight | growth_rate |
                                  harvest_yield | rot_rate
                                  (valid as locationBuffEffectTypeId on location_buff effects;
@@ -354,8 +362,10 @@ Currently seeded threshold types: filth
   TargetType (isEvent=true)   — participants | camp | location | faction | items
 
   EFFECTS & MODIFIERS
-  EventEffect         — effect row; attaches only to reward steps (stepDefId required)
-  Location_Effect     — temporary location-wide buffs/debuffs
+  EventEffect           — effect row; attaches only to effect steps (stepDefId required)
+  Location_Effect       — temporary location-wide buffs/debuffs
+  EventWeightModifier   — active spawn weight modifier on an EventDef; written by
+                          event_weight_modifier effects; worker sums all active rows at roll time
 
   ACTIVE INSTANCES
   ActiveEvent         — live event instance; campId set for camp-scoped events;

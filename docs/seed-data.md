@@ -1000,7 +1000,7 @@ Each type has exactly one responsibility. See event-system.md section 5 for full
                        to thresholdCheckValue; routes to passStepId or failStepId
   combat             — displays prompt + 'initiate' button; spawns ActiveCombat;
                        resolves to winStepId or loseStepId
-  reward             — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
+  effect             — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
                        → nextStepId (null = event ends naturally)
   exit               — terminal; optional closing text; marksUnresolved / endsAction flags; no nextStepId
 
@@ -1039,6 +1039,8 @@ These are EffectType rows with isEvent = true. The effectTypeId on EventEffect r
   discipline_xp           grant discipline experience (disciplineXpDisciplineDefId + disciplineXpValue)
   structure_damage        deal flat or proportional damage to structures in the camp (structureDamageValue + fields)
   action_output_modifier  multiply the output quantity of the triggering action (outputMultiplier); action-scoped only
+  event_weight_modifier   add a positive or negative modifier to another event's spawn weight
+                          (eventWeightTargetEventDefId + eventWeightValue + eventWeightDurationHours)
 
 
 ──────────────────────────────────────────────

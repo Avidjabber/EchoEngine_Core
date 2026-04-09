@@ -4541,10 +4541,12 @@ model EventDef {
   scope       EventScope       @relation(fields: [scopeId],       references: [id], onDelete: Restrict)
 
   // Back-relations
-  profileTriggers ItemEquipmentProfile[]
-  cooldowns       EventCooldown[]
-  unresolvedStates EventUnresolvedState[]
-  activeEvents       ActiveEvent[]
+  profileTriggers   ItemEquipmentProfile[]
+  cooldowns         EventCooldown[]
+  unresolvedStates  EventUnresolvedState[]
+  activeEvents      ActiveEvent[]
+  weightModifiers   EventWeightModifier[] @relation("EventWeightModifiers")
+  weightEffects     EventEffect[]         @relation("EventEffectWeightTarget")
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -4669,7 +4671,7 @@ model EnvCondition_EventDef {
 //                        routes to passStepId or failStepId
 //   combat             — displays prompt + 'initiate' button; spawns ActiveCombat;
 //                        resolves to winStepId or loseStepId
-//   reward             — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
+//   effect             — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
 //                        → nextStepId (null = event ends naturally)
 //   exit               — terminal step; displays optional closing text; no nextStepId;
 //                        sets marksUnresolved / endsAction as configured
@@ -4688,11 +4690,11 @@ model EventStepDef {
   stepTypeId Int
   prompt     String  @db.VarChar(2000)
 
-  // ── narrative / reward step fields ──────────────────────────────────────
-  nextStepId Int?  // null = event ends after this step (narrative, reward)
+  // ── narrative / effect step fields ──────────────────────────────────────
+  nextStepId Int?  // null = event ends after this step (narrative, effect)
 
-  // ── reward step fields ──────────────────────────────────────────────────
-  effectScopeId Int?  // default participant scope for all effects on this reward step
+  // ── effect step fields ───────────────────────────────────────────────────
+  effectScopeId Int?  // default participant scope for all effects on this effect step
 
   // ── exit step fields ─────────────────────────────────────────────────────
   marksUnresolved Boolean @default(false)  // true = record EventUnresolvedState on reaching this step
@@ -4814,8 +4816,8 @@ model EventStepRandomBranch {
   @@index([nextStepId])
 }
 
-// An effect attached to a "reward" EventStepDef. Only reward steps carry effects.
-// stepDefId must reference a reward-type step (app-enforced).
+// An effect attached to an "effect" EventStepDef. Only effect steps carry effects.
+// stepDefId must reference an effect-type step (app-enforced).
 //
 // Core effect fields:
 //   probability   — chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
@@ -4869,13 +4871,18 @@ model EventStepRandomBranch {
 // action_output_modifier fields (effectType = "action_output_modifier"):
 //   outputMultiplier — multiplier on action output quantity (2.0 = 2x output); only valid for action-scoped events
 //
+// event_weight_modifier fields (effectType = "event_weight_modifier"):
+//   eventWeightTargetEventDefId — which EventDef's spawn weight to modify
+//   eventWeightValue            — modifier added to effective spawn weight (positive = more likely, negative = less)
+//   eventWeightDurationHours    — how long the modifier lasts; null = permanent until removed
+//
 // item droptable grant (effectType = "item"):
 //   dropTableId — if set, roll from this DropTable; mutually exclusive with itemId and itemTypeId (app-enforced)
 model EventEffect {
   id           Int @id @default(autoincrement())
   effectTypeId Int
 
-  stepDefId Int  // FK to a reward-type EventStepDef
+  stepDefId Int  // FK to an effect-type EventStepDef
 
   probability   Float @default(1.0)  // probability this effect occurs (0.0-1.0)
   targetTypeId  Int?  // what type of target this effect applies to (participants, camp, location, etc.)
@@ -4925,6 +4932,11 @@ model EventEffect {
   // action_output_modifier effect fields
   outputMultiplier Float?  // multiplier on action output quantity (2.0 = 2x); only valid for action-scoped events
 
+  // event_weight_modifier effect fields
+  eventWeightTargetEventDefId Int?   // which EventDef's spawn weight to modify
+  eventWeightValue            Float? // positive = more likely, negative = less likely
+  eventWeightDurationHours    Int?   // how long the modifier lasts (null = permanent until removed)
+
   // item droptable grant (effectType = "item" only)
   dropTableId Int?  // roll from this DropTable; mutually exclusive with itemId / itemTypeId (app-enforced)
 
@@ -4940,8 +4952,9 @@ model EventEffect {
   statModifierStat       Stat?       @relation("EventEffectStatModifier", fields: [statModifierStatId], references: [id], onDelete: Restrict)
   proficiencyModifierProficiency   ProficiencyDef? @relation(fields: [proficiencyModifierProficiencyDefId], references: [id], onDelete: Restrict)
   disciplineXpDiscipline           DisciplineDef?  @relation(fields: [disciplineXpDisciplineDefId],          references: [id], onDelete: Restrict)
-  structureDamageStructureType     StructureType?  @relation("EventEffectStructureDamage", fields: [structureDamageStructureTypeId], references: [id], onDelete: Restrict)
-  dropTable                        DropTable?      @relation("EventEffectDropTable",        fields: [dropTableId],                   references: [id], onDelete: SetNull)
+  structureDamageStructureType     StructureType?  @relation("EventEffectStructureDamage",   fields: [structureDamageStructureTypeId],   references: [id], onDelete: Restrict)
+  dropTable                        DropTable?      @relation("EventEffectDropTable",          fields: [dropTableId],                     references: [id], onDelete: SetNull)
+  eventWeightTargetEventDef        EventDef?       @relation("EventEffectWeightTarget",       fields: [eventWeightTargetEventDefId],     references: [id], onDelete: Restrict)
 
   @@index([effectTypeId])
   @@index([targetTypeId])
@@ -4957,6 +4970,7 @@ model EventEffect {
   @@index([disciplineXpDisciplineDefId])
   @@index([structureDamageStructureTypeId])
   @@index([dropTableId])
+  @@index([eventWeightTargetEventDefId])
 }
 
 
@@ -4994,7 +5008,8 @@ model ActiveEvent {
 
   participants      ActiveEvent_Participant[]
   activeCombats     ActiveCombat[]
-  appliedConditions EntityCondition[]  @relation("EventAppliedConditions")
+  appliedConditions EntityCondition[]        @relation("EventAppliedConditions")
+  weightModifiers   EventWeightModifier[]    @relation("EventWeightModifierSource")
 
   @@index([guildId])
   @@index([eventDefId])
@@ -5020,6 +5035,24 @@ model ActiveEvent_Participant {
   @@unique([activeEventId, entityId])
   @@index([activeEventId])
   @@index([entityId])
+}
+
+// Active spawn weight modifier applied to an EventDef by a previous event's effect step.
+// The worker sums all active (non-expired) rows for a given eventDefId and adds the total
+// to its base spawn weight at roll time.
+model EventWeightModifier {
+  id               Int       @id @default(autoincrement())
+  targetEventDefId Int
+  value            Float     // positive = more likely, negative = less likely
+  sourceActiveEventId Int?   // which ActiveEvent wrote this modifier (null if applied manually)
+  expiresAt        DateTime? @db.Timestamptz  // null = permanent until explicitly removed
+  createdAt        DateTime  @default(now()) @db.Timestamptz
+
+  targetEventDef    EventDef     @relation("EventWeightModifiers",      fields: [targetEventDefId],    references: [id], onDelete: Cascade)
+  sourceActiveEvent ActiveEvent? @relation("EventWeightModifierSource", fields: [sourceActiveEventId], references: [id], onDelete: SetNull)
+
+  @@index([targetEventDefId])
+  @@index([sourceActiveEventId])
 }
 
 // Binds an EventDef to one or more named Locations.
