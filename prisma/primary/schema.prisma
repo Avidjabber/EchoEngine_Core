@@ -4677,8 +4677,8 @@ model EnvCondition_EventDef {
 //                      EventStepRandomBranch table to pick which nextStepId to follow
 //   choice           — displays prompt + N choice buttons (EventStepChoice rows);
 //                      choiceScopeId determines who may interact:
-//                        all_participants → first participant to click decides (formerly choice_solo)
-//                        leader          → only the group leader may click (formerly choice_leader)
+//                        all_participants → first participant to click decides
+//                        leader          → only the group leader may click
 //                      if expiresAfterMinutes elapses with no selection, event cancels
 //   choice_consensus — all participants cast individual votes (recorded in EventStepVote);
 //                      plurality winner decides; ties broken by lowest sortOrder among tied choices;
@@ -4724,8 +4724,8 @@ model EventStepDef {
   //                   cancels only if zero votes were cast
   expiresAfterMinutes Int?
   // choice only: determines who may interact with the buttons
-  //   all_participants → first to click decides  (formerly choice_solo)
-  //   leader           → only the leader may click (formerly choice_leader)
+  //   all_participants → first to click decides
+  //   leader           → only the leader may click
   choiceScopeId       Int?
 
   // ── check step fields ────────────────────────────────────────────────────
