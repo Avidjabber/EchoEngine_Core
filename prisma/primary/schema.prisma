@@ -4438,6 +4438,21 @@ model EventScope {
 model EventStepType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
+  // Seeded values: narrative | narrative_random | choice | choice_consensus |
+  //                check | combat | effect | exit
+
+  stepDefs EventStepDef[]
+}
+
+// Determines what a "check" step evaluates. Set via EventStepDef.checkTypeId.
+// Seeded values:
+//   proficiency — rolls checkProficiencyDefId for checkParticipantScopeId target(s) against checkDifficulty
+//   condition   — checks whether target(s) have conditionCheckDefId active
+//   item        — checks whether target(s) carry itemCheckItemId / itemCheckItemTypeId in sufficient quantity
+//   threshold   — reads a world-state value (thresholdCheckTypeId) and compares to thresholdCheckValue
+model EventCheckType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
 
   stepDefs EventStepDef[]
 }
@@ -4466,6 +4481,7 @@ model EventParticipantScope {
 
   stepDefs           EventStepDef[] @relation("StepEffectScope")
   checkStepDefs      EventStepDef[] @relation("StepCheckScope")
+  choiceStepDefs     EventStepDef[] @relation("StepChoiceScope")
   eventEffects       EventEffect[]
 }
 
@@ -4520,9 +4536,14 @@ model EventDef {
   minAge               Int?
 
   // Participant bounds for signup-based events
-  requiresSignup       Boolean @default(false)
-  minParticipants       Int?  // null = no minimum
-  maxParticipants       Int?  // null = no maximum
+  requiresSignup    Boolean @default(false)
+  minParticipants   Int?    // null = no minimum
+  maxParticipants   Int?    // null = no maximum
+  // Signup window: how many hours the event waits for volunteers before proceeding or cancelling.
+  // If minParticipants is met by the deadline → proceeds with enrolled group.
+  // If maxParticipants is hit early → proceeds immediately.
+  // If minParticipants is not met by the deadline → event cancels.
+  signupWindowHours Int @default(18)
 
   // Cooldown — days before this event can fire again for the same faction/guild
   cooldownDays Int @default(3)
@@ -4651,48 +4672,38 @@ model EnvCondition_EventDef {
 // A single step in an event chain. Each step type has exactly one responsibility.
 //
 // Step types:
-//   narrative          — displays prompt text; anyone in the group clicks 'next' → nextStepId
-//   narrative_random   — displays prompt text; anyone clicks 'next'; worker rolls weighted
-//                        EventStepRandomBranch table to pick which nextStepId to follow
-//   choice_solo        — displays prompt + N choice buttons (EventStepChoice rows);
-//                        the first participant to click decides → that choice's nextStepId
-//   choice_leader      — same as choice_solo but only the leader may interact; non-leaders
-//                        see the buttons but cannot click
-//   choice_consensus   — all participants cast individual votes; plurality winner decides;
-//                        ties broken by lowest sortOrder among tied choices;
-//                        if expiresAfterMinutes elapses, tallies whatever votes exist
-//                        (sortOrder tiebreak applies); cancels only if zero votes were cast
-//   proficiency_check  — displays prompt + 'roll' button; worker rolls the configured proficiency
-//                        for checkParticipantScopeId target(s) against checkDifficulty;
-//                        routes to passStepId (success) or failStepId (failure)
-//   condition_check    — automatic; no player input; checks whether checkParticipantScopeId
-//                        target(s) have conditionCheckDefId active; routes to passStepId
-//                        (has condition) or failStepId (does not)
-//   item_check         — automatic; no player input; checks whether checkParticipantScopeId
-//                        target(s) carry itemCheckItemId (or any item of itemCheckItemTypeId)
-//                        in at least itemCheckMinQuantity; routes to passStepId (has item)
-//                        or failStepId (does not)
-//   threshold_check    — automatic; no player input; reads a world-state value (thresholdCheckTypeId)
-//                        and compares it to thresholdCheckValue; thresholdCheckOnHigh = true means
-//                        pass when value > threshold, false means pass when value < threshold;
-//                        routes to passStepId or failStepId
-//   combat             — displays prompt + 'initiate' button; spawns ActiveCombat;
-//                        resolves to winStepId or loseStepId
-//   effect             — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
-//                        → nextStepId (null = event ends naturally)
-//   exit               — terminal step; displays optional closing text; no nextStepId;
-//                        sets marksUnresolved / endsAction as configured
+//   narrative        — displays prompt text; anyone in the group clicks 'next' → nextStepId
+//   narrative_random — displays prompt text; anyone clicks 'next'; worker rolls weighted
+//                      EventStepRandomBranch table to pick which nextStepId to follow
+//   choice           — displays prompt + N choice buttons (EventStepChoice rows);
+//                      choiceScopeId determines who may interact:
+//                        all_participants → first participant to click decides (formerly choice_solo)
+//                        leader          → only the group leader may click (formerly choice_leader)
+//                      if expiresAfterMinutes elapses with no selection, event cancels
+//   choice_consensus — all participants cast individual votes (recorded in EventStepVote);
+//                      plurality winner decides; ties broken by lowest sortOrder among tied choices;
+//                      if expiresAfterMinutes elapses, tallies whatever votes exist
+//                      (sortOrder tiebreak applies); cancels only if zero votes were cast
+//   check            — evaluates a condition and routes to passStepId (success) or failStepId (failure);
+//                      checkTypeId (EventCheckType) controls what is evaluated:
+//                        proficiency → rolls checkProficiencyDefId for checkParticipantScopeId
+//                                      target(s) against checkDifficulty; shows 'roll' button
+//                        condition   → automatic; checks whether target(s) have conditionCheckDefId active
+//                        item        → automatic; checks whether target(s) carry the required item/quantity
+//                        threshold   → automatic; compares world-state thresholdCheckTypeId to thresholdCheckValue
+//   combat           — displays prompt + 'initiate' button; spawns ActiveCombat;
+//                      resolves to winStepId or loseStepId
+//   effect           — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
+//                      → nextStepId (null = event ends naturally)
+//   exit             — terminal step; displays optional closing text; no nextStepId;
+//                      sets marksUnresolved / endsAction as configured
 //
 // isStarter: true on exactly one step per EventDef — the entry point of the chain.
-// sortOrder: display/seeding hint only — NOT used for execution order.
-//
-// expiresAfterMinutes: "choice" steps only — time window for the player to make a selection.
-//   If the window elapses with no selection, the worker deletes the ActiveEvent row and posts a notice.
-//   There is no fallback path; the event simply ends.
+// Navigation is driven entirely by nextStepId / passStepId / failStepId / winStepId /
+// loseStepId / EventStepChoice.nextStepId. There is no sortOrder on steps.
 model EventStepDef {
   id         Int     @id @default(autoincrement())
   eventDefId Int
-  sortOrder  Int
   isStarter  Boolean @default(false)  // true on the entry-point step of the chain
   stepTypeId Int
   prompt     String  @db.VarChar(2000)
@@ -4707,31 +4718,37 @@ model EventStepDef {
   marksUnresolved Boolean @default(false)  // true = record EventUnresolvedState on reaching this step
   endsAction      Boolean @default(false)  // true = interrupt the linked ActionInstance
 
-  // ── choice_solo / choice_leader / choice_consensus step fields ───────────
-  // choice_solo / choice_leader: if window elapses with no selection, event cancels
-  // choice_consensus: if window elapses, tallies existing votes (sortOrder tiebreak); cancels only if zero votes cast
+  // ── choice / choice_consensus step fields ────────────────────────────────
+  // choice:           expiresAfterMinutes → event cancels if no one clicks within the window
+  // choice_consensus: expiresAfterMinutes → tallies existing votes on expiry (sortOrder tiebreak);
+  //                   cancels only if zero votes were cast
   expiresAfterMinutes Int?
+  // choice only: determines who may interact with the buttons
+  //   all_participants → first to click decides  (formerly choice_solo)
+  //   leader           → only the leader may click (formerly choice_leader)
+  choiceScopeId       Int?
 
-  // ── proficiency_check / condition_check / item_check step fields ─────────
-  checkParticipantScopeId  Int?   // who is checked/rolling (e.g. leader, random_participant)
+  // ── check step fields ────────────────────────────────────────────────────
+  checkTypeId              Int?   // EventCheckType: proficiency | condition | item | threshold
+  checkParticipantScopeId  Int?   // who is checked/rolling (e.g. leader, random_participant; unused for threshold)
   passStepId               Int?   // step reached on pass/success; null = event ends
   failStepId               Int?   // step reached on fail/failure; null = event ends
 
-  // proficiency_check
-  checkProficiencyDefId    Int?   // which proficiency to roll
-  checkDifficulty          Float? // difficulty value to roll against
+  // checkType = proficiency
+  checkProficiencyDefId    Int?              // which proficiency to roll
+  checkDifficulty          Int @default(10)  // difficulty 1-20; 10 = average, higher = harder
 
-  // condition_check
+  // checkType = condition
   conditionCheckDefId      Int?   // which ConditionDef to look for on the target participant(s)
 
-  // item_check
+  // checkType = item
   itemCheckItemId          Int?   // specific item to look for
   itemCheckItemTypeId      Int?   // or: any item of this type (one of itemCheckItemId / itemCheckItemTypeId required)
   itemCheckMinQuantity     Float? // minimum quantity required; null = 1.0
 
-  // threshold_check (no participant scope — checks world state)
-  thresholdCheckTypeId     Int?   // which world-state threshold to read (e.g. filth)
-  thresholdCheckValue      Float? // comparison value
+  // checkType = threshold (no participant scope — checks world state)
+  thresholdCheckTypeId     Int?     // which world-state threshold to read (e.g. filth)
+  thresholdCheckValue      Float?   // comparison value
   thresholdCheckOnHigh     Boolean? // true = pass when value > threshold; false = pass when value < threshold
 
   // ── combat step fields ───────────────────────────────────────────────────
@@ -4742,9 +4759,11 @@ model EventStepDef {
   // ── relations ────────────────────────────────────────────────────────────
   eventDef              EventDef               @relation(fields: [eventDefId],              references: [id], onDelete: Cascade)
   stepType              EventStepType          @relation(fields: [stepTypeId],              references: [id], onDelete: Restrict)
-  effectScope           EventParticipantScope? @relation("StepEffectScope",     fields: [effectScopeId],           references: [id], onDelete: Restrict)
-  checkParticipantScope EventParticipantScope? @relation("StepCheckScope",      fields: [checkParticipantScopeId], references: [id], onDelete: Restrict)
-  checkProficiencyDef   ProficiencyDef?        @relation("StepProficiencyCheck", fields: [checkProficiencyDefId],  references: [id], onDelete: Restrict)
+  effectScope           EventParticipantScope? @relation("StepEffectScope",      fields: [effectScopeId],           references: [id], onDelete: Restrict)
+  choiceScope           EventParticipantScope? @relation("StepChoiceScope",      fields: [choiceScopeId],           references: [id], onDelete: Restrict)
+  checkParticipantScope EventParticipantScope? @relation("StepCheckScope",       fields: [checkParticipantScopeId], references: [id], onDelete: Restrict)
+  checkType             EventCheckType?        @relation(fields: [checkTypeId],              references: [id], onDelete: Restrict)
+  checkProficiencyDef   ProficiencyDef?        @relation("StepProficiencyCheck", fields: [checkProficiencyDefId],   references: [id], onDelete: Restrict)
   conditionCheckDef     ConditionDef?          @relation("StepConditionCheck",   fields: [conditionCheckDefId],     references: [id], onDelete: Restrict)
   itemCheckItem         Item?                  @relation("StepItemCheck",         fields: [itemCheckItemId],         references: [id], onDelete: Restrict)
   itemCheckItemType     ItemType?              @relation("StepItemTypeCheck",     fields: [itemCheckItemTypeId],     references: [id], onDelete: Restrict)
@@ -4759,6 +4778,7 @@ model EventStepDef {
   effects        EventEffect[]
   choiceOptions  EventStepChoice[]       @relation("StepChoiceOptions")
   randomBranches EventStepRandomBranch[] @relation("StepRandomBranches")
+  votes          EventStepVote[]
 
   // Back-references for incoming navigation links
   incomingNextSteps      EventStepDef[]          @relation("StepNext")
@@ -4770,10 +4790,11 @@ model EventStepDef {
   incomingRandomBranches EventStepRandomBranch[] @relation("StepRandomTarget")
   activeEvents           ActiveEvent[]
 
-  @@unique([eventDefId, sortOrder])
   @@index([eventDefId])
   @@index([stepTypeId])
   @@index([effectScopeId])
+  @@index([choiceScopeId])
+  @@index([checkTypeId])
   @@index([checkParticipantScopeId])
   @@index([checkProficiencyDefId])
   @@index([conditionCheckDefId])
@@ -4801,6 +4822,7 @@ model EventStepChoice {
 
   stepDef  EventStepDef @relation("StepChoiceOptions", fields: [stepDefId],  references: [id], onDelete: Cascade)
   nextStep EventStepDef @relation("StepChoiceTarget",  fields: [nextStepId], references: [id], onDelete: Restrict)
+  votes    EventStepVote[]
 
   @@index([stepDefId])
   @@index([nextStepId])
@@ -4992,8 +5014,12 @@ model ActiveEvent {
 
   currentStepId Int?      // which EventStepDef the chain is currently on
 
-  startedAt DateTime  @default(now()) @db.Timestamptz
-  expiresAt DateTime? @db.Timestamptz  // set when the current step has a response window
+  startedAt           DateTime  @default(now()) @db.Timestamptz
+  expiresAt           DateTime? @db.Timestamptz  // set when the current step has a response window
+  // Worker updates this on every player interaction (vote, choice, signup).
+  // Any ActiveEvent with lastInteractionAt older than 24 hours is expired and deleted.
+  // This field will be superseded by the logging expansion — derive from event log at that point.
+  lastInteractionAt   DateTime? @db.Timestamptz
 
   eventDef       EventDef        @relation(fields: [eventDefId],       references: [id], onDelete: Restrict)
   currentStep    EventStepDef?   @relation(fields: [currentStepId],    references: [id], onDelete: SetNull)
@@ -5006,6 +5032,7 @@ model ActiveEvent {
   appliedConditions EntityCondition[]        @relation("EventAppliedConditions")
   weightModifiers   EventWeightModifier[]    @relation("EventWeightModifierSource")
   locationEffects   Location_Effect[]
+  votes             EventStepVote[]
 
   @@index([guildId])
   @@index([eventDefId])
@@ -5030,6 +5057,29 @@ model ActiveEvent_Participant {
   @@unique([activeEventId, userId])
   @@unique([activeEventId, entityId])
   @@index([activeEventId])
+  @@index([entityId])
+}
+
+// Records a single entity's vote on a choice_consensus step.
+// One row per (activeEventId, stepDefId, entityId) — the unique constraint prevents double-voting.
+// Because each player can only have one entity in an event at a time, entity implicitly identifies
+// the player; no separate user lookup is needed.
+// The worker deletes all vote rows for the step as soon as the consensus resolves and the chain
+// advances — votes are ephemeral and do not need to persist after the step is done.
+model EventStepVote {
+  id            Int @id @default(autoincrement())
+  activeEventId Int
+  stepDefId     Int  // the choice_consensus EventStepDef this vote belongs to
+  entityId      Int
+  choiceId      Int  // which EventStepChoice the entity voted for
+
+  activeEvent ActiveEvent     @relation(fields: [activeEventId], references: [id], onDelete: Cascade)
+  stepDef     EventStepDef    @relation(fields: [stepDefId],     references: [id], onDelete: Cascade)
+  choice      EventStepChoice @relation(fields: [choiceId],      references: [id], onDelete: Cascade)
+  entity      Entity          @relation(fields: [entityId],      references: [id], onDelete: Cascade)
+
+  @@unique([activeEventId, stepDefId, entityId])
+  @@index([activeEventId, stepDefId])
   @@index([entityId])
 }
 

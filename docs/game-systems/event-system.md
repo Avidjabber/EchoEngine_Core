@@ -91,6 +91,14 @@ begins. Players voluntarily enroll their characters from the eligible pool
 (determined by scope). The app enforces EventDef.minParticipants and
 EventDef.maxParticipants.
 
+Signup window rules (signupWindowHours, default 18):
+  - If maxParticipants is reached before the deadline → event starts immediately.
+  - If minParticipants is met by the deadline → event starts with the enrolled group.
+  - If minParticipants is not met by the deadline → event cancels and posts a notice.
+
+Global idle timeout: any ActiveEvent with lastInteractionAt older than 24 hours
+is expired and deleted regardless of step type or signup state.
+
 Eligibility checks (applied against the participant list before the chain begins):
   requiresLeader            — at least one participant must have Rank.canLeadEvents = true
   requiresCanMentor         — all participants must have Rank.canMentor = true
@@ -117,69 +125,63 @@ step type when resolving a step — no step handles multiple concerns.
   randomness. Use this for proficiency-agnostic chance outcomes (e.g. "you
   find something — what is it?").
 
-  CHOICE_SOLO
+  CHOICE
   Displays prompt text + N choice buttons, one per EventStepChoice row.
-  The first participant to click decides; the event navigates directly to
-  that choice's nextStepId. No randomness, no checks — deterministic.
+  One participant clicks and the event navigates directly to that choice's
+  nextStepId. No randomness, no checks — deterministic.
+  choiceScopeId controls who may interact:
+    all_participants → the first participant to click decides
+    leader           → only the group leader may click; non-leaders see
+                       the buttons but cannot interact (use requiresLeader
+                       on the EventDef to ensure a leader is present)
   If expiresAfterMinutes is set and no one clicks within the window,
-  the event cancels (worker deletes the ActiveEvent row and posts a notice). There is no fallback.
-
-  CHOICE_LEADER
-  Identical to choice_solo in structure and expiry behavior, but only the
-  group leader may interact with the buttons. Non-leaders see the options
-  but are locked out. Use this when the decision should belong solely to
-  the event's designated leader. If no leader is present the step should
-  not be reachable — enforce this at the EventDef level via requiresLeader.
+  the event cancels. There is no fallback path.
 
   CHOICE_CONSENSUS
   Displays prompt text + N choice buttons. Every participant casts an
-  individual vote by clicking their preferred option. The plurality winner
-  (most votes) determines the next step. Ties are broken by the lowest
-  sortOrder among tied choices — seed authors can use this to set an
-  intentional default by placing it first.
+  individual vote by clicking their preferred option. Each vote is recorded
+  as an EventStepVote row (unique per entity per step — prevents double-voting).
+  The plurality winner (most votes) determines the next step. Ties are broken
+  by the lowest sortOrder among tied EventStepChoice rows — seed authors can
+  use this to set an intentional default by placing it first.
   If expiresAfterMinutes is set and the window elapses, the worker tallies
   whatever votes exist and applies the same sortOrder tiebreak. If zero
   votes were cast by expiry, the event cancels.
+  The worker deletes all EventStepVote rows for the step as soon as the
+  chain advances — votes are ephemeral.
   Valid in any event regardless of whether a leader is present — this is
   the correct choice type for volunteer/signup events where no leader role
   is guaranteed.
 
-  PROFICIENCY_CHECK
-  Displays prompt text + a 'roll' button. A participant clicks the button;
-  the worker rolls the configured proficiency (checkProficiencyDefId) for
-  the participant(s) specified by checkParticipantScopeId against
-  checkDifficulty. The chain then navigates to passStepId (success) or
-  failStepId (failure). Either may be null (event ends on that outcome).
-  No player agency in the outcome — the roll is system-driven. Use this
-  for skill gates, ability checks, and any outcome that should depend on
-  character capability rather than player choice.
+  CHECK
+  Evaluates a condition and routes to passStepId (success/present/met) or
+  failStepId (failure/absent/not met). Either may be null (event ends on
+  that outcome). checkTypeId (EventCheckType) determines what is evaluated:
 
-  CONDITION_CHECK
-  Fully automatic — no player input, no button. The worker checks whether
-  the participant(s) specified by checkParticipantScopeId currently have
-  conditionCheckDefId active. Routes to passStepId (condition present) or
-  failStepId (condition absent). Either may be null. Use this to branch
-  a chain based on the health or status of participants without surfacing
-  the check to players (e.g. "if already poisoned, take the harder path").
+    proficiency — Displays prompt + a 'roll' button. The worker rolls
+                  checkProficiencyDefId for checkParticipantScopeId
+                  target(s) against checkDifficulty (Int, default 10,
+                  range 1-20; higher = harder). No player agency in the
+                  outcome — the roll is system-driven.
 
-  ITEM_CHECK
-  Fully automatic — no player input, no button. The worker checks whether
-  the participant(s) specified by checkParticipantScopeId carry at least
-  itemCheckMinQuantity (default: 1) of the required item — identified by
-  itemCheckItemId (specific item) or itemCheckItemTypeId (any item of that
-  type; set one or the other, not both). Routes to passStepId (has item)
-  or failStepId (does not). Either may be null. Use this for "do you have
-  the key?" gates and resource checks without making them explicit choices.
+    condition   — Fully automatic; no player input. Checks whether
+                  checkParticipantScopeId target(s) have conditionCheckDefId
+                  active. Use this to branch silently on participant health
+                  or status (e.g. "if already poisoned, take the harder path").
 
-  THRESHOLD_CHECK
-  Fully automatic — no player input, no button. The worker reads the
-  current world-state value for thresholdCheckTypeId (e.g. filth) and
-  compares it to thresholdCheckValue. thresholdCheckOnHigh = true means
-  passStepId is reached when value > threshold; false means passStepId is
-  reached when value < threshold. Routes to passStepId or failStepId;
-  either may be null. Use this to branch an event based on the current
-  state of the world mid-chain (e.g. "if filth is already high, the
-  situation escalates").
+    item        — Fully automatic; no player input. Checks whether
+                  checkParticipantScopeId target(s) carry at least
+                  itemCheckMinQuantity (default: 1) of the required item,
+                  identified by itemCheckItemId (specific item) or
+                  itemCheckItemTypeId (any item of that type; set one,
+                  not both). Use for silent "do you have the key?" gates.
+
+    threshold   — Fully automatic; no player input; no participant scope.
+                  Reads world-state thresholdCheckTypeId and compares to
+                  thresholdCheckValue. thresholdCheckOnHigh = true → pass
+                  when value > threshold; false → pass when value < threshold.
+                  Use to branch mid-chain on world state (e.g. "if filth
+                  is already high, the situation escalates").
 
   COMBAT
   Displays prompt text + an 'initiate combat' button. Spawns an
@@ -217,13 +219,9 @@ step type when resolving a step — no step handles multiple concerns.
   ─────────────────  ────────────────────────────────────────────────────────
   narrative          nextStepId (FK on EventStepDef)
   narrative_random   EventStepRandomBranch weight roll → winning row's nextStepId
-  choice_solo        first participant to click → that EventStepChoice row's nextStepId
-  choice_leader      leader clicks → that EventStepChoice row's nextStepId
+  choice             participant defined by choiceScopeId clicks → that EventStepChoice row's nextStepId
   choice_consensus   plurality vote across all participants → winning EventStepChoice row's nextStepId
-  proficiency_check  passStepId (success) or failStepId (failure) — system roll
-  condition_check    passStepId (has condition) or failStepId (does not) — automatic
-  item_check         passStepId (has item) or failStepId (does not) — automatic
-  threshold_check    passStepId or failStepId based on world-state comparison — automatic
+  check              passStepId or failStepId — outcome driven by checkTypeId evaluation
   combat             winStepId or loseStepId (FKs on EventStepDef)
   effect             nextStepId (FK on EventStepDef)
   exit               terminal — no outgoing navigation
@@ -357,7 +355,9 @@ Currently seeded threshold types: filth
 
   DEFINITIONS
   EventDef                    — event template; guild-extensible
-  EventStepDef                — ordered step; type determines sole responsibility
+  EventStepDef                — step in a chain; navigation is entirely via FK pointers
+                                (nextStepId / passStepId / failStepId / winStepId / loseStepId /
+                                EventStepChoice.nextStepId) — there is no sortOrder on steps
   EventStepChoice             — bridge table: one button per row for choice steps
   EventStepRandomBranch       — weight table: one weighted branch per row for narrative_random steps
   EventDef_TriggerType        — which trigger types apply to this event
@@ -374,9 +374,9 @@ Currently seeded threshold types: filth
   EventTriggerType    — admin | patrol | hunt | crafting | foraging | clean |
                         weather_onset | threshold | daily | hourly
   EventScopeType      — global | faction | action | camp
-  EventStepType       — narrative | narrative_random | choice_solo | choice_leader |
-                        choice_consensus | proficiency_check | condition_check |
-                        item_check | threshold_check | combat | effect | exit
+  EventStepType       — narrative | narrative_random | choice | choice_consensus |
+                        check | combat | effect | exit
+  EventCheckType      — proficiency | condition | item | threshold
   EventParticipantScope — all_participants | random_participant | leader |
                           group | housed_entities
   EventThresholdType  — filth
@@ -398,12 +398,17 @@ Currently seeded threshold types: filth
                           event_weight_modifier effects; worker sums all active rows at roll time
 
   ACTIVE INSTANCES
-  ActiveEvent         — live event instance; row exists only while the event is in
-                        progress; campId set for camp-scoped events; expiresAt set
-                        when a timed choice step is active; worker deletes the row
-                        on completion, expiry, or cancellation and posts a closing
-                        notice to Discord before deletion
+  ActiveEvent             — live event instance; row exists only while the event is in
+                            progress; campId set for camp-scoped events; expiresAt set
+                            when a timed choice step is active; lastInteractionAt updated
+                            by the worker on every player action (vote, choice, signup) —
+                            any event idle for 24 hours is expired and deleted; worker
+                            deletes the row on completion, expiry, or cancellation and
+                            posts a closing notice to Discord before deletion
   ActiveEvent_Participant — entity enrolled in a live event
+  EventStepVote           — one row per entity vote on a choice_consensus step;
+                            unique per (activeEvent, step, entity); deleted when the
+                            step resolves and the chain advances
 
 
 ─────────────────────────────────────────────
@@ -417,7 +422,7 @@ check; the outcome determines whether a unique weapon is awarded. Both
 to the patrol's area.
 
 This example illustrates: action-scoped events, choice_consensus branching,
-a proficiency_check routing to separate effect steps, multiple EventEffect
+a check (proficiency) step routing to separate effect steps, multiple EventEffect
 rows on one step, and a marksUnresolved exit.
 
   ── EventDef ──────────────────────────────────────────────────────────────
@@ -431,12 +436,12 @@ rows on one step, and a marksUnresolved exit.
 
   ── EventStepDef ──────────────────────────────────────────────────────────
 
-  Step 1 — sortOrder 10 — narrative (isStarter = true)
+  Step 1 — narrative (isStarter = true)
     prompt:    "Your patrol comes across a man hunched over a cart with a
                 cracked wheel, goods spilled across the road..."
     nextStepId → step 2
 
-  Step 2 — sortOrder 20 — choice_consensus
+  Step 2 — choice_consensus
     prompt:            "What does the group do?"
     expiresAfterMinutes: 30
     choices (EventStepChoice rows):
@@ -444,7 +449,7 @@ rows on one step, and a marksUnresolved exit.
       sortOrder 2  "Chase him off"           → step 4
       sortOrder 3  "Ignore him and move on"  → step 5
 
-  Step 3 — sortOrder 30 — proficiency_check
+  Step 3 — check (checkTypeId → proficiency)
     prompt:                  "One of you steps up to assess the damage..."
     checkProficiencyDefId  → Carpentry
     checkDifficulty          14
@@ -452,7 +457,7 @@ rows on one step, and a marksUnresolved exit.
     passStepId             → step 6
     failStepId             → step 7
 
-  Step 4 — sortOrder 40 — effect
+  Step 4 — effect
     prompt:    "The group advances menacingly. He grabs what he can and flees,
                 muttering as he disappears into the treeline..."
     nextStepId → step 8
@@ -462,13 +467,13 @@ rows on one step, and a marksUnresolved exit.
           locationBuffValue         -0.3
           locationBuffDurationHours  48  (2 days)
 
-  Step 5 — sortOrder 50 — exit
+  Step 5 — exit
     prompt:         "The patrol keeps moving. The man watches you pass without
                      a word."
     marksUnresolved  true
     endsAction       false
 
-  Step 6 — sortOrder 60 — effect
+  Step 6 — effect
     prompt:    "His eyes light up. He produces a blade wrapped in cloth —
                 'I've been saving this for someone worthy.' He raises his
                 hands and speaks a quiet blessing over the land."
@@ -485,7 +490,7 @@ rows on one step, and a marksUnresolved exit.
           locationBuffValue         0.3
           locationBuffDurationHours  72  (3 days)
 
-  Step 7 — sortOrder 70 — effect
+  Step 7 — effect
     prompt:    "You weren't quite able to fix it, but he smiles warmly. 'You
                 tried — that's more than most.' He murmurs something and the
                 air smells faintly of rain."
@@ -496,7 +501,7 @@ rows on one step, and a marksUnresolved exit.
           locationBuffValue         0.3
           locationBuffDurationHours  72  (3 days)
 
-  Step 8 — sortOrder 80 — exit
+  Step 8 — exit
     prompt:         "The patrol continues onward."
     marksUnresolved  false
     endsAction       false
@@ -549,13 +554,13 @@ condition effects, and conditionsLingerOnResolution.
 
   ── EventStepDef ──────────────────────────────────────────────────────────
 
-  Step 1 — sortOrder 10 — narrative (isStarter = true)
+  Step 1 — narrative (isStarter = true)
     prompt:    "The camp's filth has reached a critical level. The stench
                 permeates everything, and illness has begun to take hold
                 among those living here."
     nextStepId → step 2
 
-  Step 2 — sortOrder 20 — effect
+  Step 2 — effect
     prompt:    "Sickness spreads through the camp."
     effectScopeId → all_participants
     nextStepId    → null  (chain pauses here; worker re-applies this step each day)
@@ -618,23 +623,23 @@ EventStepRandomBranch weight tables, item removal, and structure damage effects.
 
   ── EventStepDef ──────────────────────────────────────────────────────────
 
-  Step 1 — sortOrder 10 — narrative (isStarter = true)
+  Step 1 — narrative (isStarter = true)
     prompt:    "A violent storm tears through the camp overnight, battering
                 structures and tearing at exposed stores."
     nextStepId → step 2
 
-  Step 2 — sortOrder 20 — narrative_random
+  Step 2 — narrative_random
     prompt:    "When dawn breaks, the camp takes stock of the damage."
     branches (EventStepRandomBranch rows):
       weight 5  description "no damage"         → step 3
       weight 3  description "supplies spoiled"  → step 4
       weight 1  description "structure hit"     → step 5
 
-  Step 3 — sortOrder 30 — exit
+  Step 3 — exit
     prompt:         "The camp holds firm. The storm passes without serious damage."
     marksUnresolved  false
 
-  Step 4 — sortOrder 40 — effect
+  Step 4 — effect
     prompt:    "The storm tears through your food stores. Much of it is
                 exposed and spoiled beyond saving."
     nextStepId → step 6
@@ -645,7 +650,7 @@ EventStepRandomBranch weight tables, item removal, and structure damage effects.
           minQuantity      2.0
           maxQuantity      5.0
 
-  Step 5 — sortOrder 50 — effect
+  Step 5 — effect
     prompt:    "One of your structures takes a serious hit, its walls cracked
                 and supports weakened by the force of the storm."
     nextStepId → step 6
@@ -655,7 +660,7 @@ EventStepRandomBranch weight tables, item removal, and structure damage effects.
           structureDamageIsMultiplier  true   (15% of maxDurability)
           structureDamageCount         1      (one randomly selected structure)
 
-  Step 6 — sortOrder 60 — exit
+  Step 6 — exit
     prompt:         "The storm passes. The camp endures, though not without cost."
     marksUnresolved  false
 
@@ -689,25 +694,28 @@ converge at a shared effect and exit.
   name            The Missing Child
   scopeId         camp
   baseWeight      0.5
-  requiresSignup  true
-  minParticipants 1
-  maxParticipants 11
-  cooldownDays    14
+  requiresSignup    true
+  minParticipants   1
+  maxParticipants   11
+  signupWindowHours 18
+  cooldownDays      14
 
   ── EventDef_TriggerType ──────────────────────────────────────────────────
   triggerTypeId → hourly
 
   ── EventStepDef ──────────────────────────────────────────────────────────
 
-  Step 1 — sortOrder 10 — narrative (isStarter = true)
+  Step 1 — narrative (isStarter = true)
     prompt:    "Word spreads quickly through the camp — a child has gone
                 missing. No one has seen them since this morning. Volunteers
                 are being called to help search."
     nextStepId → step 2
-    (signup window is open while this step is displayed; chain advances
-     once the window closes or minParticipants is met)
+    (signup window is open while this step is displayed; window lasts
+     signupWindowHours = 18 hours; chain advances when maxParticipants
+     is hit early or the window closes with minParticipants met;
+     cancels if minParticipants is not met by the deadline)
 
-  Step 2 — sortOrder 20 — choice_consensus
+  Step 2 — choice_consensus
     prompt:             "Where does the group begin the search?"
     expiresAfterMinutes: 20
     choices (EventStepChoice rows):
@@ -716,17 +724,17 @@ converge at a shared effect and exit.
 
   ── INSIDE PATH ───────────────────────────────────────────────────────────
 
-  Step 3 — sortOrder 30 — narrative
+  Step 3 — narrative
     prompt:    "The group fans out through the camp, checking shelters,
                 storage huts, and shaded corners one by one."
     nextStepId → step 4
 
-  Step 4 — sortOrder 40 — narrative
+  Step 4 — narrative
     prompt:    "Near the supply huts, someone spots a small muddy footprint
                 pressed into the soft earth — and then another."
     nextStepId → step 5
 
-  Step 5 — sortOrder 50 — narrative
+  Step 5 — narrative
     prompt:    "Following the trail, you find the child curled up asleep
                 behind a stack of cured pelts, completely unaware of the
                 commotion they caused."
@@ -734,17 +742,17 @@ converge at a shared effect and exit.
 
   ── OUTSIDE PATH ──────────────────────────────────────────────────────────
 
-  Step 6 — sortOrder 60 — narrative
+  Step 6 — narrative
     prompt:    "The group slips through the camp perimeter and fans out into
                 the surrounding terrain, calling out as they go."
     nextStepId → step 7
 
-  Step 7 — sortOrder 70 — narrative
+  Step 7 — narrative
     prompt:    "A set of small tracks leads toward the treeline — recently
                 made, pressed deep into soft earth after last night's rain."
     nextStepId → step 8
 
-  Step 8 — sortOrder 80 — narrative
+  Step 8 — narrative
     prompt:    "You follow the trail into the edge of the woods and find the
                 child sitting beneath a tree, proudly clutching a fistful of
                 wildflowers they had gone to pick as a surprise."
@@ -752,7 +760,7 @@ converge at a shared effect and exit.
 
   ── SHARED RESOLUTION ─────────────────────────────────────────────────────
 
-  Step 9 — sortOrder 90 — effect
+  Step 9 — effect
     prompt:    "The child is brought safely home. Relief washes over the camp
                 as word spreads that they have been found."
     nextStepId → step 10
@@ -761,7 +769,7 @@ converge at a shared effect and exit.
           factionRepValue  50
           targetScopeId  → all_participants   (each volunteer receives 50 rep individually)
 
-  Step 10 — sortOrder 100 — exit
+  Step 10 — exit
     prompt:         "Life in the camp returns to normal."
     marksUnresolved  false
     endsAction       false
