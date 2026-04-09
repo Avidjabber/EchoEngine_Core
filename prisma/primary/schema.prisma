@@ -4681,7 +4681,7 @@ model EnvCondition_EventDef {
 // sortOrder: display/seeding hint only — NOT used for execution order.
 //
 // expiresAfterMinutes: "choice" steps only — time window for the player to make a selection.
-//   If the window elapses with no selection, the event cancels (ActiveEvent.isActive = false).
+//   If the window elapses with no selection, the worker deletes the ActiveEvent row and posts a notice.
 //   There is no fallback path; the event simply ends.
 model EventStepDef {
   id         Int     @id @default(autoincrement())
