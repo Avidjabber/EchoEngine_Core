@@ -247,9 +247,9 @@ isEvent = true marks types valid for EventEffect.effectTypeId — see EventEffec
   ──────────        ──────  ───────  ─────────  ─────────  ─────────────  ──────────  ───────
   spawn_rate        true    true     true       false      false          true        false
   spawn_weight      true    true     true       false      false          true        false
-  growth_rate       false   true     true       true       false          false       false
-  harvest_yeild     false   true     false      true       false          false       false
-  rot_rate          true    true     false      true       false          false       false
+  growth_rate       false   true     true       true       false          true        false
+  harvest_yeild     false   true     false      true       false          true        false
+  rot_rate          true    true     false      true       false          true        false
   damage_resistance false   false    false      true       false          false       false
   cultivation       false   true     false      false      false          false       false
   survival          false   true     false      false      false          false       false
