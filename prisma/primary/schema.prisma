@@ -3361,8 +3361,9 @@ model FuelType {
 // Guild-defined named structure. Types assigned via StructureDef_StructureType (most defs have one type).
 // name: internal snake_case key (e.g. "mossy_storage_den")
 // constructionPoints: progress points required for the initial build (see ActionSystemType.progressPoints for structure_contribute)
-// Filth fields: dailyFilthAverage = average filth generated per day (null = exempt); filthCap = max filth (null = exempt).
-// filthPerActivePlot: farming structures only — extra filth per active plot added on top of base roll.
+// Filth fields: dailyFilthAverage = average filth generated per day (null = exempt).
+// filthPerActivePlot lives on StructureDef_FarmingConfig (farming-type defs only).
+// There is no per-structure filthCap — the camp-wide filth cap scales with housed entity count (app constant).
 model StructureDef {
   id                 Int     @id @default(autoincrement())
   guildId            String  @db.VarChar(50)
@@ -3372,8 +3373,6 @@ model StructureDef {
   constructionPoints Int
   baseDurability     Int
   dailyFilthAverage  Int?
-  filthPerActivePlot Int?
-  filthCap           Int?
   isPowered          Boolean @default(false) // true = structure requires an active power source to function
   fuelCostPerHour    Float?                  // fuel units deducted from the satisfying power source each worker tick; null if not powered
 
@@ -3521,6 +3520,7 @@ model StructureDef_FarmingConfig {
   plotTypeId         Int
   basePlotCount      Int
   defaultSoilQuality Float @default(0.0)  // starting soilQuality delta for new plots; 0.0 = neutral
+  filthPerActivePlot Int?                  // additional filth generated per active (planted) plot per day; stacks on top of dailyFilthAverage
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
   plotType     PlotType     @relation(fields: [plotTypeId],     references: [id], onDelete: Restrict)

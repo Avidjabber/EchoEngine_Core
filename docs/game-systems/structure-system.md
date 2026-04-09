@@ -53,8 +53,9 @@ Faction ownership is managed via Camp_Faction (bridge table):
   role "shared" — factions granted access to act on this camp (build,
                   harvest, house entities, etc.).
 
-Filth is tracked per-structure (Structure.filthLevel). Camp-level filth
-is a runtime aggregate only — there is no filthLevel column on Camp.
+Filth is tracked per-structure (Structure.filthLevel). The camp filth cap
+scales with the number of entities housed at that camp — there is no filthLevel
+or filthCap column on Camp. See filth-system.md for the full formula.
 
 Key rules:
   - A faction may have zero camps (no home territory required).
@@ -157,13 +158,9 @@ type-specific config tables must be populated.
   dailyFilthAverage  │ Int?. Average filth units this structure generates per day
                      │ under normal conditions. Used as the baseline by the Worker
                      │ when computing each structure's daily filth contribution.
-                     │ null = structure generates no filth on its own.
-  filthPerActivePlot │ Int?. Farming-type defs only. Additional filth generated per
-                     │ active (planted) plot per day. Stacks on top of dailyFilthAverage.
-                     │ null on non-farming defs.
-  filthCap           │ Int?. Maximum filth that can accumulate on a single instance
-                     │ of this def. Once Structure.filthLevel reaches this cap, no
-                     │ further filth is added until some is cleared. null = no cap.
+                     │ null = structure generates no filth on its own. Farming-type
+                     │ defs also add filthPerActivePlot (on StructureDef_FarmingConfig)
+                     │ per active plot on top of this base.
   isPowered          │ Boolean. True = this structure requires an active, satisfying
                      │ power source to function. When powered functionality is
                      │ suspended, the structure's type-specific effects are disabled.
@@ -250,6 +247,9 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
     defaultSoilQuality   Float. soilQuality assigned to each plot when created.
                          Guild-defined — e.g. 1.0 for a basic garden, 1.2 for a
                          pre-composted bed. Applies to plots added by upgrades too.
+    filthPerActivePlot   Int?. Additional filth generated per active (planted) plot
+                         per day. Stacks on top of StructureDef.dailyFilthAverage.
+                         null = no plot-driven filth contribution.
 
   StructureDef_HousingConfig  (for structureTypeId = housing)
     structureDefId            FK → StructureDef
@@ -538,9 +538,11 @@ Structure tracks a single built (or in-progress) installation within a camp.
                      │ Reaching 0 transitions status to broken automatically.
   filthLevel         │ Int. Current filth accumulated on this structure. Starts at
                      │ 0 on construction completion. Incremented by the Worker on
-                     │ each daily tick (using StructureDef.dailyFilthAverage and
-                     │ filthPerActivePlot). Capped at StructureDef.filthCap when
-                     │ set. Cleared by filth-reduction actions and filth_reduction
+                     │ each daily tick (using StructureDef.dailyFilthAverage and,
+                     │ for farming structures, StructureDef_FarmingConfig
+                     │ .filthPerActivePlot). Has no per-structure ceiling — event
+                     │ thresholds are percentage-based against the camp filth cap.
+                     │ Cleared by filth-reduction actions and filth_reduction
                      │ upgrade effects.
   name               │ Optional custom label for this specific structure.
   currentFuel        │ Float?. Power sources only. Current fuel units held. null on

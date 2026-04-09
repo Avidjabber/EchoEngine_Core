@@ -1,6 +1,6 @@
 FILTH SYSTEM — DESIGN REFERENCE
 ================================
-Last updated: 2026-04-05
+Last updated: 2026-04-09
 
 This file is the authoritative reference for how filth works in EchoPaw.
 Read this before touching any filth generation, cleaning, or event-weight code.
@@ -35,7 +35,8 @@ Every participating structure rolls daily filth generation using:
 
   Example: average 100, roll 0.85, 2 rotting items → 100 × (0.85 + 0.06) = 91 filth
 
-Farming structures have an additional contribution per active plot:
+Farming structures have an additional contribution per active plot, defined on
+StructureDef_FarmingConfig.filthPerActivePlot:
 
   farmingFilthGenerated = filthPerActivePlot × (rand(0.70, 1.30) + rotItemCount × 0.03)
 
@@ -67,19 +68,27 @@ filth to that structure using:
 3. FILTH CAP
 ─────────────────────────────────────────────
 
-Each participating structure has a filth cap defined on its StructureDef.
+The filth cap is a camp-level value that scales automatically with the number
+of entities housed at that camp. There is no per-structure cap.
 
-  StructureDef.filthCap Int?   — null = structure does not track filth
+  campFilthCap = housedEntityCount × FILTH_CAP_PER_ENTITY
 
-For non-housing structures, filthCap is a static value.
+  housedEntityCount   — the number of entities currently assigned to housing
+                        structures within this camp (via Entity_Housing)
+  FILTH_CAP_PER_ENTITY — a configurable app-layer constant (not stored in the
+                         schema). Represents how much accumulated filth per
+                         housed entity the camp can tolerate before camp-wide
+                         negative events begin to fire.
 
-For housing structures, filthCap is a per-occupant value — the effective cap
-is computed at runtime as filthCap × currentOccupantCount. This dynamic
-calculation applies once housing occupancy is implemented.
+This means a camp with more residents can sustain a higher total filth load
+before triggering camp-wide consequences. A small outpost of five entities has
+a proportionally lower tolerance than a settlement of fifty.
 
-The daily rot bonus (rotItemCount × 0.03) can push generated filth above what
-the base roll alone would produce. filthLevel is still capped at filthCap —
-rot makes it harder to stay below the cap, it does not raise the cap itself.
+Individual Structure.filthLevel values are still tracked and accumulate
+without a per-structure ceiling — the cap only governs when camp-wide events
+fire. Structure-specific event thresholds (rat raids on a storage, infestations
+in housing) are defined as percentages of campFilthCap on the event def itself.
+See section 7.
 
 
 ─────────────────────────────────────────────
@@ -137,12 +146,13 @@ to that structure's filthLevel (see section 9).
 
 Camp filth is not stored. It is computed at runtime as needed:
 
-  campFilthRatio = SUM(Structure.filthLevel) / SUM(Structure.filthCap)
-                   across all filth-participating structures in the camp
+  campFilthTotal = SUM(Structure.filthLevel) across all structures in the camp
+  campFilthCap   = housedEntityCount × FILTH_CAP_PER_ENTITY
+  campFilthRatio = campFilthTotal / campFilthCap
 
-This ratio is used for camp-wide event weight calculations. Individual
-structure ratios (filthLevel / filthCap) are used for structure-specific
-event triggers.
+This ratio is used for camp-wide event weight calculations. It rises naturally
+as the camp accumulates filth and falls as entities clean structures or as
+cleaning upgrades passively reduce filth levels.
 
 Camp.filthLevel does not exist — any reference to it is outdated.
 
@@ -151,16 +161,22 @@ Camp.filthLevel does not exist — any reference to it is outdated.
 7. EFFECTS AND EVENT TRIGGERS
 ─────────────────────────────────────────────
 
-High filth at a structure increases event weight for events associated with
-that structure's type. The specific events that can fire depend on the
-structure:
+High filth triggers negative events at both the structure and camp levels.
+Event thresholds and weight scaling are defined on the event def itself —
+not on the structure def. Thresholds are expressed as a percentage of
+campFilthCap, which scales automatically with housed entity count.
 
-  Storage      → rat raid (food stolen or spoiled)
-  Housing      → flea infestation, tick infestation, disease outbreak
-  Camp-wide    → general vermin events, driven by aggregate filth ratio
+  Structure-specific events (scoped to a structure type):
+    Storage      → rat raid (food stolen or spoiled)
+    Housing      → flea infestation, tick infestation, disease outbreak
 
-Event weight scaling (exact thresholds TBD at balancing time) is applied
-per structure based on its filthLevel / filthCap ratio.
+  Camp-wide events (driven by aggregate campFilthRatio):
+    General vermin events, sanitation breakdowns, etc.
+
+For structure-specific events, the event def references the structure's
+filthLevel as a fraction of campFilthCap (e.g. "trigger when this storage's
+filthLevel > 25% of campFilthCap"). This keeps thresholds meaningful across
+camps of different sizes without requiring per-structure cap values.
 
 Broken structures (currentDurability = 0) still track filth — a collapsed
 storage still attracts rats.
@@ -172,8 +188,10 @@ storage still attracts rats.
 
   StructureDef
     dailyFilthAverage      Int?   — average daily filth generation; null = exempt
-    filthPerActivePlot     Int?   — farming structures only; added per active plot
-    filthCap               Int?   — static cap (or per-occupant for housing defs)
+
+  StructureDef_FarmingConfig
+    filthPerActivePlot     Int?   — additional filth per active (planted) plot per day;
+                                   stacks on top of dailyFilthAverage
 
   Structure
     filthLevel             Int    @default(0)
@@ -195,6 +213,8 @@ storage still attracts rats.
 
   Camp
     filthLevel             REMOVED — use runtime aggregate instead
+    filthCap               REMOVED — camp filth cap is computed at runtime:
+                                     housedEntityCount × FILTH_CAP_PER_ENTITY (app constant)
 
 
 ─────────────────────────────────────────────
