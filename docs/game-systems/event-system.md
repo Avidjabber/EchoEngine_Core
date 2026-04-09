@@ -22,7 +22,7 @@ weather, and the passage of time.
   EventDef        — the definition (template) for an event
   ActiveEvent     — a live in-progress instance of an EventDef
   EventStepDef    — an ordered step within an event definition
-  ActiveEventStep — the current or completed step of a live event
+  (no ActiveEventStep table — current step state is tracked via ActiveEvent.currentStepId)
 
 
 ─────────────────────────────────────────────
@@ -77,11 +77,11 @@ Events progress through a sequence of EventStepDef rows. Each step has a type:
   narrative — auto-resolves; posts prompt text, applies effects to effectScope
               participants, then advances to nextStepId.
 
-  choice    — presents options to players. Resolution depends on
-              EventChoiceResolutionType:
-                individual       — each participant votes independently
-                group_average    — group's average skill roll determines outcome
-                leader_designates — the leader makes the choice for the group
+  choice    — presents options to players. Each choice may trigger a skill/stat check.
+              Resolution mode (EventChoiceResolutionType) determines how that check is rolled:
+                individual       — each participant rolls independently; each may get a different outcome
+                faction_average  — single roll using the average stat/skill across all participants
+                leader_designates — leader names one entity to roll on behalf of the group
 
   combat    — spawns an ActiveCombat via a CombatEncounterDef.
               On combat resolution, advances to winStepId or loseStepId
@@ -100,31 +100,45 @@ EventParticipantScope determines which participants an effect or reward applies 
   all_participants  — every entity in the event
   random_participant — one randomly selected participant
   leader            — the leading entity only
-  group             — the collective group (used for group-average checks)
+  group             — the collective group (used for faction_average checks)
+  housed_entities   — entities currently assigned to housing structures
 
 
 ─────────────────────────────────────────────
 6. GRANTS AND REWARDS
 ─────────────────────────────────────────────
 
-Event steps can grant various effects via EffectType (where isEvent=true):
+Effects are attached to EventEffect rows and can belong to either a narrative step
+(stepDefId set) or a choice outcome (outcomeDefId set) — exactly one per row.
+Multiple EventEffect rows may be attached to the same step or outcome, each
+with independent probabilities and target types.
 
-  condition             — apply a ConditionDef to targets
-  item                  — add an item to target inventories
+  condition             — apply or remove a ConditionDef on targets
+  item                  — add or remove items from target inventories
   location_buff         — apply a temporary Location_Effect (positive = buff, negative = debuff)
   stat_modifier         — apply a temporary stat bonus/penalty
-  proficiency_modifier  — apply a temporary proficiency bonus/penalty
+  proficiency_modifier  — apply a temporary proficiency bonus/penalty, advantage, or disadvantage
   faction_rep           — grant or remove faction reputation points
   discipline_xp         — grant discipline experience points
 
-Effects are defined on EventEffect with:
-- probability: chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
-- targetType: what type of target (participants, camp, location, faction, etc.)
-- relationType: what the effect does (spawns, decrease, increase, modify, remove)
-- effectValue: what specifically is affected (structure_durability, null, etc.)
-- value: effect magnitude as percentage (0.3 = 30% damage/buff/etc.)
+Core fields on EventEffect:
+- probability:    chance this effect fires (0.0–1.0)
+- targetType:     what type of target (participants, camp, location, faction, items)
+- relationType:   what the effect does (spawns, decrease, increase, modify, remove)
+- effectValue:    what specifically is affected (e.g. "structure_durability")
 
-Each EventOutcomeDef can have multiple EventEffect rows, each with independent probabilities and target types, allowing complex outcomes like "30% chance burn condition on participants AND 30% chance 30% damage to camp structures".
+Effect-type-specific magnitude fields (not a single generic value):
+- locationBuffValue / locationBuffDurationHours  — for location_buff
+- statModifierValue                              — for stat_modifier
+- proficiencyModifierValue / HasAdvantage / HasDisadvantage — for proficiency_modifier
+- factionRepValue                                — for faction_rep
+- disciplineXpValue                              — for discipline_xp
+- minQuantity / maxQuantity / isGain             — for item
+
+Example: "30% chance burn condition on participants AND 30% chance 30% damage to
+camp structures" — two EventEffect rows on the same outcome, each with
+probability = 0.3 and different targetTypes.
+
 XP rewards from events are handled via the action or discipline reward system
 depending on the event's spawn context.
 
@@ -151,7 +165,7 @@ depending on the event's spawn context.
   EffectType (isEvent=true)   — condition | item | location_buff | stat_modifier | proficiency_modifier | faction_rep | discipline_xp
   RelationType (isEvent=true) — spawns | decrease | increase | modify | remove
   TargetType (isEvent=true)   — participants | camp | location | faction | items
-  EventChoiceResolutionType   — individual | group_average | leader_designates
+  EventChoiceResolutionType   — individual | faction_average | leader_designates
   EventThresholdType          — filth
 
   EFFECTS & MODIFIERS
@@ -159,5 +173,4 @@ depending on the event's spawn context.
   EventEffect                 — unified event effect system (conditions, items, location effects, stat/proficiency modifiers, faction rep, discipline XP)
 
   ACTIVE INSTANCES
-  ActiveEvent                 — live event instance
-  ActiveEventStep             — current/completed step of a live event
+  ActiveEvent                 — live event instance; current step tracked via currentStepId (FK → EventStepDef)
