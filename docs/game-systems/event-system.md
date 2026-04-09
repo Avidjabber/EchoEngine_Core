@@ -389,7 +389,7 @@ Currently seeded threshold types: filth
                                  (valid as locationBuffEffectTypeId on location_buff effects;
                                  see EffectType in seed-data.md for the full table)
   RelationType        — spawn | increase | decrease
-  (modify and remove rows were removed; isEvent flag removed from table)
+  (modify and remove rows were removed in a prior revision)
 
   EFFECTS & MODIFIERS
   EventEffect           — effect row; attaches only to effect steps (stepDefId required)

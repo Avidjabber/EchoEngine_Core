@@ -4922,7 +4922,7 @@ model EventEffect {
   proficiencyModifierHasDisadvantage  Boolean @default(false)
 
   // faction_rep effect fields
-  factionRepValue Float @default(0.0)  // reputation change as percentage (0.15 = +15% rep)
+  factionRepValue Float @default(0.0)  // flat reputation points (positive = gain, negative = loss)
 
   // discipline_xp effect fields
   disciplineXpDisciplineDefId Int?
