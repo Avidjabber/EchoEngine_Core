@@ -1,6 +1,6 @@
 EVENT SYSTEM — DESIGN REFERENCE
 =================================
-Last updated: 2026-04-09
+Last updated: 2026-04-09 (step type redesign, check steps, choice variants, isLocation EffectTypes)
 
 This file is the authoritative reference for how events work in EchoPaw.
 Read this before touching EventDef seeding, event resolution, or any system
@@ -130,6 +130,9 @@ step type when resolving a step — no step handles multiple concerns.
   If expiresAfterMinutes is set and the window elapses, the worker tallies
   whatever votes exist and applies the same sortOrder tiebreak. If zero
   votes were cast by expiry, the event cancels.
+  Valid in any event regardless of whether a leader is present — this is
+  the correct choice type for volunteer/signup events where no leader role
+  is guaranteed.
 
   PROFICIENCY_CHECK
   Displays prompt text + a 'roll' button. A participant clicks the button;
@@ -340,9 +343,13 @@ Currently seeded threshold types: filth
   EventParticipantScope — all_participants | random_participant | leader |
                           group | housed_entities
   EventThresholdType  — filth
-  EffectType (isEvent=true) — condition | item | location_buff | stat_modifier |
-                              proficiency_modifier | faction_rep | discipline_xp |
-                              structure_damage | action_output_modifier
+  EffectType (isEvent=true)    — condition | item | location_buff | stat_modifier |
+                                 proficiency_modifier | faction_rep | discipline_xp |
+                                 structure_damage | action_output_modifier
+  EffectType (isLocation=true) — spawn_rate | spawn_weight | growth_rate |
+                                 harvest_yield | rot_rate
+                                 (valid as locationBuffEffectTypeId on location_buff effects;
+                                 see EffectType in seed-data.md for the full table)
   RelationType (isEvent=true) — spawn | increase | decrease | modify | remove
   TargetType (isEvent=true)   — participants | camp | location | faction | items
 
