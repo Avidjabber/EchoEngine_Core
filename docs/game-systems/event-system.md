@@ -1,6 +1,6 @@
 EVENT SYSTEM — DESIGN REFERENCE
 =================================
-Last updated: 2026-04-09 (step type redesign, check steps, choice variants, isLocation EffectTypes)
+Last updated: 2026-04-09 (step type redesign, check steps, choice variants, isLocation EffectTypes, worked example)
 
 This file is the authoritative reference for how events work in EchoPaw.
 Read this before touching EventDef seeding, event resolution, or any system
@@ -366,8 +366,8 @@ Currently seeded threshold types: filth
                                  harvest_yield | rot_rate
                                  (valid as locationBuffEffectTypeId on location_buff effects;
                                  see EffectType in seed-data.md for the full table)
-  RelationType (isEvent=true) — spawn | increase | decrease | modify | remove
-  TargetType (isEvent=true)   — participants | camp | location | faction | items
+  RelationType        — spawn | increase | decrease
+  (modify and remove rows were removed; isEvent flag removed from table)
 
   EFFECTS & MODIFIERS
   EventEffect           — effect row; attaches only to effect steps (stepDefId required)
@@ -382,3 +382,109 @@ Currently seeded threshold types: filth
                         on completion, expiry, or cancellation and posts a closing
                         notice to Discord before deletion
   ActiveEvent_Participant — entity enrolled in a live event
+
+
+─────────────────────────────────────────────
+12. WORKED EXAMPLE — THE WANDERER WITH THE BROKEN CART
+─────────────────────────────────────────────
+
+A patrol stumbles across a stranger beside a broken cart. The group can
+help, chase him off, or ignore him entirely. Helping triggers a proficiency
+check; the outcome determines whether a unique weapon is awarded. Both
+"help" outcomes and the "chase off" path write a location buff or debuff
+to the patrol's area.
+
+This example illustrates: action-scoped events, choice_consensus branching,
+a proficiency_check routing to separate effect steps, multiple EventEffect
+rows on one step, and a marksUnresolved exit.
+
+  ── EventDef ──────────────────────────────────────────────────────────────
+  codeName              wanderer_broken_cart
+  name                  The Wanderer with the Broken Cart
+  scopeId               action
+  baseWeight            0.8
+  unresolvedWeightBoost 0.15
+  requiresLeader        true  (needed so the sword can target the leader scope)
+  cooldownDays          7
+
+  ── EventStepDef ──────────────────────────────────────────────────────────
+
+  Step 1 — sortOrder 10 — narrative (isStarter = true)
+    prompt:    "Your patrol comes across a man hunched over a cart with a
+                cracked wheel, goods spilled across the road..."
+    nextStepId → step 2
+
+  Step 2 — sortOrder 20 — choice_consensus
+    prompt:            "What does the group do?"
+    expiresAfterMinutes: 30
+    choices (EventStepChoice rows):
+      sortOrder 1  "Help repair his cart"    → step 3
+      sortOrder 2  "Chase him off"           → step 4
+      sortOrder 3  "Ignore him and move on"  → step 5
+
+  Step 3 — sortOrder 30 — proficiency_check
+    prompt:                  "One of you steps up to assess the damage..."
+    checkProficiencyDefId  → Carpentry
+    checkDifficulty          14
+    checkParticipantScopeId → all_participants
+    passStepId             → step 6
+    failStepId             → step 7
+
+  Step 4 — sortOrder 40 — effect
+    prompt:    "The group advances menacingly. He grabs what he can and flees,
+                muttering as he disappears into the treeline..."
+    nextStepId → step 8
+    effects (EventEffect rows):
+      [A] effectTypeId → location_buff
+          locationBuffEffectTypeId → growth_rate
+          locationBuffValue         -0.3
+          locationBuffDurationHours  48  (2 days)
+
+  Step 5 — sortOrder 50 — exit
+    prompt:         "The patrol keeps moving. The man watches you pass without
+                     a word."
+    marksUnresolved  true
+    endsAction       false
+
+  Step 6 — sortOrder 60 — effect
+    prompt:    "His eyes light up. He produces a blade wrapped in cloth —
+                'I've been saving this for someone worthy.' He raises his
+                hands and speaks a quiet blessing over the land."
+    nextStepId → step 8
+    effects (EventEffect rows):
+      [A] effectTypeId → item
+          itemId         → [unique sword]
+          isGain           true
+          minQuantity      1.0
+          maxQuantity      1.0
+          targetScopeId  → leader
+      [B] effectTypeId → location_buff
+          locationBuffEffectTypeId → growth_rate
+          locationBuffValue         0.3
+          locationBuffDurationHours  72  (3 days)
+
+  Step 7 — sortOrder 70 — effect
+    prompt:    "You weren't quite able to fix it, but he smiles warmly. 'You
+                tried — that's more than most.' He murmurs something and the
+                air smells faintly of rain."
+    nextStepId → step 8
+    effects (EventEffect rows):
+      [A] effectTypeId → location_buff
+          locationBuffEffectTypeId → growth_rate
+          locationBuffValue         0.3
+          locationBuffDurationHours  72  (3 days)
+
+  Step 8 — sortOrder 80 — exit
+    prompt:         "The patrol continues onward."
+    marksUnresolved  false
+    endsAction       false
+
+  ── Notes ─────────────────────────────────────────────────────────────────
+  - Steps 4, 6, and 7 all route to step 8 — a shared exit for all resolved
+    outcomes. Only step 5 (ignore) diverges as an unresolved exit.
+  - Each time the group ignores the wanderer, EventUnresolvedState.unresolvedCount
+    increments, boosting this event's effective weight on future patrol rolls.
+  - The location for the buff/curse is derived at runtime from the ActionInstance
+    the event is scoped to — no explicit location FK is needed on the step rows.
+  - Step 6 has two EventEffect rows on the same step; the worker applies both.
+  - Discord button label lengths: 21 / 14 / 23 chars — all within the 80-char limit.
