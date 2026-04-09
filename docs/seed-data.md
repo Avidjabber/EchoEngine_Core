@@ -978,10 +978,30 @@ Values:
 ──────────────────────────────────────────────
 EventStepType                           [ DONE ]
 ──────────────────────────────────────────────
-Values:
-  narrative
-  choice
-  combat
+Each type has exactly one responsibility. See event-system.md section 5 for full details.
+
+  narrative          — displays prompt text; anyone clicks 'next' → nextStepId
+  narrative_random   — displays prompt text; anyone clicks 'next'; worker rolls weighted
+                       EventStepRandomBranch table to determine nextStepId
+  choice_solo        — displays prompt + N choice buttons; first participant to click decides
+  choice_leader      — same as choice_solo but only the group leader may interact
+  choice_consensus   — all participants vote; plurality winner decides; ties broken by lowest
+                       sortOrder; if window elapses, tallies existing votes (cancels if none)
+  proficiency_check  — displays prompt + 'roll' button; worker rolls the configured proficiency
+                       for the scoped participant(s) against checkDifficulty;
+                       routes to passStepId (success) or failStepId (failure)
+  condition_check    — automatic; checks whether scoped participant(s) have conditionCheckDefId
+                       active; routes to passStepId (has condition) or failStepId (does not)
+  item_check         — automatic; checks whether scoped participant(s) carry the required item
+                       (itemCheckItemId or any item of itemCheckItemTypeId) in at least
+                       itemCheckMinQuantity; routes to passStepId or failStepId
+  threshold_check    — automatic; reads a world-state value (thresholdCheckTypeId) and compares
+                       to thresholdCheckValue; routes to passStepId or failStepId
+  combat             — displays prompt + 'initiate' button; spawns ActiveCombat;
+                       resolves to winStepId or loseStepId
+  reward             — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
+                       → nextStepId (null = event ends naturally)
+  exit               — terminal; optional closing text; marksUnresolved / endsAction flags; no nextStepId
 
 
 ──────────────────────────────────────────────
@@ -1021,12 +1041,11 @@ These are EffectType rows with isEvent = true. The effectTypeId on EventEffect r
 
 
 ──────────────────────────────────────────────
-EventCheckMode                          [ DONE ]
+EventCheckMode — REMOVED
 ──────────────────────────────────────────────
-Values:
-  individual        — each participant rolls independently
-  faction_average   — average roll across all event participants
-  leader_designates — the group leader makes the choice on behalf of everyone
+Skill/stat checks on choices were removed from the event system. Choices are purely
+player-driven (deterministic navigation). System-driven randomness is handled by the
+narrative_random step type and its EventStepRandomBranch weight table.
 
 
 ═══════════════════════════════════════════════════════════════════════

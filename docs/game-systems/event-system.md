@@ -20,7 +20,8 @@ levels, and the passage of time.
   ActiveEvent  — a live in-progress instance of an EventDef
   EventStepDef — an ordered step within an event definition
 
-(no ActiveEventStep table — current step state is tracked via ActiveEvent.currentStepId)
+Current step state is tracked via ActiveEvent.currentStepId (FK → EventStepDef).
+There is no separate step-history table; the chain progresses forward only.
 
 
 ─────────────────────────────────────────────
@@ -41,10 +42,8 @@ may reference one or more trigger types via EventDef_TriggerType:
                   (EventDef_WeatherTrigger)
   threshold     — fires when a configurable threshold condition is met with a
                   daily chance roll (EventDef_ThresholdTrigger)
-  daily         — worker rolls once per day per guild; EventDef.chancePerDay
-                  controls probability
-  hourly        — worker rolls once per hour per guild; EventDef.chancePerHour
-                  controls probability
+  daily         — worker rolls once per day; EventDef.chancePerDay controls probability
+  hourly        — worker rolls once per hour; EventDef.chancePerHour controls probability
 
 An EventDef may also have prerequisites — other EventDefs that must have
 completed at least once (within an optional time window) before this event is
@@ -52,11 +51,9 @@ eligible to fire (EventDef_Prerequisite).
 
 Events can have their weights boosted by unresolved related events
 (EventUnresolvedState) and by active environmental conditions
-(EnvCondition_EventDef).
-
-A weather trigger can optionally require that weather to be active before the
-event is eligible at all (EventDef_WeatherTrigger.required = true), or just
-boost its weight (required = false, weightMod > 0).
+(EnvCondition_EventDef). A weather trigger can require that weather to be
+active before the event is eligible at all (EventDef_WeatherTrigger.required =
+true), or just boost its weight (required = false, weightMod > 0).
 
 
 ─────────────────────────────────────────────
@@ -65,15 +62,14 @@ boost its weight (required = false, weightMod > 0).
 
 EventScope determines which entities the event is scoped to:
 
-  global  — the entire guild; participant group is guild-wide
+  global  — the entire guild; no specific faction or camp
   faction — scoped to one faction (ActiveEvent.factionId set)
   action  — scoped to a specific ActionInstance (ActiveEvent.actionInstanceId set)
   camp    — scoped to a specific Camp (ActiveEvent.campId set); used for
             filth-based and camp-local events
 
-EventDef.scopeId determines how the event's participants are resolved when it
-fires. For camp-scoped events, the worker finds all camps meeting the trigger
-condition and fires a separate ActiveEvent per qualifying camp.
+For camp-scoped events, the worker finds all qualifying camps and fires a
+separate ActiveEvent per camp.
 
 
 ─────────────────────────────────────────────
@@ -83,12 +79,9 @@ condition and fires a separate ActiveEvent per qualifying camp.
 When EventDef.requiresSignup = true, a signup window opens before the chain
 begins. Players voluntarily enroll their characters from the eligible pool
 (determined by scope). The app enforces EventDef.minParticipants and
-EventDef.maxParticipants during this window.
+EventDef.maxParticipants.
 
-Signup can apply to any trigger type — an admin event, a weather event, or a
-daily event can all require signup before the chain starts.
-
-Eligibility checks (applied against the participant list before chain begins):
+Eligibility checks (applied against the participant list before the chain begins):
   requiresLeader            — at least one participant must have Rank.canLeadEvents = true
   requiresCanMentor         — all participants must have Rank.canMentor = true
   allowApprenticesWithAdult — non-mentor ranks OK if ≥1 canMentor entity is present
@@ -96,189 +89,225 @@ Eligibility checks (applied against the participant list before chain begins):
 
 
 ─────────────────────────────────────────────
-5. EVENT STEPS
+5. EVENT STEPS — TYPES AND RESPONSIBILITIES
 ─────────────────────────────────────────────
 
-Events progress through a sequence of EventStepDef rows. Each step has a type:
+Every step type has exactly one responsibility. The worker switches entirely on
+step type when resolving a step — no step handles multiple concerns.
 
-  narrative — auto-resolves; posts prompt text, applies effects to effectScope
-              participants, then advances to nextStepId. No player input.
+  NARRATIVE
+  Displays prompt text in a Discord message. Anyone in the group clicks
+  'next' to advance. Points to nextStepId (null = event ends).
+  No effects. No choices. No randomness.
 
-  choice    — presents EventChoiceDef options. Each choice may trigger a
-              skill/stat check; resolution mode determines how that check is
-              rolled (EventChoiceResolutionType):
-                individual       — each participant rolls independently; each
-                                   may get a different outcome
-                faction_average  — single roll using average stat/skill across
-                                   all participants
-                leader_designates — leader names one entity to roll on behalf
-                                    of the group
+  NARRATIVE_RANDOM
+  Displays prompt text. Anyone clicks 'next'. The worker then rolls against
+  the EventStepRandomBranch weight table attached to this step and navigates
+  to the winning branch's nextStepId. No player agency — purely system-driven
+  randomness. Use this for proficiency-agnostic chance outcomes (e.g. "you
+  find something — what is it?").
 
-  combat    — spawns an ActiveCombat via a CombatEncounterDef.
-              Pauses the chain until combat resolves, then advances to
-              winStepId or loseStepId.
+  CHOICE_SOLO
+  Displays prompt text + N choice buttons, one per EventStepChoice row.
+  The first participant to click decides; the event navigates directly to
+  that choice's nextStepId. No randomness, no checks — deterministic.
+  If expiresAfterMinutes is set and no one clicks within the window,
+  the event cancels (ActiveEvent.isActive = false). There is no fallback.
 
-Step navigation:
-  narrative → nextStepId (null = event ends)
-  choice    → EventOutcomeDef.nextStepId (null = event ends)
-  combat    → winStepId or loseStepId (null = event ends)
+  CHOICE_LEADER
+  Identical to choice_solo in structure and expiry behavior, but only the
+  group leader may interact with the buttons. Non-leaders see the options
+  but are locked out. Use this when the decision should belong solely to
+  the event's designated leader. If no leader is present the step should
+  not be reachable — enforce this at the EventDef level via requiresLeader.
 
-isStarter = true on exactly one step per EventDef (the entry point).
-sortOrder is a display/seeding hint only; execution follows the step graph.
+  CHOICE_CONSENSUS
+  Displays prompt text + N choice buttons. Every participant casts an
+  individual vote by clicking their preferred option. The plurality winner
+  (most votes) determines the next step. Ties are broken by the lowest
+  sortOrder among tied choices — seed authors can use this to set an
+  intentional default by placing it first.
+  If expiresAfterMinutes is set and the window elapses, the worker tallies
+  whatever votes exist and applies the same sortOrder tiebreak. If zero
+  votes were cast by expiry, the event cancels.
 
-Choice steps may have an expiry window (expiresAfterMinutes). When the window
-elapses, the step auto-resolves using defaultChoiceDefId. null = no limit.
+  PROFICIENCY_CHECK
+  Displays prompt text + a 'roll' button. A participant clicks the button;
+  the worker rolls the configured proficiency (checkProficiencyDefId) for
+  the participant(s) specified by checkParticipantScopeId against
+  checkDifficulty. The chain then navigates to passStepId (success) or
+  failStepId (failure). Either may be null (event ends on that outcome).
+  No player agency in the outcome — the roll is system-driven. Use this
+  for skill gates, ability checks, and any outcome that should depend on
+  character capability rather than player choice.
+
+  CONDITION_CHECK
+  Fully automatic — no player input, no button. The worker checks whether
+  the participant(s) specified by checkParticipantScopeId currently have
+  conditionCheckDefId active. Routes to passStepId (condition present) or
+  failStepId (condition absent). Either may be null. Use this to branch
+  a chain based on the health or status of participants without surfacing
+  the check to players (e.g. "if already poisoned, take the harder path").
+
+  ITEM_CHECK
+  Fully automatic — no player input, no button. The worker checks whether
+  the participant(s) specified by checkParticipantScopeId carry at least
+  itemCheckMinQuantity (default: 1) of the required item — identified by
+  itemCheckItemId (specific item) or itemCheckItemTypeId (any item of that
+  type; set one or the other, not both). Routes to passStepId (has item)
+  or failStepId (does not). Either may be null. Use this for "do you have
+  the key?" gates and resource checks without making them explicit choices.
+
+  THRESHOLD_CHECK
+  Fully automatic — no player input, no button. The worker reads the
+  current world-state value for thresholdCheckTypeId (e.g. filth) and
+  compares it to thresholdCheckValue. thresholdCheckOnHigh = true means
+  passStepId is reached when value > threshold; false means passStepId is
+  reached when value < threshold. Routes to passStepId or failStepId;
+  either may be null. Use this to branch an event based on the current
+  state of the world mid-chain (e.g. "if filth is already high, the
+  situation escalates").
+
+  COMBAT
+  Displays prompt text + an 'initiate combat' button. Spawns an
+  ActiveCombat via the linked CombatEncounterDef. The chain pauses
+  until combat resolves, then navigates to winStepId (players win) or
+  loseStepId (players lose). Either may be null (event ends on that
+  outcome). Win rewards and loss consequences live on the reward steps
+  those IDs point to — not on the combat step itself.
+
+  REWARD
+  Applies all EventEffect rows attached to this step, then displays a
+  summary of what happened. Anyone clicks 'next' or 'finish' to advance.
+  Points to nextStepId (null = event ends naturally after rewards).
+  This is the ONLY step type that applies effects. effectScopeId sets
+  the default participant scope for all effects on this step.
+
+  EXIT
+  Terminal step. No nextStepId. Displays optional closing text. Sets:
+    marksUnresolved — records an EventUnresolvedState entry, boosting
+                      future weight for related events (e.g. a threat
+                      that was ignored becomes more likely to return)
+    endsAction      — interrupts the linked ActionInstance immediately
+  Use exit for "walk away" paths, player opt-outs, and any path that
+  ends the event without handing out rewards.
 
 
 ─────────────────────────────────────────────
-6. PARTICIPANT SCOPE
+6. STEP NAVIGATION SUMMARY
 ─────────────────────────────────────────────
 
-EventParticipantScope determines which participants an effect or reward applies to:
+  Step type          Navigation mechanism
+  ─────────────────  ────────────────────────────────────────────────────────
+  narrative          nextStepId (FK on EventStepDef)
+  narrative_random   EventStepRandomBranch weight roll → winning row's nextStepId
+  choice_solo        first participant to click → that EventStepChoice row's nextStepId
+  choice_leader      leader clicks → that EventStepChoice row's nextStepId
+  choice_consensus   plurality vote across all participants → winning EventStepChoice row's nextStepId
+  proficiency_check  passStepId (success) or failStepId (failure) — system roll
+  condition_check    passStepId (has condition) or failStepId (does not) — automatic
+  item_check         passStepId (has item) or failStepId (does not) — automatic
+  threshold_check    passStepId or failStepId based on world-state comparison — automatic
+  combat             winStepId or loseStepId (FKs on EventStepDef)
+  reward             nextStepId (FK on EventStepDef)
+  exit               terminal — no outgoing navigation
+
+
+─────────────────────────────────────────────
+7. PARTICIPANT SCOPE
+─────────────────────────────────────────────
+
+EventParticipantScope determines which participants an effect applies to.
+Used as the default scope on reward steps (EventStepDef.effectScopeId):
 
   all_participants   — every entity in the event
   random_participant — one randomly selected participant
   leader             — the leading entity only
-  group              — the collective group (used for faction_average checks)
-  housed_entities    — entities currently assigned to housing structures in the
-                       camp (for camp-scoped events like infestations)
+  group              — the collective group
+  housed_entities    — entities currently assigned to housing structures
+                       in the camp (camp-scoped events)
 
 
 ─────────────────────────────────────────────
-7. EFFECTS
+8. EFFECTS (REWARD STEPS ONLY)
 ─────────────────────────────────────────────
 
-EventEffect rows attach to either a narrative step (stepDefId set) or a choice
-outcome (outcomeDefId set) — exactly one per row, app-enforced. Multiple rows
-may attach to the same step or outcome; each has an independent probability.
+EventEffect rows attach exclusively to reward steps (EventEffect.stepDefId
+must reference a reward-type EventStepDef). Multiple effects may be on the
+same step; each has an independent probability.
 
 Effect types (EffectType with isEvent = true):
 
   condition             — apply or remove a ConditionDef on targets
-  item                  — add or remove items; source can be a fixed item
-                          (itemId), any item of a type (itemTypeId), or a
-                          droptable roll (dropTableId)
-  location_buff         — apply a temporary location-wide buff/debuff via
-                          a Location_Effect (positive value = buff,
-                          negative = debuff); covers crop growth rate,
-                          hunting difficulty, etc.
+  item                  — add or remove items; source is a fixed item (itemId),
+                          any item of a type (itemTypeId), or a droptable roll (dropTableId)
+  location_buff         — apply a temporary location-wide buff/debuff (locationBuffValue;
+                          positive = buff, negative = debuff)
   stat_modifier         — apply a temporary stat bonus/penalty
-  proficiency_modifier  — apply a temporary proficiency modifier, advantage,
-                          or disadvantage
+  proficiency_modifier  — apply a temporary proficiency modifier, advantage, or disadvantage
   faction_rep           — grant or remove faction reputation points
   discipline_xp         — grant discipline experience points
-  structure_damage      — deal damage to structures in the camp; can target
-                          all structures, a random N, or a specific StructureType;
-                          value is flat HP or a fraction of maxDurability
-  action_output_modifier — multiply the output quantity of the triggering
-                           crafting/action (e.g. 2.0 = 2x output); only valid
-                           for action-scoped events
+  structure_damage      — deal damage to structures in the camp; flat HP or fraction of
+                          maxDurability; targets all structures, random N, or a specific type
+  action_output_modifier — multiply the output quantity of the triggering action (e.g. 2.0 =
+                           2x output); only valid for action-scoped events
 
 Core fields on EventEffect:
-  probability    — chance this effect fires (0.0–1.0); independent per row
-  targetType     — what is being affected: participants | camp | location |
-                   faction | items
-  relationType   — what the effect does: spawn | increase | decrease |
-                   modify | remove
-  effectValue    — optional string tag for what specifically is affected
-                   (e.g. "structure_durability")
+  probability    — chance this effect fires (0.0–1.0); each row is independent
+  targetType     — participants | camp | location | faction | items
+  relationType   — spawn | increase | decrease | modify | remove
+  effectValue    — optional string tag (e.g. "structure_durability")
 
-Effect-type-specific fields:
-
-  condition:
-    conditionDefId, remove (true = remove the condition; false = apply it)
-
-  item:
-    itemId OR itemTypeId OR dropTableId (mutually exclusive)
-    minQuantity, maxQuantity, isGain (true = add; false = remove)
-    targetScopeId (EventParticipantScope for who gains/loses the item)
-
-  location_buff:
-    locationBuffEffectTypeId, locationBuffValue (positive = buff; negative = debuff)
-    locationBuffDurationHours (null = permanent until removed)
-
-  stat_modifier:
-    statModifierStatId, statModifierValue (0.1 = +10%; -0.15 = -15%)
-
-  proficiency_modifier:
-    proficiencyModifierProficiencyDefId, proficiencyModifierValue
-    proficiencyModifierHasAdvantage, proficiencyModifierHasDisadvantage
-
-  faction_rep:
-    factionRepValue (0.15 = +15% rep; -0.1 = -10% rep)
-
-  discipline_xp:
-    disciplineXpDisciplineDefId, disciplineXpValue (fraction of level XP)
-
-  structure_damage:
-    structureDamageValue         — amount: flat HP or fraction of maxDurability
-    structureDamageIsMultiplier  — true = fraction; false = flat HP
-    structureDamageCount         — null = all structures; N = N random structures
-    structureDamageStructureTypeId — optional: filter to specific StructureType
-
-  action_output_modifier:
-    outputMultiplier — e.g. 2.0 = double output from the triggering action
+Effect-type-specific magnitude fields:
+  condition:             conditionDefId, remove
+  item:                  itemId | itemTypeId | dropTableId, minQuantity, maxQuantity, isGain, targetScopeId
+  location_buff:         locationBuffEffectTypeId, locationBuffValue, locationBuffDurationHours
+  stat_modifier:         statModifierStatId, statModifierValue
+  proficiency_modifier:  proficiencyModifierProficiencyDefId, proficiencyModifierValue,
+                         proficiencyModifierHasAdvantage, proficiencyModifierHasDisadvantage
+  faction_rep:           factionRepValue
+  discipline_xp:         disciplineXpDisciplineDefId, disciplineXpValue
+  structure_damage:      structureDamageValue, structureDamageIsMultiplier, structureDamageCount,
+                         structureDamageStructureTypeId
+  action_output_modifier: outputMultiplier
 
 
 ─────────────────────────────────────────────
-8. CHOICE OUTCOMES
+9. UNRESOLVED STATE & WEIGHT BOOSTING
 ─────────────────────────────────────────────
 
-Each EventChoiceDef has one or more EventOutcomeDef rows. The outcome is
-selected by weighted random roll (modified by any skill check result). Fields:
+When an exit step with marksUnresolved = true is reached, the worker upserts
+an EventUnresolvedState row for that event:
 
-  weight          — relative selection weight; higher = more likely
-  effectScopeId   — EventParticipantScope: who the effects apply to
-  endsAction      — true = the linked ActionInstance is immediately interrupted
-  marksUnresolved — true = selecting this outcome records an EventUnresolvedState
-                    entry, boosting future weight for related events (e.g. skipping
-                    a fight increases likelihood the same enemy returns)
-  nextStepId      — which step follows; null = event ends after this outcome
+  unresolvedCount — incremented each time this event reaches an unresolved exit
+  weightBoost     — added to the event's effective weight per unresolved instance
+
+This creates escalating scenarios: each time a threat is ignored, the same
+encounter becomes more likely next time.
 
 
 ─────────────────────────────────────────────
-9. THRESHOLD TRIGGERS
+10. THRESHOLD TRIGGERS
 ─────────────────────────────────────────────
 
 EventDef_ThresholdTrigger configures threshold-based event firing:
 
-  thresholdTypeId    — what is being monitored (e.g. filth)
-  thresholdValue     — the level at which the trigger becomes active
-  chancePerDay       — daily roll probability once trigger conditions are met
-  triggerDays        — consecutive days threshold must be met before rolls begin
-                       (null = immediate)
-  triggerOnHigh      — true = trigger when value > threshold (e.g. high filth)
-  isOngoing          — true = event persists and re-applies effects each tick
-                       until resolution conditions are met
+  thresholdTypeId     — what is monitored (e.g. filth)
+  thresholdValue      — the level at which the trigger becomes active
+  chancePerDay        — daily roll probability once trigger conditions are met
+  triggerDays         — consecutive days threshold must be met before rolls begin
+  triggerOnHigh       — true = trigger when value > threshold (e.g. high filth)
+  isOngoing           — true = event persists and re-applies effects each tick
+                        until resolution conditions are met
   resolutionThreshold — separate threshold for ending the ongoing event
-                        (null = same as thresholdValue)
-  resolutionDays     — consecutive days at resolution threshold to end event
-                       (null = manual resolution only)
-  resolutionOnLow    — true = resolve when value < resolutionThreshold
+  resolutionDays      — consecutive days at resolution threshold to end event
+  resolutionOnLow     — true = resolve when value < resolutionThreshold
 
-Ongoing events (isOngoing = true):
-  When the event fires, effects are applied (e.g. conditions on housed_entities).
-  Conditions applied by ongoing events have EntityCondition.sourceActiveEventId
-  set to the ActiveEvent. When the event resolves, the worker removes all
-  EntityCondition rows with that sourceActiveEventId.
+Ongoing events: conditions applied by ongoing events have
+EntityCondition.sourceActiveEventId set. When the event resolves, the worker
+removes all EntityCondition rows with that sourceActiveEventId.
 
-Currently seeded threshold types:
-  filth — tracks camp-level filth as a fraction of the filth cap
-
-
-─────────────────────────────────────────────
-10. UNRESOLVED STATE & WEIGHT BOOSTING
-─────────────────────────────────────────────
-
-EventUnresolvedState tracks events that were not resolved (e.g. a threat that
-was ignored). When an EventOutcomeDef with marksUnresolved = true is selected,
-the worker upserts an EventUnresolvedState row:
-
-  unresolvedCount — incremented each time the event goes unresolved
-  weightBoost     — added to the event's effective weight per unresolved instance
-
-This allows escalating scenarios: each time a patrol skips a fight, the same
-encounter becomes more likely on the next patrol.
+Currently seeded threshold types: filth
 
 
 ─────────────────────────────────────────────
@@ -287,38 +316,41 @@ encounter becomes more likely on the next patrol.
 
   DEFINITIONS
   EventDef                    — event template; guild-extensible
-  EventStepDef                — ordered step within an event
+  EventStepDef                — ordered step; type determines sole responsibility
+  EventStepChoice             — bridge table: one button per row for choice steps
+  EventStepRandomBranch       — weight table: one weighted branch per row for narrative_random steps
   EventDef_TriggerType        — which trigger types apply to this event
   EventDef_ActionType         — links event to specific action type triggers
-  EventDef_WeatherTrigger     — links event to a weather state trigger
+  EventDef_WeatherTrigger     — links event to a weather state (gate or weight boost)
   EventDef_ThresholdTrigger   — configurable threshold trigger config
   EventDef_Location           — location gate or weight boost
   EventDef_Prerequisite       — prerequisite event that must have fired first
   EnvCondition_EventDef       — weight boost when an env condition is active
   EventCooldown               — per-faction/guild cooldown tracking
-  EventUnresolvedState        — tracks unresolved events that boost related weights
+  EventUnresolvedState        — tracks unresolved exits; boosts future related weights
 
   LOOKUP TABLES (seed)
-  EventTriggerType            — admin | patrol | hunt | crafting | foraging |
-                                clean | weather_onset | threshold | daily | hourly
-  EventScopeType              — global | faction | action | camp
-  EventStepType               — narrative | choice | combat
-  EventParticipantScope       — all_participants | random_participant | leader |
-                                group | housed_entities
-  EventChoiceResolutionType   — individual | faction_average | leader_designates
-  EventThresholdType          — filth
-  EffectType (isEvent=true)   — condition | item | location_buff | stat_modifier |
-                                proficiency_modifier | faction_rep | discipline_xp |
-                                structure_damage | action_output_modifier
+  EventTriggerType    — admin | patrol | hunt | crafting | foraging | clean |
+                        weather_onset | threshold | daily | hourly
+  EventScopeType      — global | faction | action | camp
+  EventStepType       — narrative | narrative_random | choice_solo | choice_leader |
+                        choice_consensus | proficiency_check | condition_check |
+                        item_check | threshold_check | combat | reward | exit
+  EventParticipantScope — all_participants | random_participant | leader |
+                          group | housed_entities
+  EventThresholdType  — filth
+  EffectType (isEvent=true) — condition | item | location_buff | stat_modifier |
+                              proficiency_modifier | faction_rep | discipline_xp |
+                              structure_damage | action_output_modifier
   RelationType (isEvent=true) — spawn | increase | decrease | modify | remove
   TargetType (isEvent=true)   — participants | camp | location | faction | items
 
   EFFECTS & MODIFIERS
-  EventEffect                 — unified effect row (step or outcome); see section 7
-  Location_Effect             — temporary location-wide buffs/debuffs
+  EventEffect         — effect row; attaches only to reward steps (stepDefId required)
+  Location_Effect     — temporary location-wide buffs/debuffs
 
   ACTIVE INSTANCES
-  ActiveEvent                 — live event instance; current step tracked via
-                                currentStepId (FK → EventStepDef);
-                                campId set for camp-scoped events
-  ActiveEvent_Participant     — entity enrolled in a live event
+  ActiveEvent         — live event instance; campId set for camp-scoped events;
+                        expiresAt set when a timed choice step is active;
+                        isActive = false when event ends for any reason
+  ActiveEvent_Participant — entity enrolled in a live event

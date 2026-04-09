@@ -315,7 +315,6 @@ model Stat {
 
   envConditionModifiers  EnvCondition_StatModifier[]
   conditionStatEffects   ConditionDef_StatEffect[]
-  eventChoiceDefs        EventChoiceDef[]
   proficiencyDefs        ProficiencyDef[]
   profilesAsDamageStat   ItemEquipmentProfile[]   @relation("ProfileDamageStat")
   profilesAsHitStat      ItemEquipmentProfile[]   @relation("ProfileHitStat")
@@ -1324,11 +1323,11 @@ model ProficiencyDef {
   conditionEffects             ConditionDef_ProficiencyEffect[]
   abilityProficiencyModifiers  Ability_ProficiencyModifier[]
   envConditionMods             EnvCondition_ProficiencyModifier[]
-  eventChoiceDefs              EventChoiceDef[]
   combatActionConditions       ItemEquipmentProfile_Condition[]
   actionStepConfigs            Guild_ActionStep_Config[]
   guildSpeciesActionStepConfigs Guild_Species_ActionStep_Config[]
   eventEffects                 EventEffect[]
+  eventCheckSteps              EventStepDef[] @relation("StepProficiencyCheck")
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -1982,6 +1981,7 @@ model ConditionDef {
   combatEffects         ConditionDef_CombatEffect[]
   combatStatEffects     ConditionDef_CombatStatEffect[]
   eventConditionEffects EventEffect[]
+  eventCheckSteps       EventStepDef[] @relation("StepConditionCheck")
   combatActions         ItemEquipmentProfile_Condition[]
   itemWarnings          ItemWarning[]
   entityConditions      EntityCondition[]
@@ -2278,6 +2278,7 @@ model ItemType {
   items                Item_Type[]
   structureStorageTypes Structure_Storage_ItemType[]
   eventEffects         EventEffect[]
+  eventCheckSteps      EventStepDef[] @relation("StepItemTypeCheck")
 }
 
 // Reusable warning labels for items — e.g. "Dangerous for kits", "Dangerous for elders"
@@ -2734,6 +2735,7 @@ model Item {
 
   actionOutputs          ItemAction_Output[]  @relation("ItemActionOutputItem")  // back-relation: this item appears as an output of these actions
   eventItemEffects       EventEffect[]
+  eventCheckSteps        EventStepDef[] @relation("StepItemCheck")
   speciesDefaultLoadouts SpeciesDefaultLoadout[]
   rankDefaultItems              Rank_DefaultItem[]
   conditionGrants               ConditionDef_GrantedItem[]
@@ -4453,6 +4455,7 @@ model EventThresholdType {
   name String @unique @db.VarChar(50)
 
   thresholdTriggers EventDef_ThresholdTrigger[]
+  checkSteps        EventStepDef[]              @relation("StepThresholdCheck")
 }
 
 model EventParticipantScope {
@@ -4465,16 +4468,9 @@ model EventParticipantScope {
   appliesToGroup  Boolean @default(false)
   appliesToHoused Boolean @default(false)  // filters to entities currently assigned to housing structures
 
-  stepDefs     EventStepDef[]
-  outcomeDefs  EventOutcomeDef[]
-  eventEffects EventEffect[]
-}
-
-model EventChoiceResolutionType {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
-
-  choiceDefs EventChoiceDef[]
+  stepDefs           EventStepDef[] @relation("StepEffectScope")
+  checkStepDefs      EventStepDef[] @relation("StepCheckScope")
+  eventEffects       EventEffect[]
 }
 
 
@@ -4643,82 +4639,183 @@ model EnvCondition_EventDef {
 }
 
 
-// A single step in an event chain.
+// A single step in an event chain. Each step type has exactly one responsibility.
 //
-// stepType:
-//   "narrative" — auto-resolves; posts prompt text, applies effects to effectScope, then advances
-//                 to nextStepId. No player input required.
-//   "choice"    — patrol leader selects from EventChoiceDef options. Each choice leads to a
-//                 weighted outcome roll which determines effects and the next step.
-//   "combat"    — triggers an ActiveCombat for the faction vs. the defined NPC. The event chain
-//                 pauses until combat resolves, then advances to winStepId or loseStepId.
+// Step types:
+//   narrative          — displays prompt text; anyone in the group clicks 'next' → nextStepId
+//   narrative_random   — displays prompt text; anyone clicks 'next'; worker rolls weighted
+//                        EventStepRandomBranch table to pick which nextStepId to follow
+//   choice_solo        — displays prompt + N choice buttons (EventStepChoice rows);
+//                        the first participant to click decides → that choice's nextStepId
+//   choice_leader      — same as choice_solo but only the leader may interact; non-leaders
+//                        see the buttons but cannot click
+//   choice_consensus   — all participants cast individual votes; plurality winner decides;
+//                        ties broken by lowest sortOrder among tied choices;
+//                        if expiresAfterMinutes elapses, tallies whatever votes exist
+//                        (sortOrder tiebreak applies); cancels only if zero votes were cast
+//   proficiency_check  — displays prompt + 'roll' button; worker rolls the configured proficiency
+//                        for checkParticipantScopeId target(s) against checkDifficulty;
+//                        routes to passStepId (success) or failStepId (failure)
+//   condition_check    — automatic; no player input; checks whether checkParticipantScopeId
+//                        target(s) have conditionCheckDefId active; routes to passStepId
+//                        (has condition) or failStepId (does not)
+//   item_check         — automatic; no player input; checks whether checkParticipantScopeId
+//                        target(s) carry itemCheckItemId (or any item of itemCheckItemTypeId)
+//                        in at least itemCheckMinQuantity; routes to passStepId (has item)
+//                        or failStepId (does not)
+//   threshold_check    — automatic; no player input; reads a world-state value (thresholdCheckTypeId)
+//                        and compares it to thresholdCheckValue; thresholdCheckOnHigh = true means
+//                        pass when value > threshold, false means pass when value < threshold;
+//                        routes to passStepId or failStepId
+//   combat             — displays prompt + 'initiate' button; spawns ActiveCombat;
+//                        resolves to winStepId or loseStepId
+//   reward             — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
+//                        → nextStepId (null = event ends naturally)
+//   exit               — terminal step; displays optional closing text; no nextStepId;
+//                        sets marksUnresolved / endsAction as configured
 //
 // isStarter: true on exactly one step per EventDef — the entry point of the chain.
-//
 // sortOrder: display/seeding hint only — NOT used for execution order.
-//            Execution flows via isStarter → outcomes / winStep / loseStep / nextStep links.
 //
-// expiresAfterMinutes: "choice" steps only — how long the leader has to respond before the step
-//   auto-resolves via defaultChoiceDefId. null = no time limit.
+// expiresAfterMinutes: "choice" steps only — time window for the player to make a selection.
+//   If the window elapses with no selection, the event cancels (ActiveEvent.isActive = false).
+//   There is no fallback path; the event simply ends.
 model EventStepDef {
   id         Int     @id @default(autoincrement())
   eventDefId Int
   sortOrder  Int
-  isStarter    Boolean @default(false)  // true on the entry-point step of the chain
-  stepTypeId   Int
-  prompt       String  @db.VarChar(2000)
+  isStarter  Boolean @default(false)  // true on the entry-point step of the chain
+  stepTypeId Int
+  prompt     String  @db.VarChar(2000)
 
-  // ── narrative step fields ────────────────────────────────────────────────
-  // effectScope: who the narrative effects apply to
-  effectScopeId Int?  // null for non-narrative steps
-  nextStepId  Int?   // null = event ends after this step
+  // ── narrative / reward step fields ──────────────────────────────────────
+  nextStepId Int?  // null = event ends after this step (narrative, reward)
 
-  // ── choice step fields ───────────────────────────────────────────────────
-  expiresAfterMinutes Int?  // time window for the leader to choose; null = no limit
-  defaultChoiceDefId  Int?  // choice applied automatically when the window expires
+  // ── reward step fields ──────────────────────────────────────────────────
+  effectScopeId Int?  // default participant scope for all effects on this reward step
+
+  // ── exit step fields ─────────────────────────────────────────────────────
+  marksUnresolved Boolean @default(false)  // true = record EventUnresolvedState on reaching this step
+  endsAction      Boolean @default(false)  // true = interrupt the linked ActionInstance
+
+  // ── choice_solo / choice_leader / choice_consensus step fields ───────────
+  // choice_solo / choice_leader: if window elapses with no selection, event cancels
+  // choice_consensus: if window elapses, tallies existing votes (sortOrder tiebreak); cancels only if zero votes cast
+  expiresAfterMinutes Int?
+
+  // ── proficiency_check / condition_check / item_check step fields ─────────
+  checkParticipantScopeId  Int?   // who is checked/rolling (e.g. leader, random_participant)
+  passStepId               Int?   // step reached on pass/success; null = event ends
+  failStepId               Int?   // step reached on fail/failure; null = event ends
+
+  // proficiency_check
+  checkProficiencyDefId    Int?   // which proficiency to roll
+  checkDifficulty          Float? // difficulty value to roll against
+
+  // condition_check
+  conditionCheckDefId      Int?   // which ConditionDef to look for on the target participant(s)
+
+  // item_check
+  itemCheckItemId          Int?   // specific item to look for
+  itemCheckItemTypeId      Int?   // or: any item of this type (one of itemCheckItemId / itemCheckItemTypeId required)
+  itemCheckMinQuantity     Float? // minimum quantity required; null = 1.0
+
+  // threshold_check (no participant scope — checks world state)
+  thresholdCheckTypeId     Int?   // which world-state threshold to read (e.g. filth)
+  thresholdCheckValue      Float? // comparison value
+  thresholdCheckOnHigh     Boolean? // true = pass when value > threshold; false = pass when value < threshold
 
   // ── combat step fields ───────────────────────────────────────────────────
   combatEncounterDefId Int?  // which CombatEncounterDef to spawn
-  winStepId            Int?  // next step when players win; null = event ends
-  loseStepId           Int?  // next step when players lose; null = event ends
-  winExpReward         Int   @default(0)  // exp awarded to each non-fleeing player participant on win
-  winFactionRepReward  Int   @default(0)  // faction rep awarded to each non-fleeing player participant on win
+  winStepId            Int?  // step reached when players win; null = event ends
+  loseStepId           Int?  // step reached when players lose; null = event ends
 
   // ── relations ────────────────────────────────────────────────────────────
-  eventDef           EventDef            @relation(fields: [eventDefId],           references: [id], onDelete: Cascade)
-  stepType           EventStepType       @relation(fields: [stepTypeId],           references: [id], onDelete: Restrict)
-  effectScope        EventParticipantScope? @relation(fields: [effectScopeId],      references: [id], onDelete: Restrict)
-  nextStep           EventStepDef?       @relation("NarrativeNext", fields: [nextStepId],  references: [id], onDelete: Restrict)
-  winStep            EventStepDef?       @relation("CombatWin",     fields: [winStepId],   references: [id], onDelete: Restrict)
-  loseStep           EventStepDef?       @relation("CombatLose",    fields: [loseStepId],  references: [id], onDelete: Restrict)
-  defaultChoice      EventChoiceDef?     @relation("StepDefaultChoice", fields: [defaultChoiceDefId], references: [id], onDelete: Restrict)
-  combatEncounterDef CombatEncounterDef? @relation(fields: [combatEncounterDefId], references: [id], onDelete: SetNull)
+  eventDef              EventDef               @relation(fields: [eventDefId],              references: [id], onDelete: Cascade)
+  stepType              EventStepType          @relation(fields: [stepTypeId],              references: [id], onDelete: Restrict)
+  effectScope           EventParticipantScope? @relation("StepEffectScope",     fields: [effectScopeId],           references: [id], onDelete: Restrict)
+  checkParticipantScope EventParticipantScope? @relation("StepCheckScope",      fields: [checkParticipantScopeId], references: [id], onDelete: Restrict)
+  checkProficiencyDef   ProficiencyDef?        @relation("StepProficiencyCheck", fields: [checkProficiencyDefId],  references: [id], onDelete: Restrict)
+  conditionCheckDef     ConditionDef?          @relation("StepConditionCheck",   fields: [conditionCheckDefId],     references: [id], onDelete: Restrict)
+  itemCheckItem         Item?                  @relation("StepItemCheck",         fields: [itemCheckItemId],         references: [id], onDelete: Restrict)
+  itemCheckItemType     ItemType?              @relation("StepItemTypeCheck",     fields: [itemCheckItemTypeId],     references: [id], onDelete: Restrict)
+  thresholdCheckType    EventThresholdType?    @relation("StepThresholdCheck",    fields: [thresholdCheckTypeId],    references: [id], onDelete: Restrict)
+  nextStep              EventStepDef?          @relation("StepNext",      fields: [nextStepId],  references: [id], onDelete: Restrict)
+  passStep              EventStepDef?          @relation("CheckPass",     fields: [passStepId],  references: [id], onDelete: Restrict)
+  failStep              EventStepDef?          @relation("CheckFail",     fields: [failStepId],  references: [id], onDelete: Restrict)
+  winStep               EventStepDef?          @relation("CombatWin",     fields: [winStepId],   references: [id], onDelete: Restrict)
+  loseStep              EventStepDef?          @relation("CombatLose",    fields: [loseStepId],  references: [id], onDelete: Restrict)
+  combatEncounterDef    CombatEncounterDef?    @relation(fields: [combatEncounterDefId], references: [id], onDelete: SetNull)
 
-  choices  EventChoiceDef[]
-  effects  EventEffect[]
+  effects        EventEffect[]
+  choiceOptions  EventStepChoice[]       @relation("StepChoiceOptions")
+  randomBranches EventStepRandomBranch[] @relation("StepRandomBranches")
 
-  // Back-references for self-joins
-  incomingNarrativeSteps EventStepDef[] @relation("NarrativeNext")
-  incomingWinSteps       EventStepDef[] @relation("CombatWin")
-  incomingLoseSteps      EventStepDef[] @relation("CombatLose")
-
-  incomingOutcomes EventOutcomeDef[] @relation("OutcomeNextStep")
-  activeEvents     ActiveEvent[]
+  // Back-references for incoming navigation links
+  incomingNextSteps      EventStepDef[]          @relation("StepNext")
+  incomingPassSteps      EventStepDef[]          @relation("CheckPass")
+  incomingFailSteps      EventStepDef[]          @relation("CheckFail")
+  incomingWinSteps       EventStepDef[]          @relation("CombatWin")
+  incomingLoseSteps      EventStepDef[]          @relation("CombatLose")
+  incomingChoiceOptions  EventStepChoice[]       @relation("StepChoiceTarget")
+  incomingRandomBranches EventStepRandomBranch[] @relation("StepRandomTarget")
+  activeEvents           ActiveEvent[]
 
   @@unique([eventDefId, sortOrder])
   @@index([eventDefId])
   @@index([stepTypeId])
   @@index([effectScopeId])
-  @@index([defaultChoiceDefId])
+  @@index([checkParticipantScopeId])
+  @@index([checkProficiencyDefId])
+  @@index([conditionCheckDefId])
+  @@index([itemCheckItemId])
+  @@index([itemCheckItemTypeId])
+  @@index([thresholdCheckTypeId])
   @@index([combatEncounterDefId])
   @@index([nextStepId])
+  @@index([passStepId])
+  @@index([failStepId])
   @@index([winStepId])
   @@index([loseStepId])
 }
 
-// Narrative step: condition applied or removed on auto-resolve.
-// Unified event effect — applies to either a narrative step or a choice outcome.
-// Exactly one of stepDefId or outcomeDefId must be set (app-enforced).
+// A single choice button on a "choice" step.
+// Each row is one button the player can click; stepDefId is the choice step it belongs to.
+// The choice is deterministic — the player picks, the step navigates directly to nextStepId.
+model EventStepChoice {
+  id          Int     @id @default(autoincrement())
+  stepDefId   Int
+  label       String  @db.VarChar(200)   // button label shown in Discord
+  description String? @db.VarChar(1000)  // optional flavor text shown with the button
+  nextStepId  Int                         // step this choice leads to
+  sortOrder   Int     @default(0)         // display order of buttons
+
+  stepDef  EventStepDef @relation("StepChoiceOptions", fields: [stepDefId],  references: [id], onDelete: Cascade)
+  nextStep EventStepDef @relation("StepChoiceTarget",  fields: [nextStepId], references: [id], onDelete: Restrict)
+
+  @@index([stepDefId])
+  @@index([nextStepId])
+}
+
+// A single weighted branch on a "narrative_random" step.
+// When the step resolves, the worker rolls against all branch weights to pick one nextStepId.
+// No player input — purely system-driven randomness.
+model EventStepRandomBranch {
+  id          Int     @id @default(autoincrement())
+  stepDefId   Int
+  weight      Float   @default(1.0)        // relative selection weight; higher = more likely
+  nextStepId  Int                           // step this branch leads to
+  description String? @db.VarChar(200)     // internal designer note (e.g. "rare outcome", "success path")
+
+  stepDef  EventStepDef @relation("StepRandomBranches", fields: [stepDefId],  references: [id], onDelete: Cascade)
+  nextStep EventStepDef @relation("StepRandomTarget",   fields: [nextStepId], references: [id], onDelete: Restrict)
+
+  @@index([stepDefId])
+  @@index([nextStepId])
+}
+
+// An effect attached to a "reward" EventStepDef. Only reward steps carry effects.
+// stepDefId must reference a reward-type step (app-enforced).
 //
 // Core effect fields:
 //   probability   — chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
@@ -4777,8 +4874,7 @@ model EventEffect {
   id           Int @id @default(autoincrement())
   effectTypeId Int
 
-  stepDefId    Int?  // FK to EventStepDef; null for outcome effects
-  outcomeDefId Int?  // FK to EventOutcomeDef; null for step effects
+  stepDefId Int  // FK to a reward-type EventStepDef
 
   probability   Float @default(1.0)  // probability this effect occurs (0.0-1.0)
   targetTypeId  Int?  // what type of target this effect applies to (participants, camp, location, etc.)
@@ -4834,9 +4930,8 @@ model EventEffect {
   effectType    EffectType   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
   targetType    TargetType? @relation(fields: [targetTypeId], references: [id], onDelete: Restrict)
   relationType  RelationType? @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
-  stepDef       EventStepDef?     @relation(fields: [stepDefId],      references: [id], onDelete: Cascade)
-  outcomeDef    EventOutcomeDef?  @relation(fields: [outcomeDefId],   references: [id], onDelete: Cascade)
-  conditionDef  ConditionDef?     @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
+  stepDef      EventStepDef  @relation(fields: [stepDefId],      references: [id], onDelete: Cascade)
+  conditionDef ConditionDef? @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
   item          Item?             @relation(fields: [itemId],     references: [id], onDelete: SetNull)
   itemType      ItemType?         @relation(fields: [itemTypeId], references: [id], onDelete: SetNull)
   targetScope   EventParticipantScope? @relation(fields: [targetScopeId], references: [id], onDelete: Restrict)
@@ -4851,7 +4946,6 @@ model EventEffect {
   @@index([targetTypeId])
   @@index([relationTypeId])
   @@index([stepDefId])
-  @@index([outcomeDefId])
   @@index([conditionDefId])
   @@index([itemId])
   @@index([itemTypeId])
@@ -4864,63 +4958,6 @@ model EventEffect {
   @@index([dropTableId])
 }
 
-
-// A choice option presented during a "choice" step. The patrol leader selects one.
-// If statId or proficiencyDefId is set, a check is rolled after the choice is made.
-// checkMode determines how the roll is computed across participants:
-//   "individual"        — each entity rolls independently; each may get a different outcome
-//   "faction_average"     — single roll using the average stat/skill across all participants
-//   "leader_designates" — leader names one entity to roll on behalf of the faction
-model EventChoiceDef {
-  id          Int     @id @default(autoincrement())
-  stepDefId   Int
-  label       String  @db.VarChar(200)
-  description String? @db.VarChar(1000)
-
-  // Optional skill/stat check made after this choice is selected
-  statId      Int?
-  proficiencyDefId  Int?
-  difficulty  Int?
-  checkModeId Int?  // null = no check; FK to EventChoiceResolutionType
-
-  stepDef   EventStepDef    @relation(fields: [stepDefId],   references: [id], onDelete: Cascade)
-  stat      Stat?           @relation(fields: [statId],      references: [id], onDelete: Restrict)
-  proficiency ProficiencyDef?     @relation(fields: [proficiencyDefId],  references: [id], onDelete: Restrict)
-  checkMode EventChoiceResolutionType? @relation(fields: [checkModeId], references: [id], onDelete: Restrict)
-
-  outcomes        EventOutcomeDef[]
-  defaultForSteps EventStepDef[]    @relation("StepDefaultChoice")
-
-  @@index([stepDefId])
-  @@index([checkModeId])
-}
-
-// A possible outcome for a choice — selected by weighted random roll (modified by skill check result).
-// effectScope: "all_participants" | "random_participant" | "leader"
-// nextStepId: null = event ends after this outcome
-// endsAction: true = the linked ActionInstance is immediately marked interrupted
-model EventOutcomeDef {
-  id          Int    @id @default(autoincrement())
-  choiceDefId Int
-  name        String @db.VarChar(200)
-  description String @db.VarChar(2000)
-
-  weight        Float   @default(1.0)
-  effectScopeId Int
-  endsAction      Boolean @default(false)
-  marksUnresolved Boolean @default(false)  // true = selecting this outcome records an EventUnresolvedState entry
-  nextStepId      Int?
-
-  choiceDef   EventChoiceDef   @relation(fields: [choiceDefId],   references: [id], onDelete: Cascade)
-  nextStep    EventStepDef?    @relation("OutcomeNextStep", fields: [nextStepId], references: [id], onDelete: Restrict)
-  effectScope EventParticipantScope @relation(fields: [effectScopeId], references: [id], onDelete: Restrict)
-
-  effects EventEffect[]
-
-  @@index([choiceDefId])
-  @@index([effectScopeId])
-  @@index([nextStepId])
-}
 
 
 // A running or resolved event chain instance.
