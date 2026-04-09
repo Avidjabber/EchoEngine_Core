@@ -352,6 +352,7 @@ model DropTable {
   guildBiomeDrops     Guild_BiomeDrop[]          // per-guild biome gather yield assignments
   combatParticipants  ActiveCombat_Participant[]  // snapshotted per-participant at combat spawn
   plantDefHarvests    PlantDef[]                 @relation("PlantDefHarvestDrop")
+  eventItemEffects    EventEffect[]              @relation("EventEffectDropTable")
   @@index([guildId])
 }
 
@@ -1092,8 +1093,9 @@ model EntityCondition {
   conditionDefId Int
   bodyPartId     Int?
 
-  sourceEntityId   Int?  // entity whose action applied this condition; null for natural onset
-  linkedConditionId Int? // paired EntityCondition on another entity (e.g. Grappling ↔ Grappled)
+  sourceEntityId      Int?  // entity whose action applied this condition; null for natural onset
+  sourceActiveEventId Int?  // set when applied by an ongoing ActiveEvent; persists until that event resolves
+  linkedConditionId   Int?  // paired EntityCondition on another entity (e.g. Grappling ↔ Grappled)
 
   onsetAt          DateTime? @db.Timestamptz
   progressionValue Float @default(1.0) // starts at 1.0; roll below difficultyRating → increases; treatment subtracts directly
@@ -1116,9 +1118,10 @@ model EntityCondition {
 
   updatedAt DateTime @updatedAt @db.Timestamptz
 
-  entity          Entity               @relation("EntityConditions",    fields: [entityId],          references: [id], onDelete: Cascade)
-  sourceEntity    Entity?              @relation("AppliedConditions",   fields: [sourceEntityId],    references: [id], onDelete: SetNull)
-  linkedCondition EntityCondition?     @relation("LinkedConditions",    fields: [linkedConditionId], references: [id], onDelete: SetNull)
+  entity            Entity               @relation("EntityConditions",      fields: [entityId],             references: [id], onDelete: Cascade)
+  sourceEntity      Entity?              @relation("AppliedConditions",     fields: [sourceEntityId],       references: [id], onDelete: SetNull)
+  sourceActiveEvent ActiveEvent?         @relation("EventAppliedConditions", fields: [sourceActiveEventId],  references: [id], onDelete: SetNull)
+  linkedCondition   EntityCondition?     @relation("LinkedConditions",      fields: [linkedConditionId],    references: [id], onDelete: SetNull)
   linkedBy        EntityCondition[]    @relation("LinkedConditions")
   condition       ConditionDef         @relation(fields: [conditionDefId],    references: [id], onDelete: Restrict)
   bodyPart        BodyPart?            @relation(fields: [bodyPartId],        references: [id], onDelete: Restrict)
@@ -1133,6 +1136,7 @@ model EntityCondition {
   @@index([entityId])
   @@index([conditionDefId])
   @@index([sourceEntityId])
+  @@index([sourceActiveEventId])
   @@index([linkedConditionId])
   @@index([appliedInCombatId])
   @@index([appliedByActionId])
@@ -3315,9 +3319,10 @@ model StructureType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
-  structureDefTypes StructureDef_StructureType[]
-  campLimits        Camp_StructureLimit[]
-  campRequirements  StructureDef_CampRequirement[]
+  structureDefTypes           StructureDef_StructureType[]
+  campLimits                  Camp_StructureLimit[]
+  campRequirements            StructureDef_CampRequirement[]
+  eventStructureDamageEffects EventEffect[]                  @relation("EventEffectStructureDamage")
 }
 
 // Global seeded lookup for valid upgrade effect types.
@@ -4048,6 +4053,7 @@ model Camp {
   factions        Camp_Faction[]
   structureLimits Camp_StructureLimit[]
   structures      Structure[]
+  activeEvents    ActiveEvent[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -4505,8 +4511,9 @@ model EventDef {
 
   scopeId       Int
 
-  baseWeight   Float  @default(1.0)
-  chancePerDay Float?
+  baseWeight    Float  @default(1.0)
+  chancePerDay  Float?
+  chancePerHour Float?
 
   // Eligibility
   requiresLeader            Boolean @default(false)
@@ -4754,6 +4761,18 @@ model EventStepDef {
 // discipline_xp fields (effectType = "discipline_xp"):
 //   disciplineXpDisciplineDefId — which discipline gains XP
 //   disciplineXpValue           — XP gain as percentage of level requirement (0.5 = 50% of level XP)
+//
+// structure_damage fields (effectType = "structure_damage"):
+//   structureDamageValue            — damage amount: flat HP (isMultiplier=false) or fraction of maxDurability (isMultiplier=true)
+//   structureDamageIsMultiplier     — true = treat value as fraction of maxDurability; false = flat HP damage
+//   structureDamageCount            — null = all structures in camp; N = randomly select N structures
+//   structureDamageStructureTypeId  — optional: only damage structures of this StructureType
+//
+// action_output_modifier fields (effectType = "action_output_modifier"):
+//   outputMultiplier — multiplier on action output quantity (2.0 = 2x output); only valid for action-scoped events
+//
+// item droptable grant (effectType = "item"):
+//   dropTableId — if set, roll from this DropTable; mutually exclusive with itemId and itemTypeId (app-enforced)
 model EventEffect {
   id           Int @id @default(autoincrement())
   effectTypeId Int
@@ -4800,6 +4819,18 @@ model EventEffect {
   disciplineXpDisciplineDefId Int?
   disciplineXpValue           Float @default(0.0)  // XP gain as percentage (0.5 = 50% of level XP)
 
+  // structure_damage effect fields
+  structureDamageValue           Float?
+  structureDamageIsMultiplier    Boolean @default(false)  // true = fraction of maxDurability; false = flat HP
+  structureDamageCount           Int?    // null = all structures; N = randomly select N structures in camp
+  structureDamageStructureTypeId Int?    // optional filter: only damage structures of this StructureType
+
+  // action_output_modifier effect fields
+  outputMultiplier Float?  // multiplier on action output quantity (2.0 = 2x); only valid for action-scoped events
+
+  // item droptable grant (effectType = "item" only)
+  dropTableId Int?  // roll from this DropTable; mutually exclusive with itemId / itemTypeId (app-enforced)
+
   effectType    EffectType   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
   targetType    TargetType? @relation(fields: [targetTypeId], references: [id], onDelete: Restrict)
   relationType  RelationType? @relation(fields: [relationTypeId], references: [id], onDelete: Restrict)
@@ -4811,8 +4842,10 @@ model EventEffect {
   targetScope   EventParticipantScope? @relation(fields: [targetScopeId], references: [id], onDelete: Restrict)
   locationBuffEffectType EffectType? @relation("EventLocationBuffEffect", fields: [locationBuffEffectTypeId], references: [id], onDelete: Restrict)
   statModifierStat       Stat?       @relation("EventEffectStatModifier", fields: [statModifierStatId], references: [id], onDelete: Restrict)
-  proficiencyModifierProficiency ProficiencyDef? @relation(fields: [proficiencyModifierProficiencyDefId], references: [id], onDelete: Restrict)
-  disciplineXpDiscipline  DisciplineDef? @relation(fields: [disciplineXpDisciplineDefId], references: [id], onDelete: Restrict)
+  proficiencyModifierProficiency   ProficiencyDef? @relation(fields: [proficiencyModifierProficiencyDefId], references: [id], onDelete: Restrict)
+  disciplineXpDiscipline           DisciplineDef?  @relation(fields: [disciplineXpDisciplineDefId],          references: [id], onDelete: Restrict)
+  structureDamageStructureType     StructureType?  @relation("EventEffectStructureDamage", fields: [structureDamageStructureTypeId], references: [id], onDelete: Restrict)
+  dropTable                        DropTable?      @relation("EventEffectDropTable",        fields: [dropTableId],                   references: [id], onDelete: SetNull)
 
   @@index([effectTypeId])
   @@index([targetTypeId])
@@ -4827,6 +4860,8 @@ model EventEffect {
   @@index([statModifierStatId])
   @@index([proficiencyModifierProficiencyDefId])
   @@index([disciplineXpDisciplineDefId])
+  @@index([structureDamageStructureTypeId])
+  @@index([dropTableId])
 }
 
 
@@ -4872,8 +4907,9 @@ model EventOutcomeDef {
 
   weight        Float   @default(1.0)
   effectScopeId Int
-  endsAction    Boolean @default(false)
-  nextStepId    Int?
+  endsAction      Boolean @default(false)
+  marksUnresolved Boolean @default(false)  // true = selecting this outcome records an EventUnresolvedState entry
+  nextStepId      Int?
 
   choiceDef   EventChoiceDef   @relation(fields: [choiceDefId],   references: [id], onDelete: Cascade)
   nextStep    EventStepDef?    @relation("OutcomeNextStep", fields: [nextStepId], references: [id], onDelete: Restrict)
@@ -4901,8 +4937,9 @@ model ActiveEvent {
   eventDefId Int
   guildId    String
 
-  factionId          Int?
+  factionId        Int?
   actionInstanceId Int?  @unique
+  campId           Int?  // set when scope = "camp"; identifies which camp this event is scoped to
 
   isActive      Boolean   @default(true)  // false = event has ended (completed or expired)
   currentStepId Int?      // which EventStepDef the chain is currently on; null when event ends
@@ -4913,15 +4950,18 @@ model ActiveEvent {
 
   eventDef       EventDef        @relation(fields: [eventDefId],       references: [id], onDelete: Restrict)
   currentStep    EventStepDef?   @relation(fields: [currentStepId],    references: [id], onDelete: SetNull)
-  faction          Faction?          @relation(fields: [factionId],          references: [id], onDelete: Cascade)
+  faction        Faction?        @relation(fields: [factionId],        references: [id], onDelete: Cascade)
   actionInstance ActionInstance? @relation(fields: [actionInstanceId], references: [id], onDelete: Cascade)
+  camp           Camp?           @relation(fields: [campId],           references: [id], onDelete: Cascade)
 
-  participants  ActiveEvent_Participant[]
-  activeCombats ActiveCombat[]
+  participants      ActiveEvent_Participant[]
+  activeCombats     ActiveCombat[]
+  appliedConditions EntityCondition[]  @relation("EventAppliedConditions")
 
   @@index([guildId])
   @@index([eventDefId])
   @@index([factionId])
+  @@index([campId])
   @@index([currentStepId])
 }
 
