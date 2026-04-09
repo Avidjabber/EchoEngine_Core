@@ -4838,7 +4838,8 @@ model EventStepRandomBranch {
 //   targetScopeId — who receives/loses the item
 //
 // location_buff fields (effectType = "location_buff"):
-//   locationBuffEffectTypeId — which EffectType to apply as a location buff/debuff
+//   locationBuffEffectTypeId — which EffectType to apply as a location buff/debuff;
+//                              must reference an EffectType with isLocation = true (app-enforced)
 //   locationBuffValue        — the effect value as percentage (0.3 = 30% buff, -0.2 = 20% debuff)
 //   locationBuffDurationHours — how long the effect lasts (null = permanent until removed)
 //

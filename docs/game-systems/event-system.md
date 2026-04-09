@@ -242,7 +242,8 @@ Effect types (EffectType with isEvent = true):
   item                  — add or remove items; source is a fixed item (itemId),
                           any item of a type (itemTypeId), or a droptable roll (dropTableId)
   location_buff         — apply a temporary location-wide buff/debuff (locationBuffValue;
-                          positive = buff, negative = debuff)
+                          positive = buff, negative = debuff); locationBuffEffectTypeId must
+                          reference an EffectType with isLocation = true
   stat_modifier         — apply a temporary stat bonus/penalty
   proficiency_modifier  — apply a temporary proficiency modifier, advantage, or disadvantage
   faction_rep           — grant or remove faction reputation points

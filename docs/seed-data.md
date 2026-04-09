@@ -240,20 +240,21 @@ EffectType                              [ DONE ]
 Developer-seeded only. Boolean flags control which systems each value is valid for.
 Also used for Plot_Buff.effectTypeId — valid plot buff types are those with isPlant = true.
 isEnvModifier = true marks types valid for EnvCondition_Modifier (per-guild world effects; guilds define their own values, no global defaults).
+isLocation = true marks types valid for Location_Effect writes (location-wide temporary buffs/debuffs, e.g. spawn weights, hunting difficulty); used as locationBuffEffectTypeId on EventEffect.
 isEvent = true marks types valid for EventEffect.effectTypeId — see EventEffectType section for the full list.
 
-  name              isItem  isPlant  isSpecies  isAbility  isEnvModifier  isEvent
-  ──────────        ──────  ───────  ─────────  ─────────  ─────────────  ───────
-  spawn_rate        true    true     true       false      false          false
-  spawn_weight      true    true     true       false      false          false
-  growth_rate       false   true     true       true       false          false
-  harvest_yeild     false   true     false      true       false          false
-  rot_rate          true    true     false      true       false          false
-  damage_resistance false   false    false      true       false          false
-  cultivation       false   true     false      false      false          false
-  survival          false   true     false      false      false          false
-  filth             false   false    false      false      true           false
-  spoilage          false   false    false      false      true           false
+  name              isItem  isPlant  isSpecies  isAbility  isEnvModifier  isLocation  isEvent
+  ──────────        ──────  ───────  ─────────  ─────────  ─────────────  ──────────  ───────
+  spawn_rate        true    true     true       false      false          true        false
+  spawn_weight      true    true     true       false      false          true        false
+  growth_rate       false   true     true       true       false          false       false
+  harvest_yeild     false   true     false      true       false          false       false
+  rot_rate          true    true     false      true       false          false       false
+  damage_resistance false   false    false      true       false          false       false
+  cultivation       false   true     false      false      false          false       false
+  survival          false   true     false      false      false          false       false
+  filth             false   false    false      false      true           false       false
+  spoilage          false   false    false      false      true           false       false
 
 
 ──────────────────────────────────────────────
