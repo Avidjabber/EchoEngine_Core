@@ -399,6 +399,36 @@ Each type has a corresponding config table (except storage, which uses Structure
 
 
 ──────────────────────────────────────────────
+ConstructionType                        [ DONE ]
+──────────────────────────────────────────────
+Developer-seeded only. Identifies the kind of work a Construction record
+represents. Referenced via constructionTypeId FK on the Construction model.
+Guilds cannot add or modify these values.
+
+  name     Purpose
+  ───────  ──────────────────────────────────────────────────────────────────
+  build    Initial construction of a new structure from a StructureDef.
+           On completion: Structure.status → active; currentDurability set to
+           StructureDef.baseDurability.
+
+  upgrade  Applying a specific StructureDef_Upgrade to an existing structure.
+           Construction.upgradeId is required (non-null). On completion:
+           Structure_AppliedUpgrade row created; upgrade effects apply immediately.
+           For plot_count upgrades, new Plot rows are also created.
+
+  repair   Restoring a broken structure's durability. Item cost is proportional
+           to the damage fraction at initiation time (repairCostProportion).
+           On completion: Structure.currentDurability restored to baseDurability;
+           Structure.status → active.
+
+  rebuild  Demolishing and reconstructing a destroyed structure in one pass,
+           restoring all upgrades that were recorded at initiation. Item cost
+           covers the full build cost plus all prior upgrade costs. On completion:
+           all prior Structure_AppliedUpgrade rows replaced; Structure.status →
+           active; currentDurability restored to baseDurability.
+
+
+──────────────────────────────────────────────
 UpgradeEffectType                       [ DONE ]
 ──────────────────────────────────────────────
 Developer-seeded only. Each row names an upgrade effect and declares which

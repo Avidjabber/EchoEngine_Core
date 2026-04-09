@@ -257,6 +257,18 @@ model EffectType {
 }
 
 
+// Engine-seeded lookup table. Identifies the kind of work a Construction record represents.
+// build:   initial construction of a new structure from a StructureDef.
+// upgrade: applying a specific StructureDef_Upgrade to an existing structure.
+// repair:  restoring a broken structure's durability (partial item cost proportional to damage).
+// rebuild: reconstructing a destroyed structure and restoring all prior upgrades in one pass.
+model ConstructionType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  constructions Construction[]
+}
+
 // Unified status table for entities and structures.
 // isEntity / isStructure flags indicate which systems each value applies to.
 model Status {
@@ -3219,17 +3231,18 @@ model Entity_Housing {
 }
 
 // Camp structure inventory. Owned by a storage-type Structure.
-// expirationModifier: driven by StructureDef_StorageConfig base value + rot_modifier upgrade deltas; recomputed when upgrades apply.
+// solidCapacity / liquidCapacity: driven by StructureDef_StorageConfig base values + solid_capacity / liquid_capacity upgrade deltas; recomputed when upgrades apply.
+// rotModifier: driven by StructureDef_StorageConfig.baseRotModifier + rot_modifier upgrade deltas; recomputed when upgrades apply.
 // isPrimaryStorage: faction's designated primary for its accepted item types.
 // acceptedTypes: item must match at least one accepted type to be stored here.
 model Structure_Storage {
-  structureId        Int   @id
-  storageId          Int   @unique
-  weightCapacity     Float?
-  fluidCapacity      Float?
-  expirationModifier Float   @default(1.0)
-  isPrimaryStorage   Boolean @default(false)
-  securityRating     Int     @default(0)  // effective sum of security_rating upgrade deltas; read by event system for theft/raid event weights
+  structureId    Int   @id
+  storageId      Int   @unique
+  solidCapacity  Float?
+  liquidCapacity Float?
+  rotModifier    Float   @default(1.0)
+  isPrimaryStorage Boolean @default(false)
+  securityRating   Int     @default(0)  // effective sum of security_rating upgrade deltas; read by event system for theft/raid event weights
 
   structure Structure @relation(fields: [structureId], references: [id], onDelete: Cascade)
   storage   Storage   @relation(fields: [storageId],   references: [id], onDelete: Cascade)
@@ -3848,7 +3861,7 @@ model Structure_AppliedUpgrade {
 model Construction {
   id                    Int       @id @default(autoincrement())
   structureId           Int
-  constructionType      String    @db.VarChar(20) @default("build")
+  constructionTypeId    Int
   upgradeId             Int?
   repairCostProportion  Float?
   pointsRequired        Int
@@ -3858,12 +3871,14 @@ model Construction {
   completedAt           DateTime? @db.Timestamptz
 
   structure         Structure             @relation(fields: [structureId],         references: [id], onDelete: Cascade)
+  constructionType  ConstructionType      @relation(fields: [constructionTypeId],  references: [id], onDelete: Restrict)
   upgrade           StructureDef_Upgrade? @relation(fields: [upgradeId],           references: [id], onDelete: Restrict)
   initiatedByEntity Entity                @relation(fields: [initiatedByEntityId], references: [id], onDelete: Restrict)
 
   itemRequirements  Construction_ItemRequirement[]
 
   @@index([structureId])
+  @@index([constructionTypeId])
   @@index([initiatedByEntityId])
 }
 

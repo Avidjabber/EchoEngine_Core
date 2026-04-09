@@ -610,13 +610,16 @@ TYPE-SPECIFIC EXTENSIONS
                        One row per storage structure. Carries all capacity and behaviour
                        fields so that Storage itself remains a pure item container.
 
-    structureId        FK → Structure (1:1)
-    storageId          FK → Storage   (1:1)
-    weightCapacity     Float?  — null = no weight limit; recomputed when solid_capacity upgrades apply
-    fluidCapacity      Float?  — null = no fluid limit; recomputed when liquid_capacity upgrades apply
-    expirationModifier Float   — default 1.0; recomputed when rot_modifier upgrades apply; < 1.0 = slower rot
-    isPrimaryStorage   Boolean — faction's designated primary storage for its accepted item types
-    securityRating     Int     — effective sum of security_rating upgrade deltas; read by the event
+    structureId      FK → Structure (1:1)
+    storageId        FK → Storage   (1:1)
+    solidCapacity    Float?  — null = no weight limit; recomputed when solid_capacity upgrades apply.
+                               Parallel to StructureDef_StorageConfig.baseCapacitySolids.
+    liquidCapacity   Float?  — null = no fluid limit; recomputed when liquid_capacity upgrades apply.
+                               Parallel to StructureDef_StorageConfig.baseCapacityLiquids.
+    rotModifier      Float   — default 1.0; recomputed when rot_modifier upgrades apply; < 1.0 = slower rot.
+                               Parallel to StructureDef_StorageConfig.baseRotModifier.
+    isPrimaryStorage Boolean — faction's designated primary storage for its accepted item types
+    securityRating   Int     — effective sum of security_rating upgrade deltas; read by the event
                                  system to weight theft/raid events at this camp
     acceptedTypes      via Structure_Storage_ItemType (storageId, itemTypeId) — item must match
                        at least one accepted type to be stored here
@@ -627,7 +630,8 @@ TYPE-SPECIFIC EXTENSIONS
 
   When an upgrade with effectType solid_capacity, liquid_capacity, rot_modifier, or
   security_rating completes, the app recomputes the effective value and updates the
-  Structure_Storage row directly.
+  corresponding Structure_Storage field directly (solidCapacity, liquidCapacity,
+  rotModifier, securityRating).
 
   Farming structures use Plot.structureId (FK → Structure) to link plots to their
   parent structure. Each Plot is one growing slot — PlotType and defaultSoilQuality
@@ -648,7 +652,9 @@ the build and closes on completion.
   ───────────────────────┼────────────────────────────────────────────────
   id                     │
   structureId            │ FK → Structure
-  constructionType       │ build | upgrade | repair | rebuild
+  constructionTypeId     │ FK → ConstructionType. Seeded values: build |
+                         │ upgrade | repair | rebuild. See seed-data.md
+                         │ → ConstructionType for per-value completion rules.
   upgradeId              │ FK → StructureDef_Upgrade. Only set when
                          │ constructionType = upgrade; null otherwise.
   repairCostProportion   │ Float?. Only set when constructionType = repair.
@@ -693,7 +699,7 @@ ITEM REQUIREMENTS
 
   On completion, all Construction_ItemRequirement rows for that construction are deleted.
 
-On completion:
+On completion (by constructionType):
   - build    → Structure.status set to active; currentDurability set to baseDurability.
   - upgrade  → Structure_AppliedUpgrade row created; effects apply immediately.
                For plot_count upgrades: new Plot rows created for the structure.
@@ -707,6 +713,13 @@ On completion:
                Structure.status set to active.
                Locked plots on farming structures are unlocked; plot count is
                restored to match the rebuilt upgrade set.
+
+POWER NOTE — isPoweredOn defaults:
+  When a build or upgrade construction completes, Structure.isPoweredOn and any
+  new Structure_AppliedUpgrade.isPoweredOn rows start as false. Powered structures
+  and upgrades do not draw fuel or provide powered functionality until the faction
+  leader explicitly enables them. This is intentional opt-in behaviour — the faction
+  controls when a powered structure starts consuming fuel.
 
 CANCELLING A CONSTRUCTION
 ──────────────────────────
@@ -820,5 +833,6 @@ selects one and the action resolves immediately with no further tracking needed.
   Structure_AppliedUpgrade       — record of each upgrade application; carries per-upgrade power consumer toggle and priority
   Structure_Storage              — join: links a storage-type Structure to a Storage; carries capacity/rot/type rules
   Structure_Storage_ItemType     — item types accepted by a structure storage
+  ConstructionType               — seeded lookup: build | upgrade | repair | rebuild
   Construction                   — active or completed build / upgrade / repair / rebuild project
   Construction_ItemRequirement   — items needed and contributed for an active construction; deleted on completion
