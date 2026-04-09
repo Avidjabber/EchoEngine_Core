@@ -1,6 +1,6 @@
 STRUCTURE & CAMP SYSTEM — DESIGN REFERENCE
 ==========================================
-Last updated: 2026-04-04
+Last updated: 2026-04-09
 
 This file is the authoritative reference for how camps and structures work in
 EchoPaw. Read this before touching camp creation, structure definitions, upgrade
@@ -154,6 +154,23 @@ type-specific config tables must be populated.
                      │ All structures start at this value when construction completes.
                      │ Effective max = baseDurability + SUM of any durability upgrade
                      │ effects applied (reserved for future use).
+  dailyFilthAverage  │ Int?. Average filth units this structure generates per day
+                     │ under normal conditions. Used as the baseline by the Worker
+                     │ when computing each structure's daily filth contribution.
+                     │ null = structure generates no filth on its own.
+  filthPerActivePlot │ Int?. Farming-type defs only. Additional filth generated per
+                     │ active (planted) plot per day. Stacks on top of dailyFilthAverage.
+                     │ null on non-farming defs.
+  filthCap           │ Int?. Maximum filth that can accumulate on a single instance
+                     │ of this def. Once Structure.filthLevel reaches this cap, no
+                     │ further filth is added until some is cleared. null = no cap.
+  isPowered          │ Boolean. True = this structure requires an active, satisfying
+                     │ power source to function. When powered functionality is
+                     │ suspended, the structure's type-specific effects are disabled.
+                     │ false = no power requirement. See power-system.md section 4.
+  fuelCostPerHour    │ Float?. Fuel units deducted from the satisfying power source
+                     │ each Worker tick. Required (non-null) when isPowered = true.
+                     │ null when isPowered = false.
 
 StructureDef_StructureType assigns one or more types to a def:
 
@@ -300,7 +317,19 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
   StructureDef_FuelConfig  (for structureTypeId = power)
     Power-source structures generate fuel units that satisfy other structures
     and upgrades (StructureDef.isPowered / StructureDef_Upgrade.isPowered).
-    Full documentation in docs/game-systems/power-system.md.
+
+    Key fields (see power-system.md for full detail):
+      isPassive           Boolean. False = active (fueled by item deposits).
+                          True = passive (fueled by the Worker from env conditions).
+      scopeId             FK → TargetScope. Determines which consumers this source
+                          can satisfy: structure | camp | location | faction.
+      fuelCapacity        Float. Maximum fuel units the source can hold.
+      baseGenerationPerHour Float? Passive sources only. Base fuel units/hour before
+                          env condition bonuses.
+      allowsBatteryUse    Boolean. When true, battery-type items can transfer charge
+                          to/from this structure directly. The structure's InputFuelType
+                          set must also include the battery's fuelTypeId. See
+                          power-system.md section 3b for battery discharge/charge rules.
 
 
 ─────────────────────────────────────────────
@@ -320,6 +349,13 @@ path. A guild may define as many or as few upgrade options as they like, or none
   maxApplications    │ Int. Max times this upgrade may be applied to one structure.
                      │ 1 = one-time only; > 1 = stackable up to this limit.
   constructionPoints │ Int. Progress points required to apply this upgrade.
+  isPowered          │ Boolean. True = this upgrade requires an active, satisfying
+                     │ power source to function. When unsatisfied, the upgrade's
+                     │ effects are suspended. false = no power requirement.
+  fuelCostPerHour    │ Float?. Fuel units deducted per Worker tick when this upgrade
+                     │ is powered and active. Non-null when isPowered = true.
+                     │ Each applied instance of the upgrade is a separate consumer.
+                     │ See power-system.md section 4.
 
 Effects are defined in StructureDef_Upgrade_Effect — one row per effect per upgrade.
 An upgrade must have at least one effect row. All effects are applied together when
@@ -327,15 +363,21 @@ the upgrade's Construction completes.
 
 StructureDef_Upgrade_Effect defines the individual effects of an upgrade:
 
-  upgradeId            │ FK → StructureDef_Upgrade
-  effectTypeId         │ FK → UpgradeEffectType. Which property this effect modifies.
-                       │ The UpgradeEffectType row carries boolean flags indicating which
-                       │ StructureType categories accept it. App enforces compatibility.
-                       │ See section 3 and seed-data.md → UpgradeEffectType for the full list.
-  effectValue          │ Float. The delta applied per application (additive).
-  targetEnvConditionId │ FK → EnvCondition. Required when UpgradeEffectType.requiresEnvTarget
-                       │ = true (env_override); null for all other types. Specifies which
-                       │ env condition this effect counteracts (e.g. Drought, Cold, Toxic).
+  upgradeId                 │ FK → StructureDef_Upgrade
+  effectTypeId              │ FK → UpgradeEffectType. Which property this effect modifies.
+                            │ The UpgradeEffectType row carries boolean flags indicating which
+                            │ StructureType categories accept it. App enforces compatibility.
+                            │ See section 3 and seed-data.md → UpgradeEffectType for the full list.
+  effectValue               │ Float. The delta applied per application (additive).
+  targetEnvConditionId      │ FK → EnvCondition. Required when UpgradeEffectType.requiresEnvTarget
+                            │ = true (env_override); null for all other types. Specifies which
+                            │ env condition this effect counteracts (e.g. Drought, Cold, Toxic).
+  efficiencyConsumerScopeId │ FK → TargetScope?. fuel_efficiency effects only. When set,
+                            │ the efficiency reduction is applied only to consumers within
+                            │ that scope (e.g. restrict savings to structure-scoped consumers
+                            │ rather than the source's full scope). null = applies to all
+                            │ consumers satisfied by this source. Ignored on non-fuel_efficiency
+                            │ effects.
 
 StructureDef_Upgrade_BuildCost defines items required to apply the upgrade:
 
@@ -494,7 +536,30 @@ Structure tracks a single built (or in-progress) installation within a camp.
   currentDurability  │ Int. Set to StructureDef.baseDurability when initial
                      │ construction completes. Decremented by damage events.
                      │ Reaching 0 transitions status to broken automatically.
+  filthLevel         │ Int. Current filth accumulated on this structure. Starts at
+                     │ 0 on construction completion. Incremented by the Worker on
+                     │ each daily tick (using StructureDef.dailyFilthAverage and
+                     │ filthPerActivePlot). Capped at StructureDef.filthCap when
+                     │ set. Cleared by filth-reduction actions and filth_reduction
+                     │ upgrade effects.
   name               │ Optional custom label for this specific structure.
+  currentFuel        │ Float?. Power sources only. Current fuel units held. null on
+                     │ non-power-source structures. Range: 0–StructureDef_FuelConfig
+                     │ .fuelCapacity. See power-system.md section 3.
+  isFuelActive       │ Boolean. Power sources only. When true, the Worker generates
+                     │ or drains fuel for this source each tick. Set by the faction
+                     │ leader to turn the source on/off. Cannot be true while the
+                     │ power_loss env condition is active.
+  isPoweredOn        │ Boolean. Power consumers only (StructureDef.isPowered = true).
+                     │ When false, this structure's powered functionality is suspended
+                     │ and no fuel is drawn. The faction leader can toggle this to
+                     │ shed load. See power-system.md section 4.
+  powerSortOrder     │ Int?. Camp-scope power sources only. Worker drains sources
+                     │ in ascending powerSortOrder order (lowest first; ties broken
+                     │ by id). null on non-camp-scope sources.
+  powerPriority      │ Int. Power consumers only. Load-shedding order when fuel runs
+                     │ low mid-tick — higher priority consumers are satisfied before
+                     │ lower ones. Ties broken by id ascending. Default 0.
 
 DURABILITY AND DAMAGE
 ──────────────────────
@@ -524,9 +589,14 @@ BROKEN STATE BEHAVIOUR
 Structure_AppliedUpgrade records each upgrade application. One row is created
 per application when the upgrade's Construction completes.
 
-  structureId  │ FK → Structure
-  upgradeId    │ FK → StructureDef_Upgrade
-  appliedAt    │ DateTime
+  structureId    │ FK → Structure
+  upgradeId      │ FK → StructureDef_Upgrade
+  appliedAt      │ DateTime
+  isPoweredOn    │ Boolean. Per-application consumer toggle for powered upgrades.
+                 │ When false, this upgrade's effects are suspended and no fuel is
+                 │ drawn for it. Ignored when StructureDef_Upgrade.isPowered = false.
+  powerPriority  │ Int. Per-application load-shedding priority. Same semantics as
+                 │ Structure.powerPriority. Default 0.
 
 Checking whether a further application is allowed:
   COUNT(Structure_AppliedUpgrade WHERE structureId AND upgradeId) < StructureDef_Upgrade.maxApplications
@@ -746,8 +816,8 @@ selects one and the action resolves immediately with no further tracking needed.
   StructureDef_Upgrade_Effect    — individual effects of an upgrade (one row per effect; upgrades may have many)
   StructureDef_Upgrade_BuildCost — items required to apply an upgrade
   StructureDef_Upgrade_Relation  — REQUIRES / BLOCKS / UPGRADES rules between upgrades on the same def
-  Structure                      — a single installation within a camp; carries currentDurability and status
-  Structure_AppliedUpgrade       — record of each upgrade application on a structure
+  Structure                      — a single installation within a camp; carries currentDurability, status, filthLevel, and power runtime state
+  Structure_AppliedUpgrade       — record of each upgrade application; carries per-upgrade power consumer toggle and priority
   Structure_Storage              — join: links a storage-type Structure to a Storage; carries capacity/rot/type rules
   Structure_Storage_ItemType     — item types accepted by a structure storage
   Construction                   — active or completed build / upgrade / repair / rebuild project
