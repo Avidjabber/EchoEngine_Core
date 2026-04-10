@@ -977,6 +977,8 @@ model Entity {
   inspectionsAsMedic   EntityInspectionLog[] @relation("InspectionMedic")
   treatmentsGiven      EntityTreatmentLog[]  @relation("TreatmentMedic")
 
+  eventStepVotes       EventStepVote[]
+
   @@index([guildId, userId])
   @@index([factionId])
   @@index([rankId])
