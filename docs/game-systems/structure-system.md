@@ -120,8 +120,14 @@ their own StructureDefs.
              │ in StructureDef_ProductionConfig. Inputs (zero or more items consumed per
              │ cycle) in StructureDef_ProductionInput; outputs (one or more items produced
              │ per cycle) in StructureDef_ProductionOutput. Runtime cycle state tracked in
-             │ Structure_ProductionState. Entities can be stationed via Entity_StationAssignment
-             │ to boost cycle rate and earn XP. See section 4a for full detail.
+             │ Structure_ProductionState. Worker contribution scaled by workEfficiency from
+             │ StructureDef_WorkSlotConfig. See section 4a for full detail.
+  work_slot  │ Adds worker assignment slots to a structure. Can be combined with any other
+             │ type. Config defined in StructureDef_WorkSlotConfig. Entities assigned via
+             │ Entity_WorkAssignment (one per entity, independent of housing). Computes
+             │ workEfficiency each tick which scales worker-driven effects across all
+             │ structure types. Discipline requirements defined in
+             │ StructureDef_WorkSlotConfig_Requirement. See section 4a for full detail.
 
 VALID EFFECT TYPES PER CATEGORY
 ─────────────────────────────────
@@ -133,7 +139,8 @@ VALID EFFECT TYPES PER CATEGORY
               (interaction unlocks handled via StructureDef_Upgrade_CraftingInteraction, not effectType)
   compost:    conversion_speed | weight_capacity | volume_capacity | env_override | env_inject | damage_resistance | filth_reduction
   power:      fuel_capacity | fuel_efficiency | passive_gen_rate | env_override | env_inject | damage_resistance | filth_reduction
-  production: production_rate | staff_rate | powered_rate | station_capacity | station_xp_bonus | energy_drain_reduction | env_override | env_inject | damage_resistance | filth_reduction
+  production: production_rate | staff_rate | powered_rate | env_override | env_inject | damage_resistance | filth_reduction
+  work_slot:  work_slots | station_xp_bonus | energy_drain_reduction | env_override | env_inject | damage_resistance | filth_reduction
 
 
 ─────────────────────────────────────────────
@@ -322,17 +329,56 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
     structureId  FK → Structure (must be a housing-type structure; enforced at app layer)
     assignedAt   DateTime
 
-  Entity_StationAssignment tracks which production structure an entity is stationed at:
-    entityId       FK → Entity (@id — one active station per entity)
-    structureId    FK → Structure (must be a production-type structure; enforced at app layer)
-    assignedAt     DateTime
-    stationedUntil DateTime?. null = indefinite posting. When non-null, the worker
-                   automatically removes the assignment once this timestamp is reached.
-                   Indexed for efficient worker queries.
-    App layer enforces StructureDef_ProductionConfig.maxStations (null = unlimited) and
-    all StructureDef_ProductionConfig_StationRequirement discipline minimums at assignment time.
-    An entity's station assignment is independent of their housing assignment — a character
-    can be housed at a barracks and stationed at a well simultaneously.
+  Entity_WorkAssignment tracks which structure an entity is assigned to work at:
+    entityId      FK → Entity (@id — one active work assignment per entity)
+    structureId   FK → Structure (must have a StructureDef_WorkSlotConfig; enforced at app layer)
+    assignedAt    DateTime
+    assignedUntil DateTime?. null = indefinite posting. When non-null, the worker
+                  automatically removes the assignment once this timestamp is reached.
+                  Indexed for efficient worker queries.
+    App layer enforces WorkSlotConfig.totalSlots (+ upgrade additions) as the hard slot cap and
+    all StructureDef_WorkSlotConfig_Requirement discipline minimums as hard gates at assignment time.
+    An entity's work assignment is fully independent of their housing assignment — a character
+    can be housed at a barracks and work-assigned to a farm simultaneously.
+
+  StructureDef_WorkSlotConfig defines work slot mechanics for any structure def:
+    structureDefId    FK → StructureDef (@id)
+    totalSlots        Int. Base number of Entity_WorkAssignment slots. Increased by upgrades
+                      with effectType = work_slots. The app enforces this as a hard cap.
+    requiredSlots     Int. Minimum filled slots before workEfficiency > 0. Default 0 (always on).
+    energyCostPerHour Int. Energy drained from each active assigned entity per tick.
+                      Default 0 (no energy cost). "Active" means currentEnergy > 0.
+                      Entities at 0 energy remain assigned but contribute nothing.
+    disciplineDefId   FK → DisciplineDef?. Discipline that receives xpGrantPerHour XP each
+                      tick per active assigned entity. null = no XP reward. Any DisciplineDef
+                      row is valid including the stat progression row.
+    xpGrantPerHour    Float. XP granted to each active assigned entity per tick. Default 0.
+
+    workEfficiency is computed by the worker each tick:
+      filledSlots = count of Entity_WorkAssignment rows for this structure
+      if filledSlots < requiredSlots → workEfficiency = 0.0
+      else → workEfficiency = filledSlots / totalSlots
+
+    workEfficiency applies to worker-driven effects for every structure type:
+      production — scales the staffCyclesPerHour contribution (base rate unaffected)
+      farming    — scales growth rate bonuses contributed by workers
+      crafting   — scales crafting roll / output quantity bonuses from workers
+      medical    — scales treatment/recovery bonuses from workers
+      any type   — scales worker presence effects (multipliers, condition grants, plot buffs)
+                   fired from work_structure / work_colocated_entities / work_plots scopes
+
+    A WorkSlotConfig can exist on any structure type, including those with no production
+    config. Slots can exist purely to enable entity presence effects at the work structure
+    without driving any direct output — a farm can have a worker slot that doesn't accelerate
+    growth directly, but the assigned entity's abilities may passively buff nearby plots.
+
+  StructureDef_WorkSlotConfig_Requirement gates which entities may be work-assigned:
+    structureDefId  FK → StructureDef
+    disciplineDefId FK → DisciplineDef
+    minimumLevel    Int. Entity's level in this discipline must be >= this value to be assigned.
+                    Hard gate — entities below threshold cannot be assigned at all.
+    @@id([structureDefId, disciplineDefId])
+    Zero rows = any entity may be assigned (no requirements).
 
   StructureDef_FuelConfig  (for structureTypeId = power)
     Power-source structures generate fuel units that satisfy other structures
@@ -358,10 +404,11 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
     cycle fires, consuming inputs (if any) and producing outputs.
 
   The effective cycle rate each tick is:
-    effectiveRate = baseCyclesPerHour
-                  + Σ(envCondition stacks × cycleRatePerStack) [from _EnvCondition rows]
-                  + (stationsWithEnergy × staffCyclesPerHour)
-                  + (hasSatisfiedPowerSource ? poweredCyclesBonus : 0)
+    workEfficiency = (from StructureDef_WorkSlotConfig — see above)
+    effectiveRate  = baseCyclesPerHour
+                   + Σ(envCondition stacks × cycleRatePerStack) [from _EnvCondition rows]
+                   + (workEfficiency × workAssignedWithEnergy × staffCyclesPerHour)
+                   + (hasSatisfiedPowerSource ? poweredCyclesBonus : 0)
 
     structureDefId      FK → StructureDef
     baseCyclesPerHour   Float. Passive cycle rate with no staff and no power. Default 0
@@ -377,17 +424,9 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
                         baseCyclesPerHour + staff contribution when unpowered. Only set
                         StructureDef.isPowered = true if the structure must be fully
                         non-functional without power.
-    maxStations         Int?. Maximum entities that may be stationed simultaneously.
-                        null = unlimited. Default null.
-    energyCostPerHour   Int. Energy drained from each active stationed entity per tick.
-                        "Active" means currentEnergy > 0. Entities at 0 energy remain
-                        stationed but contribute nothing and drain nothing. Default 5.
-    disciplineDefId     FK → DisciplineDef?. Discipline that receives xpGrantPerHour
-                        XP per active stationed entity per tick. null = no XP reward.
-                        Any DisciplineDef row is valid, including the stat progression
-                        row. Defaults to crafting if set by guild.
-    xpGrantPerHour      Float. XP granted to each active stationed entity per tick.
-                        Default 0.
+    Note: slot count, requiredSlots, energy cost, XP grant, and discipline assignment
+    requirements are all defined on StructureDef_WorkSlotConfig / _Requirement, not here.
+    staffCyclesPerHour has no effect unless the structure also has a WorkSlotConfig.
     filthPerCycle       Float. Filth added to Structure.filthLevel per completed cycle.
                         Default 0. Stacks on top of StructureDef.dailyFilthAverage.
                         Lets active production generate proportional filth — a busy
@@ -400,12 +439,9 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
                       May be negative — a Drought could slow a well's output.
     @@id([structureDefId, envConditionId])
 
-  StructureDef_ProductionConfig_StationRequirement gates which entities may be stationed:
-    structureDefId  FK → StructureDef (must be a production-type def)
-    disciplineDefId FK → DisciplineDef
-    minimumLevel    Int. Entity's level in this discipline must be >= this value to station.
-    @@id([structureDefId, disciplineDefId])
-    Zero rows = any entity may be stationed (no requirements).
+  Note: discipline requirements and slot count for work assignment are now defined on
+  StructureDef_WorkSlotConfig / StructureDef_WorkSlotConfig_Requirement (see above),
+  not on the production config.
 
   StructureDef_ProductionInput defines items consumed per production cycle:
     structureDefId  FK → StructureDef (must be a production-type def)
@@ -437,10 +473,13 @@ StructureDef_BuildCost defines the items required to initiate the initial build:
     production_rate        — increases baseCyclesPerHour
     staff_rate             — increases staffCyclesPerHour
     powered_rate           — increases poweredCyclesBonus
-    station_capacity       — increases maxStations
+    env_override / env_inject / damage_resistance / filth_reduction — standard shared effects
+
+  Upgrade effects for any structure with a WorkSlotConfig:
+    work_slots             — increases totalSlots (more entities can be assigned)
     station_xp_bonus       — increases xpGrantPerHour
     energy_drain_reduction — decreases energyCostPerHour (floor 0)
-    env_override / env_inject / damage_resistance / filth_reduction — standard shared effects
+    requiredSlots is a blueprint value and cannot be changed by upgrades.
 
   Note on env condition rate modifiers vs. env_override upgrades: env conditions listed in
   StructureDef_ProductionConfig_EnvCondition modify the cycle rate while those conditions are
@@ -467,7 +506,7 @@ COMMON PRODUCTION CONFIGURATIONS
        baseCyclesPerHour      = (rate)
        staffCyclesPerHour     = 0
        poweredCyclesBonus     = 0
-       maxStations            = 0
+       (no work_slot type — no workers can be assigned)
      Ticks continuously with no player interaction. Suitable for ponds, springs, or ambient
      resource generators.
 

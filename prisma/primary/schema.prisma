@@ -954,7 +954,7 @@ model Entity {
 
   entityStorage          Entity_Storage[]
   housing                Entity_Housing?
-  stationAssignment      Entity_StationAssignment?
+  workAssignment         Entity_WorkAssignment?
   constructionsInitiated Construction[]
   plotBuffs              Plot_Buff[]
   locationEffects        Location_Effect[]
@@ -1384,8 +1384,8 @@ model DisciplineDef {
   recipeCraftingRequirements    Recipe_CraftingRequirement[]
   guildLevelCaps                Guild_DisciplineLevelCap[]
   eventEffects                  EventEffect[]
-  productionConfigs             StructureDef_ProductionConfig[]
-  productionStationRequirements StructureDef_ProductionConfig_StationRequirement[]
+  workSlotConfigs               StructureDef_WorkSlotConfig[]
+  workSlotRequirements          StructureDef_WorkSlotConfig_Requirement[]
 }
 
 // Per-guild per-discipline level cap override.
@@ -3240,27 +3240,28 @@ model Entity_Housing {
   @@index([structureId])
 }
 
-// Assigns an entity to a production-type structure as a stationed worker.
-// One row per entity — an entity can only be stationed at one structure at a time.
-// The structure must be of type "production" (enforced at app layer).
-// App layer enforces StructureDef_ProductionConfig.maxStations on assignment and
-// StructureDef_ProductionConfig_StationRequirement discipline minimums.
-// Each worker tick, stationed entities with currentEnergy > 0 contribute staffCyclesPerHour
-// to the structure's cycle rate and receive xpGrantPerHour XP and energyCostPerHour energy drain.
-// Entities at 0 energy remain stationed but contribute nothing until energy is restored.
-// stationedUntil: when non-null, the worker automatically removes this assignment once
-//                 the timestamp is reached. null = indefinite posting.
-model Entity_StationAssignment {
-  entityId       Int      @id
-  structureId    Int
-  assignedAt     DateTime  @default(now()) @db.Timestamptz
-  stationedUntil DateTime? @db.Timestamptz  // null = indefinite; non-null = auto-unassigned by worker at this time
+// Assigns an entity to a structure as a worker. One row per entity — an entity can only
+// be work-assigned to one structure at a time, independent of housing.
+// The structure must have a StructureDef_WorkSlotConfig (enforced at app layer).
+// App layer enforces WorkSlotConfig.totalSlots (+ upgrade additions) as the hard cap and
+// all StructureDef_WorkSlotConfig_Requirement discipline minimums as hard gates on assignment.
+// The worker computes workEfficiency each tick:
+//   filledSlots = count of Entity_WorkAssignment rows for this structure
+//   if filledSlots < requiredSlots → workEfficiency = 0.0 (structure non-functional for worker-driven effects)
+//   else → workEfficiency = filledSlots / totalSlots (0.25 at quarter capacity, etc.)
+// assignedUntil: when non-null, the worker automatically removes this assignment once the
+//               timestamp is reached. null = indefinite posting.
+model Entity_WorkAssignment {
+  entityId      Int      @id
+  structureId   Int
+  assignedAt    DateTime  @default(now()) @db.Timestamptz
+  assignedUntil DateTime? @db.Timestamptz  // null = indefinite; non-null = auto-unassigned by worker at this time
 
   entity    Entity    @relation(fields: [entityId],    references: [id], onDelete: Cascade)
   structure Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
 
   @@index([structureId])
-  @@index([stationedUntil])  // worker queries for expired assignments each tick
+  @@index([assignedUntil])  // worker queries for expired assignments each tick
 }
 
 // Camp structure inventory. Owned by a storage-type Structure.
@@ -3371,6 +3372,7 @@ model UpgradeEffectType {
   isCompost  Boolean @default(false)
   isPower      Boolean @default(false)  // valid for power-type structures (renamed from isFuel for consistency with StructureType name)
   isProduction Boolean @default(false)  // valid for production-type structures
+  isWorkSlot   Boolean @default(false)  // valid for any structure with a StructureDef_WorkSlotConfig
 
   requiresEnvTarget Boolean @default(false)
 
@@ -3428,7 +3430,8 @@ model StructureDef {
   productionInputs             StructureDef_ProductionInput[]
   productionOutputs            StructureDef_ProductionOutput[]
   productionEnvConditions      StructureDef_ProductionConfig_EnvCondition[]
-  productionStationRequirements StructureDef_ProductionConfig_StationRequirement[]
+  workSlotConfig               StructureDef_WorkSlotConfig?
+  workSlotRequirements         StructureDef_WorkSlotConfig_Requirement[]
   compostOutputs           Item_CompostOutput[]
   craftingInteractionRules   Guild_CraftingInteractionRule[]
   recipeCraftingRequirements Recipe_CraftingRequirement[]
@@ -3631,14 +3634,22 @@ model StructureDef_CompostConfig {
 }
 
 // Base config for production-type StructureDefs.
+// IMPORTANT: production-type defs MUST also have the storage type. Outputs are written to
+// the structure's Structure_Storage. The app enforces this at StructureDef creation.
+// (Same requirement as compost — both types produce items that land in the structure's storage.)
 //
 // Production structures generate item outputs on a cycle-based tick system.
 // Each worker tick the effective cycle rate is computed as:
 //
-//   effectiveRate = baseCyclesPerHour
-//                 + Σ(envCondition stacks × cycleRatePerStack) per active StructureDef_ProductionConfig_EnvCondition
-//                 + (stationsWithEnergy × staffCyclesPerHour)
-//                 + (hasSatisfiedPowerSource ? poweredCyclesBonus : 0)
+//   workEfficiency  = (see StructureDef_WorkSlotConfig for formula)
+//   effectiveRate   = baseCyclesPerHour
+//                   + Σ(envCondition stacks × cycleRatePerStack) per active StructureDef_ProductionConfig_EnvCondition
+//                   + (workEfficiency × workAssignedWithEnergy × staffCyclesPerHour)
+//                   + (hasSatisfiedPowerSource ? poweredCyclesBonus : 0)
+//
+// workAssignedWithEnergy: count of Entity_WorkAssignment rows for this structure where the
+//   entity's currentEnergy > 0. Requires the structure to also have a StructureDef_WorkSlotConfig.
+//   If no WorkSlotConfig exists, staffCyclesPerHour has no effect (no workers can be assigned).
 //
 // Fractional cycles accumulate in Structure_ProductionState.accumulatedCycles and carry over
 // between ticks. Each completed whole cycle:
@@ -3653,16 +3664,9 @@ model StructureDef_CompostConfig {
 // Production structures MUST also have the storage type — outputs land in the structure's
 // own Structure_Storage and flow from there like any stored item.
 //
-// Staffing:
-//   maxStations:        null = unlimited; non-null = hard cap enforced at assignment.
-//   staffCyclesPerHour: contribution per stationed entity that currently has energy > 0.
-//   energyCostPerHour:  energy drained from each active (energy > 0) stationed entity per tick.
-//   disciplineDefId:    discipline that receives xpGrantPerHour per active stationed entity
-//                       per tick. null = no XP reward. Any DisciplineDef row is valid,
-//                       including the stat progression row.
-//   xpGrantPerHour:     XP awarded per active stationed entity per tick.
-//   Station requirements: defined per discipline in StructureDef_ProductionConfig_StationRequirement.
-//                       Entities below the minimum level for any requirement cannot be stationed.
+// Staffing (production-specific per-worker effect — slot count, requirements, energy cost,
+//   and XP grant all live on StructureDef_WorkSlotConfig):
+//   staffCyclesPerHour: contribution per work-assigned entity with energy > 0, scaled by workEfficiency.
 //
 // Power:
 //   poweredCyclesBonus: added to the effective rate when the structure has a satisfied active
@@ -3678,16 +3682,11 @@ model StructureDef_CompostConfig {
 model StructureDef_ProductionConfig {
   structureDefId      Int   @id
   baseCyclesPerHour   Float @default(0)  // passive cycle rate with no staff and no power; 0 = purely staff/power-driven
-  staffCyclesPerHour  Float @default(0)  // extra cycles/hr per stationed entity with energy > 0
+  staffCyclesPerHour  Float @default(0)  // base cycles/hr per work-assigned entity with energy > 0, scaled by workEfficiency
   poweredCyclesBonus  Float @default(0)  // extra cycles/hr when a satisfied power source is active; 0 = power has no effect
-  maxStations         Int?               // null = unlimited stations; non-null = hard cap enforced at assignment
-  energyCostPerHour   Int   @default(5)  // energy drained from each active stationed entity per tick
-  disciplineDefId     Int?               // discipline that receives XP per active stationed entity; null = no XP
-  xpGrantPerHour      Float @default(0)  // XP granted to each active stationed entity per tick
   filthPerCycle       Float @default(0)  // filth added to Structure.filthLevel per completed cycle; 0 = no cycle-driven filth
 
   structureDef  StructureDef   @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
-  disciplineDef DisciplineDef? @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
 }
 
 // Env conditions that modify the cycle rate for a production structure.
@@ -3706,13 +3705,48 @@ model StructureDef_ProductionConfig_EnvCondition {
   @@index([envConditionId])
 }
 
-// Discipline level requirements for stationing an entity at a production structure.
-// All listed requirements must be satisfied before an entity may be assigned via
-// Entity_StationAssignment. Zero rows = any entity may be stationed.
-model StructureDef_ProductionConfig_StationRequirement {
+// Work slot configuration for any StructureDef. Defines how many workers can be assigned
+// and the minimum required for worker-driven effects to apply.
+//
+// totalSlots:    base number of Entity_WorkAssignment slots available. Increased by upgrades
+//                with effectType = work_slots. The app enforces this as a hard cap on assignment.
+// requiredSlots: minimum filled slots before workEfficiency > 0. 0 = always functional.
+//                If filledSlots < requiredSlots, worker-driven effects are fully suspended
+//                (presence effects, staffCyclesPerHour, growth bonuses, etc.).
+//                requiredSlots is a blueprint property — upgrades cannot change it.
+//
+// workEfficiency = filledSlots < requiredSlots ? 0.0 : filledSlots / totalSlots
+//
+// Per-worker passive effects (applied each worker tick to each active assigned entity):
+//   energyCostPerHour: energy drained from each work-assigned entity with currentEnergy > 0.
+//                      0 = working here costs no energy.
+//   disciplineDefId:   discipline that receives xpGrantPerHour XP each tick. null = no XP.
+//                      Any DisciplineDef row is valid including the stat progression row.
+//   xpGrantPerHour:    XP granted per active assigned entity per tick. 0 = no XP.
+//
+// The work_slot StructureType must be assigned to the def via StructureDef_StructureType.
+// It can be combined with any other type (e.g. farming + work_slot, housing + medical + work_slot).
+// The slot system is independent of what the structure does — slots can exist purely to
+// enable entity presence effects at the work structure without driving any direct production or bonus.
+model StructureDef_WorkSlotConfig {
+  structureDefId    Int   @id
+  totalSlots        Int           // base worker capacity; increased by work_slots upgrade effect
+  requiredSlots     Int   @default(0)   // minimum filled for worker effects to activate; 0 = always on
+  energyCostPerHour Int   @default(0)   // energy drained from each active assigned entity per tick; 0 = no cost
+  disciplineDefId   Int?               // discipline that receives XP each tick; null = no XP reward
+  xpGrantPerHour    Float @default(0)  // XP granted to each active assigned entity per tick
+
+  structureDef  StructureDef   @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  disciplineDef DisciplineDef? @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
+}
+
+// Discipline level requirements for work assignment at a structure.
+// All listed requirements are hard gates — entities below the minimum level for any row
+// cannot be assigned via Entity_WorkAssignment. Zero rows = any entity may be assigned.
+model StructureDef_WorkSlotConfig_Requirement {
   structureDefId  Int
   disciplineDefId Int
-  minimumLevel    Int  // entity's discipline level must be >= this value
+  minimumLevel    Int  // entity's discipline level must be >= this value to be assigned
 
   structureDef  StructureDef  @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
   disciplineDef DisciplineDef @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
@@ -4000,7 +4034,7 @@ model Structure {
   residents        Entity_Housing[]
   compostDeposits  Structure_CompostDeposit[]
   productionState  Structure_ProductionState?
-  stations         Entity_StationAssignment[]
+  workAssignments  Entity_WorkAssignment[]
 
   @@index([campId])
   @@index([structureDefId])
