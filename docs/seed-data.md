@@ -400,6 +400,19 @@ Each type has a corresponding config table (except storage, which uses Structure
             —                               scope camp:      satisfies all isPowered in the same camp
             —                               scope location:  satisfies all isPowered across all camps in the location
             —                               scope faction:   satisfies all isPowered across the entire faction
+  production  StructureDef_ProductionConfig   cycle-based item generation; MUST pair with storage;
+              —                               inputs:  zero or more StructureDef_ProductionInput rows (items consumed per cycle)
+              —                               outputs: one or more StructureDef_ProductionOutput rows (items produced per cycle, with dropChance)
+              —                               baseCyclesPerHour: passive rate with no staff/power; 0 = purely staff/power-driven
+              —                               staffCyclesPerHour: extra cycles/hr per stationed entity with energy > 0
+              —                               poweredCyclesBonus: extra cycles/hr when a satisfied power source is active (soft boost)
+              —                               maxStations: null = unlimited; non-null = hard cap on Entity_StationAssignment rows
+              —                               energyCostPerHour: energy drained per active stationed entity per tick
+              —                               disciplineDefId + xpGrantPerHour: XP granted to each active stationed entity per tick
+              —                               filthPerCycle: filth added to Structure.filthLevel per completed cycle (0 = no cycle-driven filth)
+              —                               StructureDef_ProductionConfig_EnvCondition: per-condition cycle rate modifiers (may be negative)
+              —                               StructureDef_ProductionConfig_StationRequirement: discipline level gates for Entity_StationAssignment
+              —                               Entity_StationAssignment.stationedUntil: null = indefinite; non-null = worker auto-unassigns at this time
 
 
 ──────────────────────────────────────────────
@@ -450,33 +463,39 @@ Column meanings:
                       etc. because each structure type has its own flag column. For "all"
                       effects this is true; for type-specific effects it matches the type.
 
-  name                  validFor                                    requiresEnvTarget  isPower
-  ────────────────────  ──────────────────────────────────────────  ─────────────────  ───────
-  solid_capacity        storage                                     false              false
-  liquid_capacity       storage                                     false              false
-  rot_modifier          storage                                     false              false
-  security_rating       storage                                     false              false
-  plot_count            farming                                     false              false
-  growth_rate           farming                                     false              false
-  env_override          all                                         true               true
-  env_inject            all                                         true               true
-  soil_quality          farming                                     false              false
-  comfortable_capacity  housing                                     false              false
-  max_capacity          housing                                     false              false
-  treatment_bonus       medical                                     false              false
-  exam_bonus            medical                                     false              false
-  recovery_modifier     medical                                     false              false
-  contagion_resist      medical                                     false              false
-  crafting_roll_bonus   crafting                                    false              false
-  output_quantity_bonus crafting                                    false              false
-  conversion_speed      compost                                     false              false
-  fuel_capacity         power                                       false              true
-  fuel_efficiency       power                                       false              true
-  passive_gen_rate      power                                       false              true
-  weight_capacity       compost                                     false              false
-  volume_capacity       compost                                     false              false
-  damage_resistance     all                                         false              true
-  filth_reduction       all                                         false              true
+  name                   validFor                                    requiresEnvTarget  isPower  isProduction
+  ─────────────────────  ──────────────────────────────────────────  ─────────────────  ───────  ────────────
+  solid_capacity         storage                                     false              false    false
+  liquid_capacity        storage                                     false              false    false
+  rot_modifier           storage                                     false              false    false
+  security_rating        storage                                     false              false    false
+  plot_count             farming                                     false              false    false
+  growth_rate            farming                                     false              false    false
+  env_override           all                                         true               true     true
+  env_inject             all                                         true               true     true
+  soil_quality           farming                                     false              false    false
+  comfortable_capacity   housing                                     false              false    false
+  max_capacity           housing                                     false              false    false
+  treatment_bonus        medical                                     false              false    false
+  exam_bonus             medical                                     false              false    false
+  recovery_modifier      medical                                     false              false    false
+  contagion_resist       medical                                     false              false    false
+  crafting_roll_bonus    crafting                                    false              false    false
+  output_quantity_bonus  crafting                                    false              false    false
+  conversion_speed       compost                                     false              false    false
+  fuel_capacity          power                                       false              true     false
+  fuel_efficiency        power                                       false              true     false
+  passive_gen_rate       power                                       false              true     false
+  weight_capacity        compost                                     false              false    false
+  volume_capacity        compost                                     false              false    false
+  damage_resistance      all                                         false              true     true
+  filth_reduction        all                                         false              true     true
+  production_rate        production                                  false              false    true
+  staff_rate             production                                  false              false    true
+  powered_rate           production                                  false              false    true
+  station_capacity       production                                  false              false    true
+  station_xp_bonus       production                                  false              false    true
+  energy_drain_reduction production                                  false              false    true
 
 
 ──────────────────────────────────────────────
