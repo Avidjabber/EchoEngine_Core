@@ -213,7 +213,7 @@ RelationType
 Developer-seeded only. Boolean flags control which systems each value is valid for.
 
   name        isConditionSystem  isStructureSystem  isSkillSystem  isItemSystem  isCraftingSystem   isEnvConditionSystem  isOwnershipSystem
-  ──────────  ─────────────────  ─────────────────  ─────────────  ────────────  ────────────────   ────────────────────  ────────────────────
+  ──────────  ─────────────────  ─────────────────  ─────────────  ────────────  ────────────────   ────────────────────  ─────────────────
   requires    false              true               true           false         true               true                  false
   block       true               true               true           false         false              true                  false
   upgrades    false              true               true           false         false              false                 false
@@ -238,19 +238,21 @@ EffectType                              [ DONE ]
 Developer-seeded only. Boolean flags control which systems each value is valid for.
 Also used for Plot_Buff.effectTypeId — valid plot buff types are those with isPlant = true.
 isEnvModifier = true marks types valid for EnvCondition_Modifier (per-guild world effects; guilds define their own values, no global defaults).
+isLocation = true marks types valid for Location_Effect writes (location-wide temporary buffs/debuffs, e.g. spawn weights, hunting difficulty); used as locationBuffEffectTypeId on EventEffect.
+isEvent = true marks types valid for EventEffect.effectTypeId — see EventEffectType section for the full list.
 
-  name              isItem  isPlant  isSpecies  isAbility  isEnvModifier
-  ──────────        ──────  ───────  ─────────  ─────────  ─────────────
-  spawn_rate        true    true     true       false      false
-  spawn_weight      true    true     true       false      false
-  growth_rate       false   true     true       true       false
-  harvest_yeild     false   true     false      true       false
-  rot_rate          true    true     false      true       false
-  damage_resistance false   false    false      true       false
-  cultivation       false   true     false      false      false
-  survival          false   true     false      false      false
-  filth             false   false    false      false      true
-  spoilage          false   false    false      false      true
+  name              isItem  isPlant  isSpecies  isAbility  isEnvModifier  isLocation  isEvent
+  ──────────        ──────  ───────  ─────────  ─────────  ─────────────  ──────────  ───────
+  spawn_rate        true    true     true       false      false          true        false
+  spawn_weight      true    true     true       false      false          true        false
+  growth_rate       false   true     true       true       false          true        false
+  harvest_yeild     false   true     false      true       false          true        false
+  rot_rate          true    true     false      true       false          true        false
+  damage_resistance false   false    false      true       false          false       false
+  cultivation       false   true     false      false      false          false       false
+  survival          false   true     false      false      false          false       false
+  filth             false   false    false      false      true           false       false
+  spoilage          false   false    false      false      true           false       false
 
 
 ──────────────────────────────────────────────
@@ -266,26 +268,28 @@ AbilityEffectType                       [ DONE ]
   xp_grant          grants discipline XP to the ability holder
 
 ──────────────────────────────────────────────
-AbilityTargetType                       [ DONE ]
+TargetType                              [ DONE ]
 ──────────────────────────────────────────────
-  name
-  ──────────
-  discipline_xp
-  drop_plant
-  drop_species
-  drop_forage
-  drop_item
-  crafting_yield
-  crafting_quantity
-  recovery_rate
-  energy_cost
-  treatment_given
-  treatment_recieved
-  constuction_speed
-  faction_rep
-  scouting_range
-  healing_recieved
-  healing_given
+isAbility = true — valid for Ability_MultiplierEffect / Ability_PresenceEffect.
+
+  name                 isAbility
+  ──────────           ─────────
+  discipline_xp        true
+  drop_plant           true
+  drop_species         true
+  drop_forage          true
+  drop_item            true
+  crafting_yield       true
+  crafting_quantity    true
+  recovery_rate        true
+  energy_cost          true
+  treatment_given      true
+  treatment_recieved   true
+  constuction_speed    true
+  faction_rep          true
+  scouting_range       true
+  healing_recieved     true
+  healing_given        true
 
 ──────────────────────────────────────────────
 AbilityThresholdType                    [ DONE ]
@@ -396,6 +400,36 @@ Each type has a corresponding config table (except storage, which uses Structure
             —                               scope camp:      satisfies all isPowered in the same camp
             —                               scope location:  satisfies all isPowered across all camps in the location
             —                               scope faction:   satisfies all isPowered across the entire faction
+
+
+──────────────────────────────────────────────
+ConstructionType                        [ DONE ]
+──────────────────────────────────────────────
+Developer-seeded only. Identifies the kind of work a Construction record
+represents. Referenced via constructionTypeId FK on the Construction model.
+Guilds cannot add or modify these values.
+
+  name     Purpose
+  ───────  ──────────────────────────────────────────────────────────────────
+  build    Initial construction of a new structure from a StructureDef.
+           On completion: Structure.status → active; currentDurability set to
+           StructureDef.baseDurability.
+
+  upgrade  Applying a specific StructureDef_Upgrade to an existing structure.
+           Construction.upgradeId is required (non-null). On completion:
+           Structure_AppliedUpgrade row created; upgrade effects apply immediately.
+           For plot_count upgrades, new Plot rows are also created.
+
+  repair   Restoring a broken structure's durability. Item cost is proportional
+           to the damage fraction at initiation time (repairCostProportion).
+           On completion: Structure.currentDurability restored to baseDurability;
+           Structure.status → active.
+
+  rebuild  Demolishing and reconstructing a destroyed structure in one pass,
+           restoring all upgrades that were recorded at initiation. Item cost
+           covers the full build cost plus all prior upgrade costs. On completion:
+           all prior Structure_AppliedUpgrade rows replaced; Structure.status →
+           active; currentDurability restored to baseDurability.
 
 
 ──────────────────────────────────────────────
@@ -913,10 +947,15 @@ EventTriggerType                        [ DONE ]
 ──────────────────────────────────────────────
 Values:
   admin
-  activity
+  patrol
+  hunt
+  crafting
+  foraging
+  clean
   weather_onset
-  filth
+  threshold
   daily
+  hourly
 
 
 ──────────────────────────────────────────────
@@ -926,42 +965,82 @@ Values:
   global
   faction
   action
+  camp
 
 
 ──────────────────────────────────────────────
 EventStepType                           [ DONE ]
 ──────────────────────────────────────────────
+Each type has exactly one responsibility. See event-system.md section 5 for full details.
+
+  narrative          — displays prompt text; anyone clicks 'next' → nextStepId
+  narrative_random   — displays prompt text; anyone clicks 'next'; worker rolls weighted
+                       EventStepRandomBranch table to determine nextStepId
+  choice_solo        — displays prompt + N choice buttons; first participant to click decides
+  choice_leader      — same as choice_solo but only the group leader may interact
+  choice_consensus   — all participants vote; plurality winner decides; ties broken by lowest
+                       sortOrder; if window elapses, tallies existing votes (cancels if none)
+  proficiency_check  — displays prompt + 'roll' button; worker rolls the configured proficiency
+                       for the scoped participant(s) against checkDifficulty;
+                       routes to passStepId (success) or failStepId (failure)
+  condition_check    — automatic; checks whether scoped participant(s) have conditionCheckDefId
+                       active; routes to passStepId (has condition) or failStepId (does not)
+  item_check         — automatic; checks whether scoped participant(s) carry the required item
+                       (itemCheckItemId or any item of itemCheckItemTypeId) in at least
+                       itemCheckMinQuantity; routes to passStepId or failStepId
+  threshold_check    — automatic; reads a world-state value (thresholdCheckTypeId) and compares
+                       to thresholdCheckValue; routes to passStepId or failStepId
+  combat             — displays prompt + 'initiate' button; spawns ActiveCombat;
+                       resolves to winStepId or loseStepId
+  effect             — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
+                       → nextStepId (null = event ends naturally)
+  exit               — terminal; optional closing text; marksUnresolved / endsAction flags; no nextStepId
+
+
+──────────────────────────────────────────────
+EventThresholdType                      [ DONE ]
+──────────────────────────────────────────────
 Values:
-  narrative
-  choice
-  combat
+  filth
 
 
 ──────────────────────────────────────────────
 EventParticipantScope                   [ DONE ]
 ──────────────────────────────────────────────
-  name               appliesToAll  appliesToRandom  appliesToLeader  appliesToGroup
-  all_participants   true          false            false            false
-  random_participant false         true             false            false
-  leader             false         false            true             false
-  group              false         false            false            true
+  name               appliesToAll  appliesToRandom  appliesToLeader  appliesToGroup  appliesToHoused
+  all_participants   true          false            false            false            false
+  random_participant false         true             false            false            false
+  leader             false         false            true             false            false
+  group              false         false            false            true             false
+  housed_entities    false         false            false            false            true
 
 
 ──────────────────────────────────────────────
 EventEffectType                         [ DONE ]
 ──────────────────────────────────────────────
-Values:
-  condition
-  item
+These are EffectType rows with isEvent = true. The effectTypeId on EventEffect references this table.
+
+  name                    notes
+  ────────────────────    ─────────────────────────────────────────────────────────────────────────────
+  condition               apply or remove a ConditionDef on targets
+  item                    add or remove items from target inventories (fixed item, itemType, or dropTableId roll)
+  location_buff           apply a temporary location-wide buff/debuff (locationBuffEffectTypeId + locationBuffValue)
+  stat_modifier           apply a temporary stat bonus/penalty (statModifierStatId + statModifierValue)
+  proficiency_modifier    apply a temporary proficiency modifier, advantage, or disadvantage
+  faction_rep             grant or remove faction reputation (factionRepValue)
+  discipline_xp           grant discipline experience (disciplineXpDisciplineDefId + disciplineXpValue)
+  structure_damage        deal flat or proportional damage to structures in the camp (structureDamageValue + fields)
+  action_output_modifier  multiply the output quantity of the triggering action (outputMultiplier); action-scoped only
+  event_weight_modifier   add a positive or negative modifier to another event's spawn weight
+                          (eventWeightTargetEventDefId + eventWeightValue + eventWeightDurationHours)
 
 
 ──────────────────────────────────────────────
-EventCheckMode                          [ DONE ]
+EventCheckMode — REMOVED
 ──────────────────────────────────────────────
-Values:
-  individual        — each participant rolls independently
-  faction_average   — average roll across all event participants
-  leader_designates — the group leader makes the choice on behalf of everyone
+Skill/stat checks on choices were removed from the event system. Choices are purely
+player-driven (deterministic navigation). System-driven randomness is handled by the
+narrative_random step type and its EventStepRandomBranch weight table.
 
 
 ═══════════════════════════════════════════════════════════════════════

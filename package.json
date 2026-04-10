@@ -11,7 +11,8 @@
     "db:migrate:dev:primary": "prisma migrate dev --schema=prisma/primary/schema.prisma",
     "db:migrate:deploy:primary": "prisma migrate deploy --schema=prisma/primary/schema.prisma",
     "db:push:primary": "prisma db push --schema=prisma/primary/schema.prisma",
-    "db:studio:primary": "prisma studio --schema=prisma/primary/schema.prisma"
+    "db:studio:primary": "prisma studio --schema=prisma/primary/schema.prisma",
+    "db:seed": "ts-node --project tsconfig.seed.json prisma/seed.ts"
   },
   "devDependencies": {
     "prisma": "^7.5.0",

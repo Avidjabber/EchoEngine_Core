@@ -237,6 +237,8 @@ model EffectType {
   isSpecies       Boolean @default(false)
   isAbility       Boolean @default(false)
   isEnvModifier   Boolean @default(false)  // valid for EnvCondition_Modifier (global world effects e.g. filth, spoilage)
+  isLocation      Boolean @default(false)  // valid for Location_Buff (location-wide effects e.g. crop growth, hunting difficulty)
+  isEvent         Boolean @default(false)  // valid for EventEffect (event outcome effects)
 
   plantDefEnvConditionEffect      PlantDef_EnvConditionEffect[]
   plantTypeEnvConditionEffect     PlantType_EnvConditionEffect[]
@@ -247,8 +249,23 @@ model EffectType {
   abilityPresenceEffects          Ability_PresenceEffect[]
   plotBuffs                       Plot_Buff[]
   envConditionModifiers           EnvCondition_Modifier[]
+  locationEffects                 Location_Effect[]
+  eventLocationBuffEffects        EventEffect[]                 @relation("EventLocationBuffEffect")
+  eventEffects                    EventEffect[]
 }
 
+
+// Engine-seeded lookup table. Identifies the kind of work a Construction record represents.
+// build:   initial construction of a new structure from a StructureDef.
+// upgrade: applying a specific StructureDef_Upgrade to an existing structure.
+// repair:  restoring a broken structure's durability (partial item cost proportional to damage).
+// rebuild: reconstructing a destroyed structure and restoring all prior upgrades in one pass.
+model ConstructionType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  constructions Construction[]
+}
 
 // Unified status table for entities and structures.
 // isEntity / isStructure flags indicate which systems each value applies to.
@@ -296,7 +313,6 @@ model Stat {
 
   envConditionModifiers  EnvCondition_StatModifier[]
   conditionStatEffects   ConditionDef_StatEffect[]
-  eventChoiceDefs        EventChoiceDef[]
   proficiencyDefs        ProficiencyDef[]
   profilesAsDamageStat   ItemEquipmentProfile[]   @relation("ProfileDamageStat")
   profilesAsHitStat      ItemEquipmentProfile[]   @relation("ProfileHitStat")
@@ -308,6 +324,7 @@ model Stat {
   speciesActionStepDefaults    Species_ActionStep[]               @relation("SpeciesActionStepDefaultStat")
   guildSpeciesActionStepConfigs Guild_Species_ActionStep_Config[] @relation("GuildSpeciesActionStepStat")
   combatStatEffectMods         CombatStatEffectDef_StatMod[]      @relation("CombatStatEffectDef_StatMod")
+  eventEffectStatModifiers     EventEffect[]                       @relation("EventEffectStatModifier")
 }
 
 // Symptom labels — shared between ConditionDef (via ConditionDef_SymptomTag) and ItemEffect.
@@ -332,6 +349,7 @@ model DropTable {
   guildBiomeDrops     Guild_BiomeDrop[]          // per-guild biome gather yield assignments
   combatParticipants  ActiveCombat_Participant[]  // snapshotted per-participant at combat spawn
   plantDefHarvests    PlantDef[]                 @relation("PlantDefHarvestDrop")
+  eventItemEffects    EventEffect[]              @relation("EventEffectDropTable")
   @@index([guildId])
 }
 
@@ -937,6 +955,7 @@ model Entity {
   housing                Entity_Housing?
   constructionsInitiated Construction[]
   plotBuffs              Plot_Buff[]
+  locationEffects        Location_Effect[]
   dailyActionRecords     Action_EntityDailyRecord[]
 
   actionParticipations  ActionInstance_Entity[]
@@ -957,6 +976,8 @@ model Entity {
   inspectionsAsPatient EntityInspectionLog[] @relation("InspectionPatient")
   inspectionsAsMedic   EntityInspectionLog[] @relation("InspectionMedic")
   treatmentsGiven      EntityTreatmentLog[]  @relation("TreatmentMedic")
+
+  eventStepVotes       EventStepVote[]
 
   @@index([guildId, userId])
   @@index([factionId])
@@ -1071,8 +1092,9 @@ model EntityCondition {
   conditionDefId Int
   bodyPartId     Int?
 
-  sourceEntityId   Int?  // entity whose action applied this condition; null for natural onset
-  linkedConditionId Int? // paired EntityCondition on another entity (e.g. Grappling ↔ Grappled)
+  sourceEntityId      Int?  // entity whose action applied this condition; null for natural onset
+  sourceActiveEventId Int?  // set when applied by an ongoing ActiveEvent; persists until that event resolves
+  linkedConditionId   Int?  // paired EntityCondition on another entity (e.g. Grappling ↔ Grappled)
 
   onsetAt          DateTime? @db.Timestamptz
   progressionValue Float @default(1.0) // starts at 1.0; roll below difficultyRating → increases; treatment subtracts directly
@@ -1095,9 +1117,10 @@ model EntityCondition {
 
   updatedAt DateTime @updatedAt @db.Timestamptz
 
-  entity          Entity               @relation("EntityConditions",    fields: [entityId],          references: [id], onDelete: Cascade)
-  sourceEntity    Entity?              @relation("AppliedConditions",   fields: [sourceEntityId],    references: [id], onDelete: SetNull)
-  linkedCondition EntityCondition?     @relation("LinkedConditions",    fields: [linkedConditionId], references: [id], onDelete: SetNull)
+  entity            Entity               @relation("EntityConditions",      fields: [entityId],             references: [id], onDelete: Cascade)
+  sourceEntity      Entity?              @relation("AppliedConditions",     fields: [sourceEntityId],       references: [id], onDelete: SetNull)
+  sourceActiveEvent ActiveEvent?         @relation("EventAppliedConditions", fields: [sourceActiveEventId],  references: [id], onDelete: SetNull)
+  linkedCondition   EntityCondition?     @relation("LinkedConditions",      fields: [linkedConditionId],    references: [id], onDelete: SetNull)
   linkedBy        EntityCondition[]    @relation("LinkedConditions")
   condition       ConditionDef         @relation(fields: [conditionDefId],    references: [id], onDelete: Restrict)
   bodyPart        BodyPart?            @relation(fields: [bodyPartId],        references: [id], onDelete: Restrict)
@@ -1112,6 +1135,7 @@ model EntityCondition {
   @@index([entityId])
   @@index([conditionDefId])
   @@index([sourceEntityId])
+  @@index([sourceActiveEventId])
   @@index([linkedConditionId])
   @@index([appliedInCombatId])
   @@index([appliedByActionId])
@@ -1299,10 +1323,11 @@ model ProficiencyDef {
   conditionEffects             ConditionDef_ProficiencyEffect[]
   abilityProficiencyModifiers  Ability_ProficiencyModifier[]
   envConditionMods             EnvCondition_ProficiencyModifier[]
-  eventChoiceDefs              EventChoiceDef[]
   combatActionConditions       ItemEquipmentProfile_Condition[]
   actionStepConfigs            Guild_ActionStep_Config[]
   guildSpeciesActionStepConfigs Guild_Species_ActionStep_Config[]
+  eventEffects                 EventEffect[]
+  eventCheckSteps              EventStepDef[] @relation("StepProficiencyCheck")
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -1356,6 +1381,7 @@ model DisciplineDef {
   craftingInteractionRules      Guild_CraftingInteractionRule[]
   recipeCraftingRequirements    Recipe_CraftingRequirement[]
   guildLevelCaps                Guild_DisciplineLevelCap[]
+  eventEffects                  EventEffect[]
 }
 
 // Per-guild per-discipline level cap override.
@@ -1592,9 +1618,10 @@ model Ability_ProficiencyModifier {
   @@index([proficiencyDefId])
 }
 
-model AbilityTargetType {
-  id    Int    @id @default(autoincrement())
-  name  String @unique @db.VarChar(100)
+model TargetType {
+  id        Int    @id @default(autoincrement())
+  name      String @unique @db.VarChar(100)
+  isAbility Boolean @default(false)  // valid for ability multiplier/presence effects
 
   abilityMultiplierEffect Ability_MultiplierEffect[]
   abilityPresenceEffects  Ability_PresenceEffect[]
@@ -1617,7 +1644,7 @@ model Ability_MultiplierEffect {
   abilityDef   AbilityDef    @relation(fields: [abilityDefId],   references: [id], onDelete: Cascade)
   biome        Biome?        @relation(fields: [biomeId],        references: [id], onDelete: Restrict)
   weatherState WeatherState? @relation(fields: [weatherStateId], references: [id], onDelete: Restrict)
-  abilityTargetType AbilityTargetType @relation(fields: [targetTypeId], references: [id], onDelete: Restrict)
+  abilityTargetType TargetType @relation(fields: [targetTypeId], references: [id], onDelete: Restrict)
 
 
   @@index([abilityDefId])
@@ -1839,7 +1866,7 @@ model Ability_PresenceEffect {
   conditionDefId Int?
 
   // abilityEffectType = "multiplier"
-  multiplierTargetTypeId Int?   // FK → AbilityTargetType; tells the app which table targetId points to
+  multiplierTargetTypeId Int?   // FK → TargetType; tells the app which table targetId points to
   multiplierValue        Float?
   targetId               Int?   // polymorphic narrow: e.g. disciplineDefId for discipline_xp, factionId for faction_rep_gain; null = all
 
@@ -1853,7 +1880,7 @@ model Ability_PresenceEffect {
   abilityEffectType    AbilityEffectType  @relation(fields: [abilityEffectTypeId],     references: [id], onDelete: Restrict)
   stackBehavior        StackBehavior      @relation(fields: [stackBehaviorId],         references: [id], onDelete: Restrict)
   conditionDef         ConditionDef?      @relation(fields: [conditionDefId],          references: [id], onDelete: Restrict)
-  multiplierTargetType AbilityTargetType? @relation(fields: [multiplierTargetTypeId],  references: [id], onDelete: Restrict)
+  multiplierTargetType TargetType? @relation(fields: [multiplierTargetTypeId],  references: [id], onDelete: Restrict)
   effectType           EffectType?        @relation(fields: [effectTypeId],            references: [id], onDelete: Restrict)
 
   @@index([abilityDefId])
@@ -1952,6 +1979,7 @@ model ConditionDef {
   combatEffects         ConditionDef_CombatEffect[]
   combatStatEffects     ConditionDef_CombatStatEffect[]
   eventConditionEffects EventEffect[]
+  eventCheckSteps       EventStepDef[] @relation("StepConditionCheck")
   combatActions         ItemEquipmentProfile_Condition[]
   itemWarnings          ItemWarning[]
   entityConditions      EntityCondition[]
@@ -2248,6 +2276,7 @@ model ItemType {
   items                Item_Type[]
   structureStorageTypes Structure_Storage_ItemType[]
   eventEffects         EventEffect[]
+  eventCheckSteps      EventStepDef[] @relation("StepItemTypeCheck")
 }
 
 // Reusable warning labels for items — e.g. "Dangerous for kits", "Dangerous for elders"
@@ -2704,6 +2733,7 @@ model Item {
 
   actionOutputs          ItemAction_Output[]  @relation("ItemActionOutputItem")  // back-relation: this item appears as an output of these actions
   eventItemEffects       EventEffect[]
+  eventCheckSteps        EventStepDef[] @relation("StepItemCheck")
   speciesDefaultLoadouts SpeciesDefaultLoadout[]
   rankDefaultItems              Rank_DefaultItem[]
   conditionGrants               ConditionDef_GrantedItem[]
@@ -3205,17 +3235,18 @@ model Entity_Housing {
 }
 
 // Camp structure inventory. Owned by a storage-type Structure.
-// expirationModifier: driven by StructureDef_StorageConfig base value + rot_modifier upgrade deltas; recomputed when upgrades apply.
+// solidCapacity / liquidCapacity: driven by StructureDef_StorageConfig base values + solid_capacity / liquid_capacity upgrade deltas; recomputed when upgrades apply.
+// rotModifier: driven by StructureDef_StorageConfig.baseRotModifier + rot_modifier upgrade deltas; recomputed when upgrades apply.
 // isPrimaryStorage: faction's designated primary for its accepted item types.
 // acceptedTypes: item must match at least one accepted type to be stored here.
 model Structure_Storage {
-  structureId        Int   @id
-  storageId          Int   @unique
-  weightCapacity     Float?
-  fluidCapacity      Float?
-  expirationModifier Float   @default(1.0)
-  isPrimaryStorage   Boolean @default(false)
-  securityRating     Int     @default(0)  // effective sum of security_rating upgrade deltas; read by event system for theft/raid event weights
+  structureId    Int   @id
+  storageId      Int   @unique
+  solidCapacity  Float?
+  liquidCapacity Float?
+  rotModifier    Float   @default(1.0)
+  isPrimaryStorage Boolean @default(false)
+  securityRating   Int     @default(0)  // effective sum of security_rating upgrade deltas; read by event system for theft/raid event weights
 
   structure Structure @relation(fields: [structureId], references: [id], onDelete: Cascade)
   storage   Storage   @relation(fields: [storageId],   references: [id], onDelete: Cascade)
@@ -3288,9 +3319,10 @@ model StructureType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
-  structureDefTypes StructureDef_StructureType[]
-  campLimits        Camp_StructureLimit[]
-  campRequirements  StructureDef_CampRequirement[]
+  structureDefTypes           StructureDef_StructureType[]
+  campLimits                  Camp_StructureLimit[]
+  campRequirements            StructureDef_CampRequirement[]
+  eventStructureDamageEffects EventEffect[]                  @relation("EventEffectStructureDamage")
 }
 
 // Global seeded lookup for valid upgrade effect types.
@@ -3334,8 +3366,9 @@ model FuelType {
 // Guild-defined named structure. Types assigned via StructureDef_StructureType (most defs have one type).
 // name: internal snake_case key (e.g. "mossy_storage_den")
 // constructionPoints: progress points required for the initial build (see ActionSystemType.progressPoints for structure_contribute)
-// Filth fields: dailyFilthAverage = average filth generated per day (null = exempt); filthCap = max filth (null = exempt).
-// filthPerActivePlot: farming structures only — extra filth per active plot added on top of base roll.
+// Filth fields: dailyFilthAverage = average filth generated per day (null = exempt).
+// filthPerActivePlot lives on StructureDef_FarmingConfig (farming-type defs only).
+// There is no per-structure filthCap — the camp-wide filth cap scales with housed entity count (app constant).
 model StructureDef {
   id                 Int     @id @default(autoincrement())
   guildId            String  @db.VarChar(50)
@@ -3345,8 +3378,6 @@ model StructureDef {
   constructionPoints Int
   baseDurability     Int
   dailyFilthAverage  Int?
-  filthPerActivePlot Int?
-  filthCap           Int?
   isPowered          Boolean @default(false) // true = structure requires an active power source to function
   fuelCostPerHour    Float?                  // fuel units deducted from the satisfying power source each worker tick; null if not powered
 
@@ -3494,6 +3525,7 @@ model StructureDef_FarmingConfig {
   plotTypeId         Int
   basePlotCount      Int
   defaultSoilQuality Float @default(0.0)  // starting soilQuality delta for new plots; 0.0 = neutral
+  filthPerActivePlot Int?                  // additional filth generated per active (planted) plot per day; stacks on top of dailyFilthAverage
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
   plotType     PlotType     @relation(fields: [plotTypeId],     references: [id], onDelete: Restrict)
@@ -3834,7 +3866,7 @@ model Structure_AppliedUpgrade {
 model Construction {
   id                    Int       @id @default(autoincrement())
   structureId           Int
-  constructionType      String    @db.VarChar(20) @default("build")
+  constructionTypeId    Int
   upgradeId             Int?
   repairCostProportion  Float?
   pointsRequired        Int
@@ -3844,12 +3876,14 @@ model Construction {
   completedAt           DateTime? @db.Timestamptz
 
   structure         Structure             @relation(fields: [structureId],         references: [id], onDelete: Cascade)
+  constructionType  ConstructionType      @relation(fields: [constructionTypeId],  references: [id], onDelete: Restrict)
   upgrade           StructureDef_Upgrade? @relation(fields: [upgradeId],           references: [id], onDelete: Restrict)
   initiatedByEntity Entity                @relation(fields: [initiatedByEntityId], references: [id], onDelete: Restrict)
 
   itemRequirements  Construction_ItemRequirement[]
 
   @@index([structureId])
+  @@index([constructionTypeId])
   @@index([initiatedByEntityId])
 }
 
@@ -3928,6 +3962,7 @@ model Location {
   actionInstances   ActionInstance[]
   eventTriggers     EventDef_Location[]
   camps             Camp[]
+  effects           Location_Effect[]
 
   @@unique([guildId, name])
   @@index([guildId])
@@ -4018,6 +4053,7 @@ model Camp {
   factions        Camp_Faction[]
   structureLimits Camp_StructureLimit[]
   structures      Structure[]
+  activeEvents    ActiveEvent[]
 
   @@unique([guildId, codeName])
   @@index([guildId])
@@ -4380,7 +4416,18 @@ model EventTriggerType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
-  eventDefs EventDef[]
+  eventDefTriggers EventDef_TriggerType[]
+}
+
+model EventDef_TriggerType {
+  eventDefId    Int
+  triggerTypeId Int
+
+  eventDef    EventDef        @relation(fields: [eventDefId],    references: [id], onDelete: Cascade)
+  triggerType EventTriggerType @relation(fields: [triggerTypeId], references: [id], onDelete: Restrict)
+
+  @@id([eventDefId, triggerTypeId])
+  @@index([triggerTypeId])
 }
 
 model EventScope {
@@ -4393,6 +4440,21 @@ model EventScope {
 model EventStepType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
+  // Seeded values: narrative | narrative_random | choice | choice_consensus |
+  //                check | combat | effect | exit
+
+  stepDefs EventStepDef[]
+}
+
+// Determines what a "check" step evaluates. Set via EventStepDef.checkTypeId.
+// Seeded values:
+//   proficiency — rolls checkProficiencyDefId for checkParticipantScopeId target(s) against checkDifficulty
+//   condition   — checks whether target(s) have conditionCheckDefId active
+//   item        — checks whether target(s) carry itemCheckItemId / itemCheckItemTypeId in sufficient quantity
+//   threshold   — reads a world-state value (thresholdCheckTypeId) and compares to thresholdCheckValue
+model EventCheckType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
 
   stepDefs EventStepDef[]
 }
@@ -4401,6 +4463,14 @@ model EventStepType {
 // appliesToRandom: effect applies to one randomly selected participant
 // appliesToLeader: effect applies to the action leader only
 // appliesToGroup:  effect applies to the group of participants collectively
+model EventThresholdType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  thresholdTriggers EventDef_ThresholdTrigger[]
+  checkSteps        EventStepDef[]              @relation("StepThresholdCheck")
+}
+
 model EventParticipantScope {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -4409,40 +4479,40 @@ model EventParticipantScope {
   appliesToRandom Boolean @default(false)
   appliesToLeader Boolean @default(false)
   appliesToGroup  Boolean @default(false)
+  appliesToHoused Boolean @default(false)  // filters to entities currently assigned to housing structures
 
-  stepDefs     EventStepDef[]
-  outcomeDefs  EventOutcomeDef[]
-  eventEffects EventEffect[]
-}
-
-model EventEffectType {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
-
-  eventEffects EventEffect[]
-}
-
-model EventCheckMode {
-  id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)
-
-  choiceDefs EventChoiceDef[]
+  stepDefs           EventStepDef[] @relation("StepEffectScope")
+  checkStepDefs      EventStepDef[] @relation("StepCheckScope")
+  choiceStepDefs     EventStepDef[] @relation("StepChoiceScope")
+  eventEffects       EventEffect[]
 }
 
 
 // Top-level event definition.
 //
-// triggerType:
-//   "admin"         — admin-initiated; participants provided via signup before the chain starts
-//   "activity"      — fires during an ActionInstance; participants pulled from the activity roster
+// triggerTypes:
+//   one or more trigger types may apply to the same event definition.
+//   "admin"         — admin-initiated; typically provides a signup window before the chain starts
+//   "patrol"        — fires when a patrol activity completes
+//   "hunt"          — fires when a hunt activity completes
+//   "crafting"      — fires when a crafting activity completes
+//   "foraging"      — fires when a foraging activity completes
+//   "clean"         — fires when a cleaning activity completes
 //   "weather_onset" — fires automatically when a matching WeatherState becomes active
-//   "filth"         — fires when faction filth/cap ratio crosses a threshold (see EventDef_FilthTrigger)
-//   "daily"         — Worker rolls once per day per guild; chancePerDay controls probability
+//   "threshold"     — fires when a configurable threshold condition is met (EventDef_ThresholdTrigger)
+//   "daily"         — worker gets one trigger opportunity per day per guild
+//   "hourly"        — worker gets one trigger opportunity per hour per guild
+//
+// All trigger types (except "admin") go through a universal 5% gate before weighted selection.
+// If the gate passes, the worker collects all eligible EventDefs for the context and picks one
+// via weighted selection (baseWeight + active EventWeightModifier rows). No per-event probability
+// fields — weight controls relative likelihood among eligible events, not absolute firing chance.
 //
 // scope:
-//   "global" — posted guild-wide; not tied to any faction or activity
-//   "faction"  — scoped to one faction
-//   "action" — scoped to a specific ActionInstance
+//   "global"  — posted guild-wide; not tied to any faction or activity
+//   "faction" — scoped to one faction
+//   "action"  — scoped to a specific ActionInstance
+//   "camp"    — scoped to a specific Camp; worker fires one ActiveEvent per qualifying camp
 //
 // Eligibility (checked before the chain begins against the provided participant list):
 //   requiresLeader            — at least one participant must have Rank.canLeadEvents = true
@@ -4456,11 +4526,10 @@ model EventDef {
   name        String  @db.VarChar(200)
   description String? @db.VarChar(1000)
 
-  triggerTypeId Int
   scopeId       Int
 
-  baseWeight   Float  @default(1.0)  // base spawn weight for activity/daily selection
-  chancePerDay Float?                // triggerType = "daily" only
+  baseWeight            Float @default(1.0)   // base weight for weighted selection; modifiers stack on top
+  unresolvedWeightBoost Float @default(0.1)  // how much each unresolved exit adds to effective weight
 
   // Eligibility
   requiresLeader            Boolean @default(false)
@@ -4468,13 +4537,23 @@ model EventDef {
   allowApprenticesWithAdult Boolean @default(false)
   minAge               Int?
 
+  // Participant bounds for signup-based events
+  requiresSignup    Boolean @default(false)
+  minParticipants   Int?    // null = no minimum
+  maxParticipants   Int?    // null = no maximum
+  // Signup window: how many hours the event waits for volunteers before proceeding or cancelling.
+  // If minParticipants is met by the deadline → proceeds with enrolled group.
+  // If maxParticipants is hit early → proceeds immediately.
+  // If minParticipants is not met by the deadline → event cancels.
+  signupWindowHours Int @default(18)
+
   // Cooldown — days before this event can fire again for the same faction/guild
   cooldownDays Int @default(3)
 
   // Trigger conditions
   weatherTriggers     EventDef_WeatherTrigger[]
   actionTriggers      EventDef_ActionType[]
-  filthTrigger        EventDef_FilthTrigger?
+  thresholdTrigger   EventDef_ThresholdTrigger?
   envConditionWeights EnvCondition_EventDef[]
   locationTriggers    EventDef_Location[]
   prerequisites       EventDef_Prerequisite[] @relation("EventPrerequisites")
@@ -4483,18 +4562,20 @@ model EventDef {
   // Content
   steps EventStepDef[]
 
-  triggerType EventTriggerType @relation(fields: [triggerTypeId], references: [id], onDelete: Restrict)
+  triggerTypes EventDef_TriggerType[]
   scope       EventScope       @relation(fields: [scopeId],       references: [id], onDelete: Restrict)
 
   // Back-relations
-  profileTriggers ItemEquipmentProfile[]
-  cooldowns       EventCooldown[]
-  activeEvents       ActiveEvent[]
+  profileTriggers   ItemEquipmentProfile[]
+  cooldowns         EventCooldown[]
+  unresolvedStates  EventUnresolvedState[]
+  activeEvents      ActiveEvent[]
+  weightModifiers   EventWeightModifier[] @relation("EventWeightModifiers")
+  weightEffects     EventEffect[]         @relation("EventEffectWeightTarget")
 
   @@unique([guildId, codeName])
   @@index([guildId])
   @@index([guildId, name])
-  @@index([triggerTypeId])
   @@index([scopeId])
 }
 
@@ -4532,16 +4613,34 @@ model EventDef_ActionType {
 }
 
 // Filth threshold trigger.
-// chancePerDay scales linearly above filthThreshold.
-// isOngoing: true = event persists and re-applies effects each tick until filth drops below threshold.
-model EventDef_FilthTrigger {
+// When conditions are met, the worker applies the universal 5% gate on each daily tick.
+// isOngoing: true = event persists and re-applies effects each tick until resolution conditions are met.
+// triggerDays: consecutive days threshold must be met before the daily gate roll begins.
+// triggerOnHigh: true = trigger when value > threshold, false = trigger when value < threshold.
+// resolutionThreshold: separate threshold for ending ongoing events (null = same as thresholdValue).
+// resolutionDays: consecutive days resolution threshold must be met to end event.
+// resolutionOnLow: true = resolve when value < resolutionThreshold, false = resolve when value > resolutionThreshold.
+model EventDef_ThresholdTrigger {
   eventDefId Int @id
 
-  filthThreshold Float   // filth/cap ratio (0.0–1.0) at which daily roll begins
-  chancePerDay   Float   // base daily chance at filth/cap = 1.0; scales linearly above threshold
-  isOngoing      Boolean @default(false)
+  thresholdTypeId Int   // what type of threshold this monitors (filth, population, etc.)
+  thresholdValue  Float // the threshold value (0.0–1.0 for ratios, absolute values for counts)
+  isOngoing       Boolean @default(false)
 
-  eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
+  triggerDays        Int?    // consecutive days above/below thresholdValue before chance rolls begin (null = immediate)
+  triggerOnHigh      Boolean @default(true)  // true = trigger on high values, false = trigger on low values
+  resolutionThreshold Float?  // separate threshold for event resolution (null = use thresholdValue)
+  resolutionDays     Int?    // consecutive days at resolution threshold to end event (null = manual resolution only)
+  resolutionOnLow    Boolean? // true = resolve on low values, false = resolve on high values (null = opposite of triggerOnHigh)
+
+  // false (default): on resolution the worker explicitly removes all EntityCondition rows tied to this event
+  // true: worker only deletes the ActiveEvent row; applied conditions expire naturally on their own timer.
+  //       Use this when the condition should linger after the cause is resolved
+  //       (e.g. filth sickness: camp cleaned, but entities are still sick for 3 more days).
+  conditionsLingerOnResolution Boolean @default(false)
+
+  thresholdType EventThresholdType @relation(fields: [thresholdTypeId], references: [id], onDelete: Restrict)
+  eventDef      EventDef           @relation(fields: [eventDefId],     references: [id], onDelete: Cascade)
 }
 
 // Another EventDef that must have at least one completed ActiveEvent in the guild before this event is eligible.
@@ -4572,84 +4671,193 @@ model EnvCondition_EventDef {
 }
 
 
-// A single step in an event chain.
+// A single step in an event chain. Each step type has exactly one responsibility.
 //
-// stepType:
-//   "narrative" — auto-resolves; posts prompt text, applies effects to effectScope, then advances
-//                 to nextStepId. No player input required.
-//   "choice"    — patrol leader selects from EventChoiceDef options. Each choice leads to a
-//                 weighted outcome roll which determines effects and the next step.
-//   "combat"    — triggers an ActiveCombat for the faction vs. the defined NPC. The event chain
-//                 pauses until combat resolves, then advances to winStepId or loseStepId.
+// Step types:
+//   narrative        — displays prompt text; anyone in the group clicks 'next' → nextStepId
+//   narrative_random — displays prompt text; anyone clicks 'next'; worker rolls weighted
+//                      EventStepRandomBranch table to pick which nextStepId to follow
+//   choice           — displays prompt + N choice buttons (EventStepChoice rows);
+//                      choiceScopeId determines who may interact:
+//                        all_participants → first participant to click decides
+//                        leader          → only the group leader may click
+//                      if expiresAfterMinutes elapses with no selection, event cancels
+//   choice_consensus — all participants cast individual votes (recorded in EventStepVote);
+//                      plurality winner decides; ties broken by lowest sortOrder among tied choices;
+//                      if expiresAfterMinutes elapses, tallies whatever votes exist
+//                      (sortOrder tiebreak applies); cancels only if zero votes were cast
+//   check            — evaluates a condition and routes to passStepId (success) or failStepId (failure);
+//                      checkTypeId (EventCheckType) controls what is evaluated:
+//                        proficiency → rolls checkProficiencyDefId for checkParticipantScopeId
+//                                      target(s) against checkDifficulty; shows 'roll' button
+//                        condition   → automatic; checks whether target(s) have conditionCheckDefId active
+//                        item        → automatic; checks whether target(s) carry the required item/quantity
+//                        threshold   → automatic; compares world-state thresholdCheckTypeId to thresholdCheckValue
+//   combat           — displays prompt + 'initiate' button; spawns ActiveCombat;
+//                      resolves to winStepId or loseStepId
+//   effect           — applies EventEffect rows; displays results; anyone clicks 'next'/'finish'
+//                      → nextStepId (null = event ends naturally)
+//   exit             — terminal step; displays optional closing text; no nextStepId;
+//                      sets marksUnresolved / endsAction as configured
 //
 // isStarter: true on exactly one step per EventDef — the entry point of the chain.
-//
-// sortOrder: display/seeding hint only — NOT used for execution order.
-//            Execution flows via isStarter → outcomes / winStep / loseStep / nextStep links.
-//
-// expiresAfterMinutes: "choice" steps only — how long the leader has to respond before the step
-//   auto-resolves via defaultChoiceDefId. null = no time limit.
+// Navigation is driven entirely by nextStepId / passStepId / failStepId / winStepId /
+// loseStepId / EventStepChoice.nextStepId. There is no sortOrder on steps.
 model EventStepDef {
   id         Int     @id @default(autoincrement())
   eventDefId Int
-  sortOrder  Int
-  isStarter    Boolean @default(false)  // true on the entry-point step of the chain
-  stepTypeId   Int
-  prompt       String  @db.VarChar(2000)
+  isStarter  Boolean @default(false)  // true on the entry-point step of the chain
+  stepTypeId Int
+  prompt     String  @db.VarChar(2000)
 
-  // ── narrative step fields ────────────────────────────────────────────────
-  // effectScope: who the narrative effects apply to
-  effectScopeId Int?  // null for non-narrative steps
-  nextStepId  Int?   // null = event ends after this step
+  // ── narrative / effect step fields ──────────────────────────────────────
+  nextStepId Int?  // null = event ends after this step (narrative, effect)
 
-  // ── choice step fields ───────────────────────────────────────────────────
-  expiresAfterMinutes Int?  // time window for the leader to choose; null = no limit
-  defaultChoiceDefId  Int?  // choice applied automatically when the window expires
+  // ── effect step fields ───────────────────────────────────────────────────
+  effectScopeId Int?  // default participant scope for all effects on this effect step
+
+  // ── exit step fields ─────────────────────────────────────────────────────
+  marksUnresolved Boolean @default(false)  // true = record EventUnresolvedState on reaching this step
+  endsAction      Boolean @default(false)  // true = interrupt the linked ActionInstance
+
+  // ── choice / choice_consensus step fields ────────────────────────────────
+  // choice:           expiresAfterMinutes → event cancels if no one clicks within the window
+  // choice_consensus: expiresAfterMinutes → tallies existing votes on expiry (sortOrder tiebreak);
+  //                   cancels only if zero votes were cast
+  expiresAfterMinutes Int?
+  // choice only: determines who may interact with the buttons
+  //   all_participants → first to click decides
+  //   leader           → only the leader may click
+  choiceScopeId       Int?
+
+  // ── check step fields ────────────────────────────────────────────────────
+  checkTypeId              Int?   // EventCheckType: proficiency | condition | item | threshold
+  checkParticipantScopeId  Int?   // who is checked/rolling (e.g. leader, random_participant; unused for threshold)
+  passStepId               Int?   // step reached on pass/success; null = event ends
+  failStepId               Int?   // step reached on fail/failure; null = event ends
+
+  // checkType = proficiency
+  checkProficiencyDefId    Int?              // which proficiency to roll
+  checkDifficulty          Int @default(10)  // difficulty 1-20; 10 = average, higher = harder
+
+  // checkType = condition
+  conditionCheckDefId      Int?   // which ConditionDef to look for on the target participant(s)
+
+  // checkType = item
+  itemCheckItemId          Int?   // specific item to look for
+  itemCheckItemTypeId      Int?   // or: any item of this type (one of itemCheckItemId / itemCheckItemTypeId required)
+  itemCheckMinQuantity     Float? // minimum quantity required; null = 1.0
+
+  // checkType = threshold (no participant scope — checks world state)
+  thresholdCheckTypeId     Int?     // which world-state threshold to read (e.g. filth)
+  thresholdCheckValue      Float?   // comparison value
+  thresholdCheckOnHigh     Boolean? // true = pass when value > threshold; false = pass when value < threshold
 
   // ── combat step fields ───────────────────────────────────────────────────
   combatEncounterDefId Int?  // which CombatEncounterDef to spawn
-  winStepId            Int?  // next step when players win; null = event ends
-  loseStepId           Int?  // next step when players lose; null = event ends
-  winExpReward         Int   @default(0)  // exp awarded to each non-fleeing player participant on win
-  winFactionRepReward  Int   @default(0)  // faction rep awarded to each non-fleeing player participant on win
+  winStepId            Int?  // step reached when players win; null = event ends
+  loseStepId           Int?  // step reached when players lose; null = event ends
 
   // ── relations ────────────────────────────────────────────────────────────
-  eventDef           EventDef            @relation(fields: [eventDefId],           references: [id], onDelete: Cascade)
-  stepType           EventStepType       @relation(fields: [stepTypeId],           references: [id], onDelete: Restrict)
-  effectScope        EventParticipantScope? @relation(fields: [effectScopeId],      references: [id], onDelete: Restrict)
-  nextStep           EventStepDef?       @relation("NarrativeNext", fields: [nextStepId],  references: [id], onDelete: Restrict)
-  winStep            EventStepDef?       @relation("CombatWin",     fields: [winStepId],   references: [id], onDelete: Restrict)
-  loseStep           EventStepDef?       @relation("CombatLose",    fields: [loseStepId],  references: [id], onDelete: Restrict)
-  defaultChoice      EventChoiceDef?     @relation("StepDefaultChoice", fields: [defaultChoiceDefId], references: [id], onDelete: Restrict)
-  combatEncounterDef CombatEncounterDef? @relation(fields: [combatEncounterDefId], references: [id], onDelete: SetNull)
+  eventDef              EventDef               @relation(fields: [eventDefId],              references: [id], onDelete: Cascade)
+  stepType              EventStepType          @relation(fields: [stepTypeId],              references: [id], onDelete: Restrict)
+  effectScope           EventParticipantScope? @relation("StepEffectScope",      fields: [effectScopeId],           references: [id], onDelete: Restrict)
+  choiceScope           EventParticipantScope? @relation("StepChoiceScope",      fields: [choiceScopeId],           references: [id], onDelete: Restrict)
+  checkParticipantScope EventParticipantScope? @relation("StepCheckScope",       fields: [checkParticipantScopeId], references: [id], onDelete: Restrict)
+  checkType             EventCheckType?        @relation(fields: [checkTypeId],              references: [id], onDelete: Restrict)
+  checkProficiencyDef   ProficiencyDef?        @relation("StepProficiencyCheck", fields: [checkProficiencyDefId],   references: [id], onDelete: Restrict)
+  conditionCheckDef     ConditionDef?          @relation("StepConditionCheck",   fields: [conditionCheckDefId],     references: [id], onDelete: Restrict)
+  itemCheckItem         Item?                  @relation("StepItemCheck",         fields: [itemCheckItemId],         references: [id], onDelete: Restrict)
+  itemCheckItemType     ItemType?              @relation("StepItemTypeCheck",     fields: [itemCheckItemTypeId],     references: [id], onDelete: Restrict)
+  thresholdCheckType    EventThresholdType?    @relation("StepThresholdCheck",    fields: [thresholdCheckTypeId],    references: [id], onDelete: Restrict)
+  nextStep              EventStepDef?          @relation("StepNext",      fields: [nextStepId],  references: [id], onDelete: Restrict)
+  passStep              EventStepDef?          @relation("CheckPass",     fields: [passStepId],  references: [id], onDelete: Restrict)
+  failStep              EventStepDef?          @relation("CheckFail",     fields: [failStepId],  references: [id], onDelete: Restrict)
+  winStep               EventStepDef?          @relation("CombatWin",     fields: [winStepId],   references: [id], onDelete: Restrict)
+  loseStep              EventStepDef?          @relation("CombatLose",    fields: [loseStepId],  references: [id], onDelete: Restrict)
+  combatEncounterDef    CombatEncounterDef?    @relation(fields: [combatEncounterDefId], references: [id], onDelete: SetNull)
 
-  choices  EventChoiceDef[]
-  effects  EventEffect[]
+  effects        EventEffect[]
+  choiceOptions  EventStepChoice[]       @relation("StepChoiceOptions")
+  randomBranches EventStepRandomBranch[] @relation("StepRandomBranches")
+  votes          EventStepVote[]
 
-  // Back-references for self-joins
-  incomingNarrativeSteps EventStepDef[] @relation("NarrativeNext")
-  incomingWinSteps       EventStepDef[] @relation("CombatWin")
-  incomingLoseSteps      EventStepDef[] @relation("CombatLose")
+  // Back-references for incoming navigation links
+  incomingNextSteps      EventStepDef[]          @relation("StepNext")
+  incomingPassSteps      EventStepDef[]          @relation("CheckPass")
+  incomingFailSteps      EventStepDef[]          @relation("CheckFail")
+  incomingWinSteps       EventStepDef[]          @relation("CombatWin")
+  incomingLoseSteps      EventStepDef[]          @relation("CombatLose")
+  incomingChoiceOptions  EventStepChoice[]       @relation("StepChoiceTarget")
+  incomingRandomBranches EventStepRandomBranch[] @relation("StepRandomTarget")
+  activeEvents           ActiveEvent[]
 
-  incomingOutcomes EventOutcomeDef[] @relation("OutcomeNextStep")
-  activeEvents     ActiveEvent[]
-
-  @@unique([eventDefId, sortOrder])
   @@index([eventDefId])
   @@index([stepTypeId])
   @@index([effectScopeId])
-  @@index([defaultChoiceDefId])
+  @@index([choiceScopeId])
+  @@index([checkTypeId])
+  @@index([checkParticipantScopeId])
+  @@index([checkProficiencyDefId])
+  @@index([conditionCheckDefId])
+  @@index([itemCheckItemId])
+  @@index([itemCheckItemTypeId])
+  @@index([thresholdCheckTypeId])
   @@index([combatEncounterDefId])
   @@index([nextStepId])
+  @@index([passStepId])
+  @@index([failStepId])
   @@index([winStepId])
   @@index([loseStepId])
 }
 
-// Narrative step: condition applied or removed on auto-resolve.
-// Unified event effect — applies to either a narrative step or a choice outcome.
-// Exactly one of stepDefId or outcomeDefId must be set (app-enforced).
+// A single choice button on a "choice" step.
+// Each row is one button the player can click; stepDefId is the choice step it belongs to.
+// The choice is deterministic — the player picks, the step navigates directly to nextStepId.
+model EventStepChoice {
+  id          Int     @id @default(autoincrement())
+  stepDefId   Int
+  label       String  @db.VarChar(200)   // button label shown in Discord
+  description String? @db.VarChar(1000)  // optional flavor text shown with the button
+  nextStepId  Int                         // step this choice leads to
+  sortOrder   Int     @default(0)         // display order of buttons
+
+  stepDef  EventStepDef @relation("StepChoiceOptions", fields: [stepDefId],  references: [id], onDelete: Cascade)
+  nextStep EventStepDef @relation("StepChoiceTarget",  fields: [nextStepId], references: [id], onDelete: Restrict)
+  votes    EventStepVote[]
+
+  @@index([stepDefId])
+  @@index([nextStepId])
+}
+
+// A single weighted branch on a "narrative_random" step.
+// When the step resolves, the worker rolls against all branch weights to pick one nextStepId.
+// No player input — purely system-driven randomness.
+model EventStepRandomBranch {
+  id          Int     @id @default(autoincrement())
+  stepDefId   Int
+  weight      Float   @default(1.0)        // relative selection weight; higher = more likely
+  nextStepId  Int                           // step this branch leads to
+  description String? @db.VarChar(200)     // internal designer note (e.g. "rare outcome", "success path")
+
+  stepDef  EventStepDef @relation("StepRandomBranches", fields: [stepDefId],  references: [id], onDelete: Cascade)
+  nextStep EventStepDef @relation("StepRandomTarget",   fields: [nextStepId], references: [id], onDelete: Restrict)
+
+  @@index([stepDefId])
+  @@index([nextStepId])
+}
+
+// An effect attached to an "effect" EventStepDef. Only effect steps carry effects.
+// stepDefId must reference an effect-type step (app-enforced).
 //
-// effectType: "condition" | "item"
+// Core effect fields:
+//   probability   — chance effect occurs (0.0-1.0, e.g., 0.3 = 30%)
+//   effectTypeId  — drives the worker switch; all effect data lives in the type-specific fields below
+//   targetScopeId — who the effect applies to; overrides the step-level effectScopeId for this
+//                   specific effect. Valid for per-entity effects: condition, item, faction_rep,
+//                   stat_modifier, proficiency_modifier, discipline_xp. Null = use step effectScopeId.
+//
+// effectType: "condition" | "item" | "location_buff" | "stat_modifier" | "proficiency_modifier" | "faction_rep" | "discipline_xp"
 //
 // condition fields (effectType = "condition"):
 //   conditionDefId — which condition to apply or remove
@@ -4661,13 +4869,55 @@ model EventStepDef {
 //                                     or a random globally seeded item of that type (isGain=true)
 //   minQuantity / maxQuantity — rolled quantity range
 //   isGain        — true = items added; false = items removed/consumed
-//   targetScopeId — who receives/loses the item
+//
+// location_buff fields (effectType = "location_buff"):
+//   locationBuffEffectTypeId — which EffectType to apply as a location buff/debuff;
+//                              must reference an EffectType with isLocation = true (app-enforced)
+//   locationBuffValue        — the effect value as percentage (0.3 = 30% buff, -0.2 = 20% debuff)
+//   locationBuffDurationHours — how long the effect lasts (null = permanent until removed)
+//
+// stat_modifier fields (effectType = "stat_modifier"):
+//   statModifierStatId — which stat to modify
+//   statModifierValue  — modifier value as percentage (0.1 = +10% bonus, -0.15 = -15% penalty)
+//
+// proficiency_modifier fields (effectType = "proficiency_modifier"):
+//   proficiencyModifierProficiencyDefId — which proficiency to modify
+//   proficiencyModifierValue            — modifier value as percentage (0.2 = +20% bonus)
+//   proficiencyModifierHasAdvantage     — grants advantage on rolls
+//   proficiencyModifierHasDisadvantage  — grants disadvantage on rolls
+//
+// faction_rep fields (effectType = "faction_rep"):
+//   factionRepValue — flat reputation point change (positive = gain, negative = loss);
+//                     applied per entity when targetScopeId is set, or to the faction collectively
+//
+// discipline_xp fields (effectType = "discipline_xp"):
+//   disciplineXpDisciplineDefId — which discipline gains XP
+//   disciplineXpValue           — XP gain as percentage of level requirement (0.5 = 50% of level XP)
+//
+// structure_damage fields (effectType = "structure_damage"):
+//   structureDamageValue            — damage amount: flat HP (isMultiplier=false) or fraction of maxDurability (isMultiplier=true)
+//   structureDamageIsMultiplier     — true = treat value as fraction of maxDurability; false = flat HP damage
+//   structureDamageCount            — null = all structures in camp; N = randomly select N structures
+//   structureDamageStructureTypeId  — optional: only damage structures of this StructureType
+//
+// action_output_modifier fields (effectType = "action_output_modifier"):
+//   outputMultiplier — multiplier on action output quantity (2.0 = 2x output); only valid for action-scoped events
+//
+// event_weight_modifier fields (effectType = "event_weight_modifier"):
+//   eventWeightTargetEventDefId — which EventDef's spawn weight to modify
+//   eventWeightValue            — modifier added to effective spawn weight (positive = more likely, negative = less)
+//   eventWeightDurationHours    — how long the modifier lasts; null = permanent until removed
+//
+// item droptable grant (effectType = "item"):
+//   dropTableId — if set, roll from this DropTable; mutually exclusive with itemId and itemTypeId (app-enforced)
 model EventEffect {
   id           Int @id @default(autoincrement())
   effectTypeId Int
 
-  stepDefId    Int?  // FK to EventStepDef; null for outcome effects
-  outcomeDefId Int?  // FK to EventOutcomeDef; null for step effects
+  stepDefId Int  // FK to an effect-type EventStepDef
+
+  probability   Float @default(1.0)  // probability this effect occurs (0.0-1.0)
+  targetScopeId Int?                 // overrides step effectScopeId for this effect; valid for per-entity effect types
 
   // condition effect fields
   conditionDefId Int?
@@ -4679,118 +4929,117 @@ model EventEffect {
   minQuantity Float @default(1.0)
   maxQuantity Float @default(1.0)
   isGain      Boolean @default(true)
-  targetScopeId Int?
 
-  effectType    EventEffectType   @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
-  stepDef       EventStepDef?     @relation(fields: [stepDefId],      references: [id], onDelete: Cascade)
-  outcomeDef    EventOutcomeDef?  @relation(fields: [outcomeDefId],   references: [id], onDelete: Cascade)
-  conditionDef  ConditionDef?     @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
+  // location_buff effect fields
+  locationBuffEffectTypeId Int?
+  locationBuffValue        Float @default(0.0)  // effect value as percentage (0.3 = 30% buff/debuff)
+  locationBuffDurationHours Int?
+
+  // stat_modifier effect fields
+  statModifierStatId Int?
+  statModifierValue  Float @default(0.0)  // modifier value as percentage (0.1 = +10% bonus)
+
+  // proficiency_modifier effect fields
+  proficiencyModifierProficiencyDefId Int?
+  proficiencyModifierValue            Float @default(0.0)  // modifier value as percentage (0.2 = +20% bonus)
+  proficiencyModifierHasAdvantage     Boolean @default(false)
+  proficiencyModifierHasDisadvantage  Boolean @default(false)
+
+  // faction_rep effect fields
+  factionRepValue Float @default(0.0)  // flat reputation points (positive = gain, negative = loss)
+
+  // discipline_xp effect fields
+  disciplineXpDisciplineDefId Int?
+  disciplineXpValue           Float @default(0.0)  // XP gain as percentage (0.5 = 50% of level XP)
+
+  // structure_damage effect fields
+  structureDamageValue           Float?
+  structureDamageIsMultiplier    Boolean @default(false)  // true = fraction of maxDurability; false = flat HP
+  structureDamageCount           Int?    // null = all structures; N = randomly select N structures in camp
+  structureDamageStructureTypeId Int?    // optional filter: only damage structures of this StructureType
+
+  // action_output_modifier effect fields
+  outputMultiplier Float?  // multiplier on action output quantity (2.0 = 2x); only valid for action-scoped events
+
+  // event_weight_modifier effect fields
+  eventWeightTargetEventDefId Int?   // which EventDef's spawn weight to modify
+  eventWeightValue            Float? // positive = more likely, negative = less likely
+  eventWeightDurationHours    Int?   // how long the modifier lasts (null = permanent until removed)
+
+  // item droptable grant (effectType = "item" only)
+  dropTableId Int?  // roll from this DropTable; mutually exclusive with itemId / itemTypeId (app-enforced)
+
+  effectType EffectType   @relation(fields: [effectTypeId], references: [id], onDelete: Restrict)
+  stepDef    EventStepDef @relation(fields: [stepDefId],    references: [id], onDelete: Cascade)
+  conditionDef ConditionDef? @relation(fields: [conditionDefId], references: [id], onDelete: Restrict)
   item          Item?             @relation(fields: [itemId],     references: [id], onDelete: SetNull)
   itemType      ItemType?         @relation(fields: [itemTypeId], references: [id], onDelete: SetNull)
   targetScope   EventParticipantScope? @relation(fields: [targetScopeId], references: [id], onDelete: Restrict)
+  locationBuffEffectType EffectType? @relation("EventLocationBuffEffect", fields: [locationBuffEffectTypeId], references: [id], onDelete: Restrict)
+  statModifierStat       Stat?       @relation("EventEffectStatModifier", fields: [statModifierStatId], references: [id], onDelete: Restrict)
+  proficiencyModifierProficiency   ProficiencyDef? @relation(fields: [proficiencyModifierProficiencyDefId], references: [id], onDelete: Restrict)
+  disciplineXpDiscipline           DisciplineDef?  @relation(fields: [disciplineXpDisciplineDefId],          references: [id], onDelete: Restrict)
+  structureDamageStructureType     StructureType?  @relation("EventEffectStructureDamage",   fields: [structureDamageStructureTypeId],   references: [id], onDelete: Restrict)
+  dropTable                        DropTable?      @relation("EventEffectDropTable",          fields: [dropTableId],                     references: [id], onDelete: SetNull)
+  eventWeightTargetEventDef        EventDef?       @relation("EventEffectWeightTarget",       fields: [eventWeightTargetEventDefId],     references: [id], onDelete: Restrict)
 
   @@index([effectTypeId])
   @@index([stepDefId])
-  @@index([outcomeDefId])
   @@index([conditionDefId])
   @@index([itemId])
   @@index([itemTypeId])
   @@index([targetScopeId])
+  @@index([locationBuffEffectTypeId])
+  @@index([statModifierStatId])
+  @@index([proficiencyModifierProficiencyDefId])
+  @@index([disciplineXpDisciplineDefId])
+  @@index([structureDamageStructureTypeId])
+  @@index([dropTableId])
+  @@index([eventWeightTargetEventDefId])
 }
 
 
-// A choice option presented during a "choice" step. The patrol leader selects one.
-// If statId or proficiencyDefId is set, a check is rolled after the choice is made.
-// checkMode determines how the roll is computed across participants:
-//   "individual"        — each entity rolls independently; each may get a different outcome
-//   "faction_average"     — single roll using the average stat/skill across all participants
-//   "leader_designates" — leader names one entity to roll on behalf of the faction
-model EventChoiceDef {
-  id          Int     @id @default(autoincrement())
-  stepDefId   Int
-  label       String  @db.VarChar(200)
-  description String? @db.VarChar(1000)
 
-  // Optional skill/stat check made after this choice is selected
-  statId      Int?
-  proficiencyDefId  Int?
-  difficulty  Int?
-  checkModeId Int?  // null = no check; FK to EventCheckMode
-
-  stepDef   EventStepDef    @relation(fields: [stepDefId],   references: [id], onDelete: Cascade)
-  stat      Stat?           @relation(fields: [statId],      references: [id], onDelete: Restrict)
-  proficiency ProficiencyDef?     @relation(fields: [proficiencyDefId],  references: [id], onDelete: Restrict)
-  checkMode EventCheckMode? @relation(fields: [checkModeId], references: [id], onDelete: Restrict)
-
-  outcomes        EventOutcomeDef[]
-  defaultForSteps EventStepDef[]    @relation("StepDefaultChoice")
-
-  @@index([stepDefId])
-  @@index([checkModeId])
-}
-
-// A possible outcome for a choice — selected by weighted random roll (modified by skill check result).
-// effectScope: "all_participants" | "random_participant" | "leader"
-// nextStepId: null = event ends after this outcome
-// endsAction: true = the linked ActionInstance is immediately marked interrupted
-model EventOutcomeDef {
-  id          Int    @id @default(autoincrement())
-  choiceDefId Int
-  name        String @db.VarChar(200)
-  description String @db.VarChar(2000)
-
-  weight        Float   @default(1.0)
-  effectScopeId Int
-  endsAction    Boolean @default(false)
-  nextStepId    Int?
-
-  choiceDef   EventChoiceDef   @relation(fields: [choiceDefId],   references: [id], onDelete: Cascade)
-  nextStep    EventStepDef?    @relation("OutcomeNextStep", fields: [nextStepId], references: [id], onDelete: Restrict)
-  effectScope EventParticipantScope @relation(fields: [effectScopeId], references: [id], onDelete: Restrict)
-
-  effects EventEffect[]
-
-  @@index([choiceDefId])
-  @@index([effectScopeId])
-  @@index([nextStepId])
-}
-
-
-// A running or resolved event chain instance.
+// A live event chain instance. Row exists only while the event is in progress.
+// Worker deletes the row when the event ends (natural completion, choice expiry, or interruption),
+// posting a closing notice to Discord before deletion.
 //
-// status:
-//   "active"    — chain is progressing; currentStepId is set
-//   "completed" — all steps resolved naturally
-//   "expired"   — a choice step's time window elapsed with no default choice to fall back on
-//
-// currentStepId is the sole runtime state for the chain. History of which choices/outcomes
-// led here is derivable by traversing the step graph from the starter step.
+// currentStepId is the sole runtime state for the chain.
 model ActiveEvent {
   id         Int    @id @default(autoincrement())
   eventDefId Int
   guildId    String
 
-  factionId          Int?
+  factionId        Int?
   actionInstanceId Int?  @unique
+  campId           Int?  // set when scope = "camp"; identifies which camp this event is scoped to
 
-  isActive      Boolean   @default(true)  // false = event has ended (completed or expired)
-  currentStepId Int?      // which EventStepDef the chain is currently on; null when event ends
+  currentStepId Int?      // which EventStepDef the chain is currently on
 
-  startedAt   DateTime  @default(now()) @db.Timestamptz
-  completedAt DateTime? @db.Timestamptz
-  expiresAt   DateTime? @db.Timestamptz  // set when the current step has a response window
+  startedAt           DateTime  @default(now()) @db.Timestamptz
+  expiresAt           DateTime? @db.Timestamptz  // set when the current step has a response window
+  // Worker updates this on every player interaction (vote, choice, signup).
+  // Any ActiveEvent with lastInteractionAt older than 24 hours is expired and deleted.
+  // This field will be superseded by the logging expansion — derive from event log at that point.
+  lastInteractionAt   DateTime? @db.Timestamptz
 
   eventDef       EventDef        @relation(fields: [eventDefId],       references: [id], onDelete: Restrict)
   currentStep    EventStepDef?   @relation(fields: [currentStepId],    references: [id], onDelete: SetNull)
-  faction          Faction?          @relation(fields: [factionId],          references: [id], onDelete: Cascade)
+  faction        Faction?        @relation(fields: [factionId],        references: [id], onDelete: Cascade)
   actionInstance ActionInstance? @relation(fields: [actionInstanceId], references: [id], onDelete: Cascade)
+  camp           Camp?           @relation(fields: [campId],           references: [id], onDelete: Cascade)
 
-  participants  ActiveEvent_Participant[]
-  activeCombats ActiveCombat[]
+  participants      ActiveEvent_Participant[]
+  activeCombats     ActiveCombat[]
+  appliedConditions EntityCondition[]        @relation("EventAppliedConditions")
+  weightModifiers   EventWeightModifier[]    @relation("EventWeightModifierSource")
+  locationEffects   Location_Effect[]
+  votes             EventStepVote[]
 
   @@index([guildId])
   @@index([eventDefId])
   @@index([factionId])
+  @@index([campId])
   @@index([currentStepId])
 }
 
@@ -4813,6 +5062,47 @@ model ActiveEvent_Participant {
   @@index([entityId])
 }
 
+// Records a single entity's vote on a choice_consensus step.
+// One row per (activeEventId, stepDefId, entityId) — the unique constraint prevents double-voting.
+// Because each player can only have one entity in an event at a time, entity implicitly identifies
+// the player; no separate user lookup is needed.
+// The worker deletes all vote rows for the step as soon as the consensus resolves and the chain
+// advances — votes are ephemeral and do not need to persist after the step is done.
+model EventStepVote {
+  id            Int @id @default(autoincrement())
+  activeEventId Int
+  stepDefId     Int  // the choice_consensus EventStepDef this vote belongs to
+  entityId      Int
+  choiceId      Int  // which EventStepChoice the entity voted for
+
+  activeEvent ActiveEvent     @relation(fields: [activeEventId], references: [id], onDelete: Cascade)
+  stepDef     EventStepDef    @relation(fields: [stepDefId],     references: [id], onDelete: Cascade)
+  choice      EventStepChoice @relation(fields: [choiceId],      references: [id], onDelete: Cascade)
+  entity      Entity          @relation(fields: [entityId],      references: [id], onDelete: Cascade)
+
+  @@unique([activeEventId, stepDefId, entityId])
+  @@index([activeEventId, stepDefId])
+  @@index([entityId])
+}
+
+// Active spawn weight modifier applied to an EventDef by a previous event's effect step.
+// The worker sums all active (non-expired) rows for a given eventDefId and adds the total
+// to its base spawn weight at roll time.
+model EventWeightModifier {
+  id               Int       @id @default(autoincrement())
+  targetEventDefId Int
+  value            Float     // positive = more likely, negative = less likely
+  sourceActiveEventId Int?   // which ActiveEvent wrote this modifier (null if applied manually)
+  expiresAt        DateTime? @db.Timestamptz  // null = permanent until explicitly removed
+  createdAt        DateTime  @default(now()) @db.Timestamptz
+
+  targetEventDef    EventDef     @relation("EventWeightModifiers",      fields: [targetEventDefId],    references: [id], onDelete: Cascade)
+  sourceActiveEvent ActiveEvent? @relation("EventWeightModifierSource", fields: [sourceActiveEventId], references: [id], onDelete: SetNull)
+
+  @@index([targetEventDefId])
+  @@index([sourceActiveEventId])
+}
+
 // Binds an EventDef to one or more named Locations.
 // weightMod = 0.0: hard gate (event can only fire at this location)
 // weightMod > 0.0: weight boost when the action occurs at this location
@@ -4829,13 +5119,31 @@ model EventDef_Location {
 }
 
 // Per-faction (or per-guild for global events) cooldown tracking.
-// factionId = null means guild-wide cooldown (guild derived from eventDef.guildId).
+// One row per (guildId, eventDefId, factionId) — upserted each time the event fires.
+// factionId = null means guild-wide cooldown (global/threshold/daily/hourly scoped events).
 model EventCooldown {
-  id         Int  @id @default(autoincrement())
+  id         Int    @id @default(autoincrement())
+  guildId    String @db.VarChar(50)
   eventDefId Int
-  factionId    Int?
+  factionId  Int?
 
-  lastEventAt DateTime @db.Timestamptz
+  lastFiredAt DateTime @db.Timestamptz
+
+  eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, eventDefId, factionId])
+  @@index([guildId, eventDefId])
+  @@index([factionId])
+}
+
+// Tracks unresolved event states that can boost related event weights.
+// Used for events like "dangerous enemy encounters" that become more likely if unresolved.
+model EventUnresolvedState {
+  id         Int  @id @default(autoincrement())
+  eventDefId Int  // the event that was unresolved
+  factionId    Int?  // null = guild-wide unresolved state
+
+  unresolvedCount Int @default(1)  // incremented each time this event reaches an unresolved exit
 
   eventDef EventDef @relation(fields: [eventDefId], references: [id], onDelete: Cascade)
 
@@ -5907,6 +6215,37 @@ model Plot_Buff {
   effectType EffectType  @relation(fields: [effectTypeId],   references: [id], onDelete: Restrict)
 
   @@unique([plotId, sourceEntityId, effectTypeId])
+}
+
+// Temporary modifiers applied to locations by events or abilities.
+// Used for location-wide effects like crop growth bonuses/debuffs or hunting difficulty changes.
+// Worker sums all non-expired rows per (locationId, effectTypeId) to get the net modifier.
+//
+// Source columns are mutually exclusive:
+//   sourceEntityId     — set for entity-sourced effects (abilities, items)
+//   sourceActiveEventId — set for event-sourced effects; onDelete: SetNull so the row
+//                         survives the ActiveEvent deletion and expires naturally
+// Both null = admin/manual effect.
+model Location_Effect {
+  id                  Int      @id @default(autoincrement())
+  locationId          Int
+  sourceEntityId      Int?     // null for event/admin-written effects
+  sourceActiveEventId Int?     // set when an event effect step wrote this row
+  effectTypeId        Int
+  effectValue         Float    // positive = buff, negative = debuff
+  appliedAt           DateTime @default(now()) @db.Timestamptz
+  expiresAt           DateTime @db.Timestamptz
+
+  location      Location     @relation(fields: [locationId],          references: [id], onDelete: Cascade)
+  entity        Entity?      @relation(fields: [sourceEntityId],      references: [id], onDelete: Cascade)
+  activeEvent   ActiveEvent? @relation(fields: [sourceActiveEventId], references: [id], onDelete: SetNull)
+  effectType    EffectType   @relation(fields: [effectTypeId],        references: [id], onDelete: Restrict)
+
+  // One row per (location, source, effectType) combination — prevents duplicate stacking from the same source.
+  // Multiple events can each hold their own row; the worker sums them.
+  @@unique([locationId, sourceEntityId, sourceActiveEventId, effectTypeId])
+  @@index([locationId, effectTypeId])
+  @@index([sourceActiveEventId])
 }
 
 // A live instance of a plant growing at a plot. One PlotCrop per plot at a time (enforced via Plot).
