@@ -249,3 +249,28 @@ rows instead of StoredItem rows. The worker counts active deposit rows as the
 rotItemCount when rolling daily filth for a compost structure.
 
 This is an intended trade-off: composting produces useful outputs at a filth cost.
+
+
+─────────────────────────────────────────────
+11. PRODUCTION STRUCTURES
+─────────────────────────────────────────────
+
+Production-type structures (see structure-system.md) generate filth through two
+independent mechanisms that both apply when the structure is active:
+
+  dailyFilthAverage  — the standard per-structure baseline rolled each day,
+                       same as all other structure types.
+
+  filthPerCycle      — defined on StructureDef_ProductionConfig. Added directly
+                       to Structure.filthLevel each time a production cycle
+                       completes. Not subject to the ±30% roll — it is a flat
+                       addition per cycle.
+
+                       filthPerCycle = 0 (default) means production generates no
+                       cycle-driven filth beyond the daily baseline. Set > 0 for
+                       structures where active output is inherently messy — a
+                       forge or tannery is dirtier when running than when idle.
+
+The two mechanisms stack: a busy forge with dailyFilthAverage = 5 and
+filthPerCycle = 2 completing 8 cycles per day contributes 5 (daily, rolled) +
+16 (cycle-driven, flat) = 21 filth that day before any filth_reduction upgrades.

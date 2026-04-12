@@ -1646,6 +1646,16 @@ CREATE TABLE "Entity_Housing" (
 );
 
 -- CreateTable
+CREATE TABLE "Entity_WorkAssignment" (
+    "entityId" INTEGER NOT NULL,
+    "structureId" INTEGER NOT NULL,
+    "assignedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "assignedUntil" TIMESTAMPTZ,
+
+    CONSTRAINT "Entity_WorkAssignment_pkey" PRIMARY KEY ("entityId")
+);
+
+-- CreateTable
 CREATE TABLE "Structure_Storage" (
     "structureId" INTEGER NOT NULL,
     "storageId" INTEGER NOT NULL,
@@ -1705,6 +1715,8 @@ CREATE TABLE "UpgradeEffectType" (
     "isCrafting" BOOLEAN NOT NULL DEFAULT false,
     "isCompost" BOOLEAN NOT NULL DEFAULT false,
     "isPower" BOOLEAN NOT NULL DEFAULT false,
+    "isProduction" BOOLEAN NOT NULL DEFAULT false,
+    "isWorkSlot" BOOLEAN NOT NULL DEFAULT false,
     "requiresEnvTarget" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "UpgradeEffectType_pkey" PRIMARY KEY ("id")
@@ -1843,6 +1855,75 @@ CREATE TABLE "StructureDef_CompostConfig" (
     "volumeCapacity" DOUBLE PRECISION,
 
     CONSTRAINT "StructureDef_CompostConfig_pkey" PRIMARY KEY ("structureDefId")
+);
+
+-- CreateTable
+CREATE TABLE "StructureDef_ProductionConfig" (
+    "structureDefId" INTEGER NOT NULL,
+    "baseCyclesPerHour" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "staffCyclesPerHour" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "poweredCyclesBonus" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "filthPerCycle" DOUBLE PRECISION NOT NULL DEFAULT 0,
+
+    CONSTRAINT "StructureDef_ProductionConfig_pkey" PRIMARY KEY ("structureDefId")
+);
+
+-- CreateTable
+CREATE TABLE "StructureDef_ProductionConfig_EnvCondition" (
+    "structureDefId" INTEGER NOT NULL,
+    "envConditionId" INTEGER NOT NULL,
+    "cycleRatePerStack" DOUBLE PRECISION NOT NULL,
+
+    CONSTRAINT "StructureDef_ProductionConfig_EnvCondition_pkey" PRIMARY KEY ("structureDefId","envConditionId")
+);
+
+-- CreateTable
+CREATE TABLE "StructureDef_WorkSlotConfig" (
+    "structureDefId" INTEGER NOT NULL,
+    "totalSlots" INTEGER NOT NULL,
+    "requiredSlots" INTEGER NOT NULL DEFAULT 0,
+    "energyCostPerHour" INTEGER NOT NULL DEFAULT 0,
+    "disciplineDefId" INTEGER,
+    "xpGrantPerHour" DOUBLE PRECISION NOT NULL DEFAULT 0,
+
+    CONSTRAINT "StructureDef_WorkSlotConfig_pkey" PRIMARY KEY ("structureDefId")
+);
+
+-- CreateTable
+CREATE TABLE "StructureDef_WorkSlotConfig_Requirement" (
+    "structureDefId" INTEGER NOT NULL,
+    "disciplineDefId" INTEGER NOT NULL,
+    "minimumLevel" INTEGER NOT NULL,
+
+    CONSTRAINT "StructureDef_WorkSlotConfig_Requirement_pkey" PRIMARY KEY ("structureDefId","disciplineDefId")
+);
+
+-- CreateTable
+CREATE TABLE "StructureDef_ProductionInput" (
+    "structureDefId" INTEGER NOT NULL,
+    "itemId" INTEGER NOT NULL,
+    "amountPerCycle" DOUBLE PRECISION NOT NULL,
+
+    CONSTRAINT "StructureDef_ProductionInput_pkey" PRIMARY KEY ("structureDefId","itemId")
+);
+
+-- CreateTable
+CREATE TABLE "StructureDef_ProductionOutput" (
+    "structureDefId" INTEGER NOT NULL,
+    "itemId" INTEGER NOT NULL,
+    "amountPerCycle" DOUBLE PRECISION NOT NULL,
+    "dropChance" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+
+    CONSTRAINT "StructureDef_ProductionOutput_pkey" PRIMARY KEY ("structureDefId","itemId")
+);
+
+-- CreateTable
+CREATE TABLE "Structure_ProductionState" (
+    "structureId" INTEGER NOT NULL,
+    "accumulatedCycles" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "lastProductionAt" TIMESTAMPTZ NOT NULL,
+
+    CONSTRAINT "Structure_ProductionState_pkey" PRIMARY KEY ("structureId")
 );
 
 -- CreateTable
@@ -3970,6 +4051,12 @@ CREATE UNIQUE INDEX "Entity_Storage_storageId_key" ON "Entity_Storage"("storageI
 CREATE INDEX "Entity_Housing_structureId_idx" ON "Entity_Housing"("structureId");
 
 -- CreateIndex
+CREATE INDEX "Entity_WorkAssignment_structureId_idx" ON "Entity_WorkAssignment"("structureId");
+
+-- CreateIndex
+CREATE INDEX "Entity_WorkAssignment_assignedUntil_idx" ON "Entity_WorkAssignment"("assignedUntil");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Structure_Storage_storageId_key" ON "Structure_Storage"("storageId");
 
 -- CreateIndex
@@ -4016,6 +4103,18 @@ CREATE INDEX "StructureDef_CraftingConfig_Interaction_craftingInteraction_idx" O
 
 -- CreateIndex
 CREATE INDEX "StructureDef_Upgrade_CraftingInteraction_craftingInteractio_idx" ON "StructureDef_Upgrade_CraftingInteraction"("craftingInteractionId");
+
+-- CreateIndex
+CREATE INDEX "StructureDef_ProductionConfig_EnvCondition_envConditionId_idx" ON "StructureDef_ProductionConfig_EnvCondition"("envConditionId");
+
+-- CreateIndex
+CREATE INDEX "StructureDef_WorkSlotConfig_Requirement_disciplineDefId_idx" ON "StructureDef_WorkSlotConfig_Requirement"("disciplineDefId");
+
+-- CreateIndex
+CREATE INDEX "StructureDef_ProductionInput_itemId_idx" ON "StructureDef_ProductionInput"("itemId");
+
+-- CreateIndex
+CREATE INDEX "StructureDef_ProductionOutput_itemId_idx" ON "StructureDef_ProductionOutput"("itemId");
 
 -- CreateIndex
 CREATE INDEX "StructureDef_FuelConfig_InputFuelType_fuelTypeId_idx" ON "StructureDef_FuelConfig_InputFuelType"("fuelTypeId");
@@ -5467,6 +5566,12 @@ ALTER TABLE "Entity_Housing" ADD CONSTRAINT "Entity_Housing_entityId_fkey" FOREI
 ALTER TABLE "Entity_Housing" ADD CONSTRAINT "Entity_Housing_structureId_fkey" FOREIGN KEY ("structureId") REFERENCES "Structure"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Entity_WorkAssignment" ADD CONSTRAINT "Entity_WorkAssignment_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_WorkAssignment" ADD CONSTRAINT "Entity_WorkAssignment_structureId_fkey" FOREIGN KEY ("structureId") REFERENCES "Structure"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Structure_Storage" ADD CONSTRAINT "Structure_Storage_structureId_fkey" FOREIGN KEY ("structureId") REFERENCES "Structure"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -5546,6 +5651,42 @@ ALTER TABLE "StructureDef_Upgrade_CraftingInteraction" ADD CONSTRAINT "Structure
 
 -- AddForeignKey
 ALTER TABLE "StructureDef_CompostConfig" ADD CONSTRAINT "StructureDef_CompostConfig_structureDefId_fkey" FOREIGN KEY ("structureDefId") REFERENCES "StructureDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_ProductionConfig" ADD CONSTRAINT "StructureDef_ProductionConfig_structureDefId_fkey" FOREIGN KEY ("structureDefId") REFERENCES "StructureDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_ProductionConfig_EnvCondition" ADD CONSTRAINT "StructureDef_ProductionConfig_EnvCondition_structureDefId_fkey" FOREIGN KEY ("structureDefId") REFERENCES "StructureDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_ProductionConfig_EnvCondition" ADD CONSTRAINT "StructureDef_ProductionConfig_EnvCondition_envConditionId_fkey" FOREIGN KEY ("envConditionId") REFERENCES "EnvCondition"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_WorkSlotConfig" ADD CONSTRAINT "StructureDef_WorkSlotConfig_structureDefId_fkey" FOREIGN KEY ("structureDefId") REFERENCES "StructureDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_WorkSlotConfig" ADD CONSTRAINT "StructureDef_WorkSlotConfig_disciplineDefId_fkey" FOREIGN KEY ("disciplineDefId") REFERENCES "DisciplineDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_WorkSlotConfig_Requirement" ADD CONSTRAINT "StructureDef_WorkSlotConfig_Requirement_structureDefId_fkey" FOREIGN KEY ("structureDefId") REFERENCES "StructureDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_WorkSlotConfig_Requirement" ADD CONSTRAINT "StructureDef_WorkSlotConfig_Requirement_disciplineDefId_fkey" FOREIGN KEY ("disciplineDefId") REFERENCES "DisciplineDef"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_ProductionInput" ADD CONSTRAINT "StructureDef_ProductionInput_structureDefId_fkey" FOREIGN KEY ("structureDefId") REFERENCES "StructureDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_ProductionInput" ADD CONSTRAINT "StructureDef_ProductionInput_itemId_fkey" FOREIGN KEY ("itemId") REFERENCES "Item"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_ProductionOutput" ADD CONSTRAINT "StructureDef_ProductionOutput_structureDefId_fkey" FOREIGN KEY ("structureDefId") REFERENCES "StructureDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StructureDef_ProductionOutput" ADD CONSTRAINT "StructureDef_ProductionOutput_itemId_fkey" FOREIGN KEY ("itemId") REFERENCES "Item"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Structure_ProductionState" ADD CONSTRAINT "Structure_ProductionState_structureId_fkey" FOREIGN KEY ("structureId") REFERENCES "Structure"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "StructureDef_FuelConfig" ADD CONSTRAINT "StructureDef_FuelConfig_structureDefId_fkey" FOREIGN KEY ("structureDefId") REFERENCES "StructureDef"("id") ON DELETE CASCADE ON UPDATE CASCADE;

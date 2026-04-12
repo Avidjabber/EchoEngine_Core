@@ -484,6 +484,7 @@ model EnvCondition {
   plotTypeEnvConditions         PlotType_EnvCondition[]
   structureUpgradeEffects       StructureDef_Upgrade_Effect[]
   passiveGeneratorConditions    StructureDef_FuelConfig_EnvCondition[]
+  productionRateModifiers       StructureDef_ProductionConfig_EnvCondition[]
 }
 
 // Environmental conditions active during a weather state (e.g. Storm → Damp, Windy)
@@ -953,6 +954,7 @@ model Entity {
 
   entityStorage          Entity_Storage[]
   housing                Entity_Housing?
+  workAssignment         Entity_WorkAssignment?
   constructionsInitiated Construction[]
   plotBuffs              Plot_Buff[]
   locationEffects        Location_Effect[]
@@ -1382,6 +1384,8 @@ model DisciplineDef {
   recipeCraftingRequirements    Recipe_CraftingRequirement[]
   guildLevelCaps                Guild_DisciplineLevelCap[]
   eventEffects                  EventEffect[]
+  workSlotConfigs               StructureDef_WorkSlotConfig[]
+  workSlotRequirements          StructureDef_WorkSlotConfig_Requirement[]
 }
 
 // Per-guild per-discipline level cap override.
@@ -2748,6 +2752,8 @@ model Item {
   compostInputs                     Item_CompostOutput[] @relation("ItemCompostInputs")
   compostOutputs                    Item_CompostOutput[] @relation("ItemCompostOutputs")
   compostDeposits                   Structure_CompostDeposit[]
+  productionInputs                  StructureDef_ProductionInput[]
+  productionOutputs                 StructureDef_ProductionOutput[]
   treatmentLogs          EntityTreatmentLog[]
   abilityGrantedActions  Ability_GrantedAction[]
   requiredByProfiles     ItemEquipmentProfile_RequiredItem[] @relation("ProfileRequiredItem")
@@ -3234,6 +3240,30 @@ model Entity_Housing {
   @@index([structureId])
 }
 
+// Assigns an entity to a structure as a worker. One row per entity — an entity can only
+// be work-assigned to one structure at a time, independent of housing.
+// The structure must have a StructureDef_WorkSlotConfig (enforced at app layer).
+// App layer enforces WorkSlotConfig.totalSlots (+ upgrade additions) as the hard cap and
+// all StructureDef_WorkSlotConfig_Requirement discipline minimums as hard gates on assignment.
+// The worker computes workEfficiency each tick:
+//   filledSlots = count of Entity_WorkAssignment rows for this structure
+//   if filledSlots < requiredSlots → workEfficiency = 0.0 (structure non-functional for worker-driven effects)
+//   else → workEfficiency = filledSlots / totalSlots (0.25 at quarter capacity, etc.)
+// assignedUntil: when non-null, the worker automatically removes this assignment once the
+//               timestamp is reached. null = indefinite posting.
+model Entity_WorkAssignment {
+  entityId      Int      @id
+  structureId   Int
+  assignedAt    DateTime  @default(now()) @db.Timestamptz
+  assignedUntil DateTime? @db.Timestamptz  // null = indefinite; non-null = auto-unassigned by worker at this time
+
+  entity    Entity    @relation(fields: [entityId],    references: [id], onDelete: Cascade)
+  structure Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+
+  @@index([structureId])
+  @@index([assignedUntil])  // worker queries for expired assignments each tick
+}
+
 // Camp structure inventory. Owned by a storage-type Structure.
 // solidCapacity / liquidCapacity: driven by StructureDef_StorageConfig base values + solid_capacity / liquid_capacity upgrade deltas; recomputed when upgrades apply.
 // rotModifier: driven by StructureDef_StorageConfig.baseRotModifier + rot_modifier upgrade deltas; recomputed when upgrades apply.
@@ -3340,7 +3370,9 @@ model UpgradeEffectType {
   isMedical  Boolean @default(false)
   isCrafting Boolean @default(false)
   isCompost  Boolean @default(false)
-  isPower    Boolean @default(false)  // valid for power-type structures (renamed from isFuel for consistency with StructureType name)
+  isPower      Boolean @default(false)  // valid for power-type structures (renamed from isFuel for consistency with StructureType name)
+  isProduction Boolean @default(false)  // valid for production-type structures
+  isWorkSlot   Boolean @default(false)  // valid for any structure with a StructureDef_WorkSlotConfig
 
   requiresEnvTarget Boolean @default(false)
 
@@ -3394,6 +3426,12 @@ model StructureDef {
   compostConfig    StructureDef_CompostConfig?
   craftingConfig   StructureDef_CraftingConfig?
   fuelConfig       StructureDef_FuelConfig?
+  productionConfig             StructureDef_ProductionConfig?
+  productionInputs             StructureDef_ProductionInput[]
+  productionOutputs            StructureDef_ProductionOutput[]
+  productionEnvConditions      StructureDef_ProductionConfig_EnvCondition[]
+  workSlotConfig               StructureDef_WorkSlotConfig?
+  workSlotRequirements         StructureDef_WorkSlotConfig_Requirement[]
   compostOutputs           Item_CompostOutput[]
   craftingInteractionRules   Guild_CraftingInteractionRule[]
   recipeCraftingRequirements Recipe_CraftingRequirement[]
@@ -3593,6 +3631,169 @@ model StructureDef_CompostConfig {
   volumeCapacity Float?
 
   structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+}
+
+// Base config for production-type StructureDefs.
+// IMPORTANT: production-type defs MUST also have the storage type. Outputs are written to
+// the structure's Structure_Storage. The app enforces this at StructureDef creation.
+// (Same requirement as compost — both types produce items that land in the structure's storage.)
+//
+// Production structures generate item outputs on a cycle-based tick system.
+// Each worker tick the effective cycle rate is computed as:
+//
+//   workEfficiency  = (see StructureDef_WorkSlotConfig for formula)
+//   effectiveRate   = baseCyclesPerHour
+//                   + Σ(envCondition stacks × cycleRatePerStack) per active StructureDef_ProductionConfig_EnvCondition
+//                   + (workEfficiency × workAssignedWithEnergy × staffCyclesPerHour)
+//                   + (hasSatisfiedPowerSource ? poweredCyclesBonus : 0)
+//
+// workAssignedWithEnergy: count of Entity_WorkAssignment rows for this structure where the
+//   entity's currentEnergy > 0. Requires the structure to also have a StructureDef_WorkSlotConfig.
+//   If no WorkSlotConfig exists, staffCyclesPerHour has no effect (no workers can be assigned).
+//
+// Fractional cycles accumulate in Structure_ProductionState.accumulatedCycles and carry over
+// between ticks. Each completed whole cycle:
+//   1. Checks inputs — if any StructureDef_ProductionInput rows exist, all required amounts
+//      must be present in the structure's linked storage. If any are missing, production halts
+//      for that tick (no partial consumption).
+//   2. Consumes inputs from the structure's storage (if any).
+//   3. Produces all outputs — each StructureDef_ProductionOutput row is rolled against
+//      dropChance; successful rolls add amountPerCycle of that item to the structure's storage.
+//   4. Adds filthPerCycle to the structure's filthLevel (if filthPerCycle > 0).
+//
+// Production structures MUST also have the storage type — outputs land in the structure's
+// own Structure_Storage and flow from there like any stored item.
+//
+// Staffing (production-specific per-worker effect — slot count, requirements, energy cost,
+//   and XP grant all live on StructureDef_WorkSlotConfig):
+//   staffCyclesPerHour: contribution per work-assigned entity with energy > 0, scaled by workEfficiency.
+//
+// Power:
+//   poweredCyclesBonus: added to the effective rate when the structure has a satisfied active
+//                       power source. Uses the same power resolution as any other consumer
+//                       (isPowered + fuelCostPerHour on StructureDef). Set to 0 to ignore power.
+//   This is a soft boost — the structure still runs at baseCyclesPerHour + staff contribution
+//   when unpowered. Use StructureDef.isPowered = true only if the structure should be fully
+//   non-functional without power.
+//
+// Environment conditions:
+//   Defined per condition in StructureDef_ProductionConfig_EnvCondition. Each active condition
+//   adds (stackCount × cycleRatePerStack) to the effective rate each tick.
+model StructureDef_ProductionConfig {
+  structureDefId      Int   @id
+  baseCyclesPerHour   Float @default(0)  // passive cycle rate with no staff and no power; 0 = purely staff/power-driven
+  staffCyclesPerHour  Float @default(0)  // base cycles/hr per work-assigned entity with energy > 0, scaled by workEfficiency
+  poweredCyclesBonus  Float @default(0)  // extra cycles/hr when a satisfied power source is active; 0 = power has no effect
+  filthPerCycle       Float @default(0)  // filth added to Structure.filthLevel per completed cycle; 0 = no cycle-driven filth
+
+  structureDef  StructureDef   @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+}
+
+// Env conditions that modify the cycle rate for a production structure.
+// Each tick the worker sums (stack count × cycleRatePerStack) across all active conditions
+// linked here and adds the result to the effective cycle rate.
+// Negative cycleRatePerStack values are valid — a drought could slow a well's output.
+model StructureDef_ProductionConfig_EnvCondition {
+  structureDefId    Int
+  envConditionId    Int
+  cycleRatePerStack Float  // cycle rate added per hour per active stack of this condition; may be negative
+
+  structureDef  StructureDef  @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  envCondition  EnvCondition  @relation(fields: [envConditionId], references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, envConditionId])
+  @@index([envConditionId])
+}
+
+// Work slot configuration for any StructureDef. Defines how many workers can be assigned
+// and the minimum required for worker-driven effects to apply.
+//
+// totalSlots:    base number of Entity_WorkAssignment slots available. Increased by upgrades
+//                with effectType = work_slots. The app enforces this as a hard cap on assignment.
+// requiredSlots: minimum filled slots before workEfficiency > 0. 0 = always functional.
+//                If filledSlots < requiredSlots, worker-driven effects are fully suspended
+//                (presence effects, staffCyclesPerHour, growth bonuses, etc.).
+//                requiredSlots is a blueprint property — upgrades cannot change it.
+//
+// workEfficiency = filledSlots < requiredSlots ? 0.0 : filledSlots / totalSlots
+//
+// Per-worker passive effects (applied each worker tick to each active assigned entity):
+//   energyCostPerHour: energy drained from each work-assigned entity with currentEnergy > 0.
+//                      0 = working here costs no energy.
+//   disciplineDefId:   discipline that receives xpGrantPerHour XP each tick. null = no XP.
+//                      Any DisciplineDef row is valid including the stat progression row.
+//   xpGrantPerHour:    XP granted per active assigned entity per tick. 0 = no XP.
+//
+// The work_slot StructureType must be assigned to the def via StructureDef_StructureType.
+// It can be combined with any other type (e.g. farming + work_slot, housing + medical + work_slot).
+// The slot system is independent of what the structure does — slots can exist purely to
+// enable entity presence effects at the work structure without driving any direct production or bonus.
+model StructureDef_WorkSlotConfig {
+  structureDefId    Int   @id
+  totalSlots        Int           // base worker capacity; increased by work_slots upgrade effect
+  requiredSlots     Int   @default(0)   // minimum filled for worker effects to activate; 0 = always on
+  energyCostPerHour Int   @default(0)   // energy drained from each active assigned entity per tick; 0 = no cost
+  disciplineDefId   Int?               // discipline that receives XP each tick; null = no XP reward
+  xpGrantPerHour    Float @default(0)  // XP granted to each active assigned entity per tick
+
+  structureDef  StructureDef   @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  disciplineDef DisciplineDef? @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
+}
+
+// Discipline level requirements for work assignment at a structure.
+// All listed requirements are hard gates — entities below the minimum level for any row
+// cannot be assigned via Entity_WorkAssignment. Zero rows = any entity may be assigned.
+model StructureDef_WorkSlotConfig_Requirement {
+  structureDefId  Int
+  disciplineDefId Int
+  minimumLevel    Int  // entity's discipline level must be >= this value to be assigned
+
+  structureDef  StructureDef  @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  disciplineDef DisciplineDef @relation(fields: [disciplineDefId], references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, disciplineDefId])
+  @@index([disciplineDefId])
+}
+
+// Items consumed per production cycle. Zero rows = no inputs required (purely generative).
+// All listed items must be present in the structure's storage before a cycle fires.
+// If any input is missing the cycle does not fire and no inputs are consumed.
+model StructureDef_ProductionInput {
+  structureDefId Int
+  itemId         Int
+  amountPerCycle Float  // quantity consumed from storage per completed cycle
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  item         Item         @relation(fields: [itemId],         references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, itemId])
+  @@index([itemId])
+}
+
+// Items produced per production cycle. One or more rows per def.
+// dropChance mirrors the compost system — roll per output per cycle.
+model StructureDef_ProductionOutput {
+  structureDefId Int
+  itemId         Int
+  amountPerCycle Float                  // quantity added to storage per successful roll
+  dropChance     Float @default(1.0)   // 0.0–1.0; 1.0 = always produced
+
+  structureDef StructureDef @relation(fields: [structureDefId], references: [id], onDelete: Cascade)
+  item         Item         @relation(fields: [itemId],         references: [id], onDelete: Restrict)
+
+  @@id([structureDefId, itemId])
+  @@index([itemId])
+}
+
+// Per-instance runtime state for production-type structures.
+// accumulatedCycles carries the fractional cycle remainder between worker ticks.
+// lastProductionAt is updated each tick regardless of whether a cycle completed.
+model Structure_ProductionState {
+  structureId        Int      @id
+  accumulatedCycles  Float    @default(0)  // fractional carry-over; >= 1.0 triggers a production cycle
+  lastProductionAt   DateTime @db.Timestamptz
+
+  structure Structure @relation(fields: [structureId], references: [id], onDelete: Cascade)
 }
 
 // Base config for fuel-type StructureDefs (power sources).
@@ -3832,6 +4033,8 @@ model Structure {
   plots            Plot[]
   residents        Entity_Housing[]
   compostDeposits  Structure_CompostDeposit[]
+  productionState  Structure_ProductionState?
+  workAssignments  Entity_WorkAssignment[]
 
   @@index([campId])
   @@index([structureDefId])

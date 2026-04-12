@@ -308,24 +308,27 @@ TargetScope                             [ DONE ]
   isPowerScope              — valid for StructureDef_FuelConfig.scopeId
   isEfficiencyConsumerScope — valid for StructureDef_Upgrade_Effect.efficiencyConsumerScopeId
 
-  name                 isAbilityTarget  isPresenceScope  isPowerScope  isEfficiencyConsumerScope
-  ──────────           ───────────────  ───────────────  ────────────  ─────────────────────────
-  self                 true             false            false         false
-  action_target        true             false            false         false
-  action_participant   true             false            false         false
-  area                 true             false            false         false
-  housing_structure    false            true             false         false
-  housing_plot         false            true             false         false
-  colocated_entities   false            true             false         false
-  camp_entities        false            true             false         false
-  camp_structures      false            true             false         false
-  structure            false            false            true          false
-  camp                 false            false            true          false
-  location             false            false            true          false
-  faction              false            false            true          false
-  all                  false            false            false         true
-  structures_only      false            false            false         true
-  upgrades_only        false            false            false         true
+  name                       isAbilityTarget  isPresenceScope  isPowerScope  isEfficiencyConsumerScope
+  ──────────                 ───────────────  ───────────────  ────────────  ─────────────────────────
+  self                       true             false            false         false
+  action_target              true             false            false         false
+  action_participant         true             false            false         false
+  area                       true             false            false         false
+  housing_structure          false            true             false         false   // structure entity is housed at
+  housing_plot               false            true             false         false   // plots at entity's housing structure
+  colocated_entities         false            true             false         false   // other entities housed at same structure
+  camp_entities              false            true             false         false   // all entities in same camp
+  camp_structures            false            true             false         false   // all structures in same camp
+  work_structure             false            true             false         false   // structure entity is work-assigned to
+  work_plots                 false            true             false         false   // plots at entity's work structure
+  work_colocated_entities    false            true             false         false   // other entities work-assigned to same structure
+  structure                  false            false            true          false
+  camp                       false            false            true          false
+  location                   false            false            true          false
+  faction                    false            false            true          false
+  all                        false            false            false         true
+  structures_only            false            false            false         true
+  upgrades_only              false            false            false         true
 
 
 ──────────────────────────────────────────────
@@ -400,6 +403,22 @@ Each type has a corresponding config table (except storage, which uses Structure
             —                               scope camp:      satisfies all isPowered in the same camp
             —                               scope location:  satisfies all isPowered across all camps in the location
             —                               scope faction:   satisfies all isPowered across the entire faction
+  work_slot   StructureDef_WorkSlotConfig     worker assignment slots; can pair with any other type;
+              —                               totalSlots + requiredSlots: slot count and minimum threshold for workEfficiency > 0
+              —                               energyCostPerHour + disciplineDefId + xpGrantPerHour: passive per-worker tick effects
+              —                               StructureDef_WorkSlotConfig_Requirement: discipline level hard gates on assignment
+              —                               Entity_WorkAssignment: one active assignment per entity (like housing)
+              —                               workEfficiency = filledSlots < requiredSlots ? 0.0 : filledSlots / totalSlots
+  production  StructureDef_ProductionConfig   cycle-based item generation; MUST pair with storage;
+              —                               inputs:  zero or more StructureDef_ProductionInput rows (items consumed per cycle)
+              —                               outputs: one or more StructureDef_ProductionOutput rows (items produced per cycle, with dropChance)
+              —                               baseCyclesPerHour: passive rate with no staff/power; 0 = purely staff/power-driven
+              —                               staffCyclesPerHour: extra cycles/hr per stationed entity with energy > 0
+              —                               poweredCyclesBonus: extra cycles/hr when a satisfied power source is active (soft boost)
+              —                               filthPerCycle: filth added to Structure.filthLevel per completed cycle (0 = no cycle-driven filth)
+              —                               StructureDef_ProductionConfig_EnvCondition: per-condition cycle rate modifiers (may be negative)
+              —                               slot count, energy, XP, discipline gates → StructureDef_WorkSlotConfig / _Requirement (not on production config)
+              —                               worker efficiency → workEfficiency from WorkSlotConfig scales staffCyclesPerHour contribution
 
 
 ──────────────────────────────────────────────
@@ -450,33 +469,39 @@ Column meanings:
                       etc. because each structure type has its own flag column. For "all"
                       effects this is true; for type-specific effects it matches the type.
 
-  name                  validFor                                    requiresEnvTarget  isPower
-  ────────────────────  ──────────────────────────────────────────  ─────────────────  ───────
-  solid_capacity        storage                                     false              false
-  liquid_capacity       storage                                     false              false
-  rot_modifier          storage                                     false              false
-  security_rating       storage                                     false              false
-  plot_count            farming                                     false              false
-  growth_rate           farming                                     false              false
-  env_override          all                                         true               true
-  env_inject            all                                         true               true
-  soil_quality          farming                                     false              false
-  comfortable_capacity  housing                                     false              false
-  max_capacity          housing                                     false              false
-  treatment_bonus       medical                                     false              false
-  exam_bonus            medical                                     false              false
-  recovery_modifier     medical                                     false              false
-  contagion_resist      medical                                     false              false
-  crafting_roll_bonus   crafting                                    false              false
-  output_quantity_bonus crafting                                    false              false
-  conversion_speed      compost                                     false              false
-  fuel_capacity         power                                       false              true
-  fuel_efficiency       power                                       false              true
-  passive_gen_rate      power                                       false              true
-  weight_capacity       compost                                     false              false
-  volume_capacity       compost                                     false              false
-  damage_resistance     all                                         false              true
-  filth_reduction       all                                         false              true
+  name                   validFor                                    requiresEnvTarget  isPower  isProduction  isWorkSlot
+  ─────────────────────  ──────────────────────────────────────────  ─────────────────  ───────  ────────────  ──────────
+  solid_capacity         storage                                     false              false    false         false
+  liquid_capacity        storage                                     false              false    false         false
+  rot_modifier           storage                                     false              false    false         false
+  security_rating        storage                                     false              false    false         false
+  plot_count             farming                                     false              false    false         false
+  growth_rate            farming                                     false              false    false         false
+  env_override           all                                         true               true     true          true
+  env_inject             all                                         true               true     true          true
+  soil_quality           farming                                     false              false    false         false
+  comfortable_capacity   housing                                     false              false    false         false
+  max_capacity           housing                                     false              false    false         false
+  treatment_bonus        medical                                     false              false    false         false
+  exam_bonus             medical                                     false              false    false         false
+  recovery_modifier      medical                                     false              false    false         false
+  contagion_resist       medical                                     false              false    false         false
+  crafting_roll_bonus    crafting                                    false              false    false         false
+  output_quantity_bonus  crafting                                    false              false    false         false
+  conversion_speed       compost                                     false              false    false         false
+  fuel_capacity          power                                       false              true     false         false
+  fuel_efficiency        power                                       false              true     false         false
+  passive_gen_rate       power                                       false              true     false         false
+  weight_capacity        compost                                     false              false    false         false
+  volume_capacity        compost                                     false              false    false         false
+  damage_resistance      all                                         false              true     true          true
+  filth_reduction        all                                         false              true     true          true
+  production_rate        production                                  false              false    true          false
+  staff_rate             production                                  false              false    true          false
+  powered_rate           production                                  false              false    true          false
+  station_xp_bonus       any def with WorkSlotConfig                 false              false    false         true
+  energy_drain_reduction any def with WorkSlotConfig                 false              false    false         true
+  work_slots             any def with WorkSlotConfig                 false              false    false         true
 
 
 ──────────────────────────────────────────────
