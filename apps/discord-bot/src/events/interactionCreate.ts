@@ -13,7 +13,7 @@ function dispatch(handlers: ComponentHandler[], interaction: Interaction): Promi
 
 function isDenManagementCommand(interaction: Interaction): boolean {
     if (!interaction.isChatInputCommand()) return false;
-    const EXEMPT_SUBCOMMANDS = new Set(['set', 'remove', 'list']);
+    const EXEMPT_SUBCOMMANDS = new Set(['set', 'remove', 'list', 'config']);
     return (
         interaction.commandName === 'server' &&
         interaction.options.getSubcommandGroup(false) === 'den' &&

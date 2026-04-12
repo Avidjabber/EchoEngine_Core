@@ -1,4 +1,5 @@
 import { ButtonInteraction, ModalSubmitInteraction, StringSelectMenuInteraction } from 'discord.js';
+import { handleDenToggle, handleDenDone, handleDenDelete } from '../commands/Aggregate/server/den/configHandlers';
 
 type AnyComponentInteraction =
     | ButtonInteraction
@@ -11,16 +12,14 @@ export interface ComponentHandler {
 }
 
 // ── Modal handlers ─────────────────────────────────────────────────────────────
-// import { handleSomeModal } from '../commands/Aggregate/Something/actions/someModalHandler';
-//
-// export const modalHandlers: ComponentHandler[] = [
-//     { prefix: 'someModal', handler: handleSomeModal },
-// ];
-
 export const modalHandlers: ComponentHandler[] = [];
 
 // ── Select menu handlers ───────────────────────────────────────────────────────
 export const selectMenuHandlers: ComponentHandler[] = [];
 
 // ── Button handlers ────────────────────────────────────────────────────────────
-export const buttonHandlers: ComponentHandler[] = [];
+export const buttonHandlers: ComponentHandler[] = [
+    { prefix: 'den_toggle:', handler: interaction => handleDenToggle(interaction as ButtonInteraction) },
+    { prefix: 'den_done:',   handler: interaction => handleDenDone(interaction as ButtonInteraction) },
+    { prefix: 'den_delete:', handler: interaction => handleDenDelete(interaction as ButtonInteraction) },
+];

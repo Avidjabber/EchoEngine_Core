@@ -40,4 +40,20 @@ export class ServerRepository {
             data: { guildId, ownerId },
         });
     }
+
+    updateDen(guildId: string, channelId: string, data: {
+        allowWorldSim: boolean;
+        allowConditions: boolean;
+        allowCombat: boolean;
+        allowActivities: boolean;
+        allowEvents: boolean;
+        allowCrafting: boolean;
+        allowProgression: boolean;
+        allowSocial: boolean;
+    }) {
+        return this.db.echoDens.update({
+            where: { guildId_channelId: { guildId, channelId } },
+            data,
+        });
+    }
 }
