@@ -6,9 +6,114 @@ import {
 } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
-import { removeDen, updateDen } from '../../../../services/server/denService';
+import { getDen, getDens, removeDen, updateDen } from '../../../../services/server/denService';
 import { getState, clearState, setState, DenConfigKey } from './configState';
 import { buildDenConfigComponents } from './configComponents';
+import { buildDenListComponents } from './listComponents';
+
+// ── List → Config ────────────────────────────────────────────────────────────
+// customId format: den_list_config:<channelId>
+
+export async function handleDenListConfig(interaction: ButtonInteraction): Promise<void> {
+    const channelId = interaction.customId.split(':')[1];
+    const guildId   = interaction.guildId!;
+
+    await interaction.deferUpdate();
+
+    const result = await getDen(guildId, channelId);
+
+    if (!result.success) {
+        await interaction.editReply({
+            flags:      MessageFlags.IsComponentsV2,
+            components: [
+                new ContainerBuilder()
+                    .setAccentColor(colors.error)
+                    .addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(messages.denNotFound),
+                    ),
+            ] as never,
+        });
+        return;
+    }
+
+    const den = result.value!;
+
+    setState(interaction.user.id, channelId, {
+        guildId,
+        channelId,
+        allowWorldSim:    den.allowWorldSim,
+        allowConditions:  den.allowConditions,
+        allowCombat:      den.allowCombat,
+        allowActivities:  den.allowActivities,
+        allowEvents:      den.allowEvents,
+        allowCrafting:    den.allowCrafting,
+        allowProgression: den.allowProgression,
+        allowSocial:      den.allowSocial,
+    });
+
+    const channel     = interaction.guild?.channels.cache.get(channelId);
+    const channelName = channel && 'name' in channel ? (channel.name as string) : channelId;
+
+    await interaction.editReply({
+        flags:      MessageFlags.IsComponentsV2,
+        components: buildDenConfigComponents(
+            {
+                guildId,
+                channelId,
+                allowWorldSim:    den.allowWorldSim,
+                allowConditions:  den.allowConditions,
+                allowCombat:      den.allowCombat,
+                allowActivities:  den.allowActivities,
+                allowEvents:      den.allowEvents,
+                allowCrafting:    den.allowCrafting,
+                allowProgression: den.allowProgression,
+                allowSocial:      den.allowSocial,
+            },
+            channelName,
+        ) as never,
+    });
+}
+
+// ── List done ────────────────────────────────────────────────────────────────
+// customId: den_list_done
+
+export async function handleDenListDone(interaction: ButtonInteraction): Promise<void> {
+    await interaction.deferUpdate();
+    await interaction.deleteReply();
+}
+
+// ── List pagination ──────────────────────────────────────────────────────────
+// customId format: den_list_page:<page>
+
+export async function handleDenListPage(interaction: ButtonInteraction): Promise<void> {
+    const page    = parseInt(interaction.customId.split(':')[1], 10);
+    const guildId = interaction.guildId!;
+
+    await interaction.deferUpdate();
+
+    const result = await getDens(guildId);
+
+    if (!result.success) {
+        await interaction.editReply({
+            flags:      MessageFlags.IsComponentsV2,
+            components: [
+                new ContainerBuilder()
+                    .setAccentColor(colors.error)
+                    .addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(messages.apiError(result.error!)),
+                    ),
+            ] as never,
+        });
+        return;
+    }
+
+    const dens = result.value ?? [];
+
+    await interaction.editReply({
+        flags:      MessageFlags.IsComponentsV2,
+        components: buildDenListComponents(dens, page) as never,
+    });
+}
 
 // ── Toggle ──────────────────────────────────────────────────────────────────
 // customId format: den_toggle:<fieldKey>:<channelId>
