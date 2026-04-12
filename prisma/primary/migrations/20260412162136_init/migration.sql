@@ -202,6 +202,22 @@ CREATE TABLE "Symptom" (
 );
 
 -- CreateTable
+CREATE TABLE "SymptomFlavorText" (
+    "id" SERIAL NOT NULL,
+    "text" VARCHAR(300) NOT NULL,
+
+    CONSTRAINT "SymptomFlavorText_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Symptom_FlavorText" (
+    "symptomId" INTEGER NOT NULL,
+    "flavorTextId" INTEGER NOT NULL,
+
+    CONSTRAINT "Symptom_FlavorText_pkey" PRIMARY KEY ("symptomId","flavorTextId")
+);
+
+-- CreateTable
 CREATE TABLE "DropTable" (
     "id" SERIAL NOT NULL,
     "guildId" VARCHAR(50) NOT NULL,
@@ -3304,6 +3320,9 @@ CREATE UNIQUE INDEX "Stat_name_key" ON "Stat"("name");
 CREATE UNIQUE INDEX "Symptom_name_key" ON "Symptom"("name");
 
 -- CreateIndex
+CREATE INDEX "Symptom_FlavorText_flavorTextId_idx" ON "Symptom_FlavorText"("flavorTextId");
+
+-- CreateIndex
 CREATE INDEX "DropTable_guildId_idx" ON "DropTable"("guildId");
 
 -- CreateIndex
@@ -4817,6 +4836,12 @@ ALTER TABLE "GuildSettings" ADD CONSTRAINT "GuildSettings_currentPatternId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "GuildSettings" ADD CONSTRAINT "GuildSettings_currentPatternStepId_fkey" FOREIGN KEY ("currentPatternStepId") REFERENCES "WeatherPatternStep"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Symptom_FlavorText" ADD CONSTRAINT "Symptom_FlavorText_symptomId_fkey" FOREIGN KEY ("symptomId") REFERENCES "Symptom"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Symptom_FlavorText" ADD CONSTRAINT "Symptom_FlavorText_flavorTextId_fkey" FOREIGN KEY ("flavorTextId") REFERENCES "SymptomFlavorText"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "DropTable_Entry" ADD CONSTRAINT "DropTable_Entry_dropTableId_fkey" FOREIGN KEY ("dropTableId") REFERENCES "DropTable"("id") ON DELETE CASCADE ON UPDATE CASCADE;
