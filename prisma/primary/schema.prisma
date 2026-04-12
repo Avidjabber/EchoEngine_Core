@@ -336,6 +336,31 @@ model Symptom {
 
   conditionSymptomTags ConditionDef_SymptomTag[]
   itemEffects          ItemEffect[]
+  flavorTextLinks      Symptom_FlavorText[]
+}
+
+// A reusable ambient message template that can be emitted during the daily tick when an entity
+// has an undiscovered condition carrying a linked symptom.
+// text supports a {name} placeholder replaced with the entity's name at emit time.
+// Multiple symptoms can share the same template; each symptom can have multiple templates —
+// the tick picks one at random from the pool of all templates linked to the chosen symptom.
+model SymptomFlavorText {
+  id   Int    @id @default(autoincrement())
+  text String @db.VarChar(300)  // e.g. "{name} was heard coughing in the night."
+
+  symptomLinks Symptom_FlavorText[]
+}
+
+// Join table: many symptoms ↔ many flavor text templates
+model Symptom_FlavorText {
+  symptomId    Int
+  flavorTextId Int
+
+  symptom    Symptom           @relation(fields: [symptomId],    references: [id], onDelete: Cascade)
+  flavorText SymptomFlavorText @relation(fields: [flavorTextId], references: [id], onDelete: Cascade)
+
+  @@id([symptomId, flavorTextId])
+  @@index([flavorTextId])
 }
 
 

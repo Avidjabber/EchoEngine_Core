@@ -802,9 +802,6 @@ Symptom                                 [ DONE ]
   Incontinence                       5
   Strong Urine Odor                  5
   Swollen Abdomen (Fluid Buildup)    5
-  Miscarriage                        0
-  Abnormal Discharge (Reproductive)  8
-  Labor Complications                3
   Low Milk Production                12
 
   MUSCULOSKELETAL
@@ -908,6 +905,198 @@ Symptom                                 [ DONE ]
   Respiratory Illness   5
   Poisoning             10
   Drooling              3
+
+
+──────────────────────────────────────────────
+SymptomFlavorText                       [ DONE ]
+──────────────────────────────────────────────
+  Global ambient message templates emitted during the daily tick when an entity has an
+  undiscovered condition carrying a linked symptom. Text supports a {name} placeholder
+  replaced with the entity's name at emit time. Not guild-extensible.
+
+  One template seeded per symptom (see Symptom_FlavorText below for the join).
+  Additional templates can be added later to any symptom for random variation.
+
+  RESPIRATORY
+  symptom                         text
+  Runny Nose                      {name}'s nose has been running all day, leaving damp traces on their face.
+  Sneezing                        {name} let out a sudden sneeze that scattered the nearby bedding.
+  Nasal Bleeding                  A thin trail of blood was spotted beneath {name}'s nose.
+  Congestion                      {name} has been breathing through their mouth, their nose seemingly blocked.
+  Coughing                        {name} was heard coughing fitfully in the night.
+  Sore Throat                     {name} winced when swallowing their meal, favoring one side of their throat.
+  Wheezing                        A faint wheeze follows {name}'s every breath.
+  Rattling Breath                 {name}'s breathing carries an unsettling rattle.
+  Rapid Breathing                 {name} has been breathing rapidly, even while resting.
+  Labored Breathing               Each breath {name} takes appears to cost them considerable effort.
+  Difficulty Breathing            {name} has been pausing frequently, struggling to catch their breath.
+  Open-mouth Breathing            {name} has been keeping their mouth open, even in the cool air.
+  Gasping for Air                 {name} was seen gasping for air near the food stores.
+  Cyanosis (Bluish Tongue/Gums)   {name}'s tongue and gums have taken on an unusual bluish hue.
+  Choking                         {name} was seen gagging and clawing at their throat.
+
+  NEUROLOGICAL
+  symptom                                    text
+  Unconsciousness                            {name} was found unresponsive and could not be roused.
+  Seizure                                    {name} collapsed suddenly, their limbs seizing uncontrollably for several heartbeats.
+  Tremors                                    A subtle trembling runs through {name}'s body, even at rest.
+  Disorientation                             {name} wandered past their own bedding twice before settling.
+  Dizziness                                  {name} stumbled when turning their head, nearly losing their footing.
+  Confusion                                  {name} stared blankly when spoken to, slow to respond.
+  Memory Loss                                {name} asked about a meal they had already eaten this morning.
+  Head Tilt                                  {name} has been holding their head at an odd angle all day.
+  Circling                                   {name} was spotted walking in tight circles near the camp entrance.
+  Loss of Coordination (Ataxia)              {name}'s limbs seem to be working against each other.
+  Hyperactivity                              {name} has barely rested, moving restlessly from place to place without purpose.
+  Depression (Low Mood / Unresponsiveness)   {name} has been sitting alone at the edge of camp, uninterested in the day's activities.
+  Hallucination-like Behavior                {name} startled at nothing, their gaze fixed on an empty patch of ground.
+  Sensitivity to Sound                       {name} flinched sharply at a sound no one else seemed to notice.
+  Sudden Personality Change                  Those who know {name} well have noticed something unsettling in how they carry themselves today.
+
+  DIGESTIVE
+  symptom                 text
+  Vomiting                {name} was found retching alone before dawn.
+  Nausea                  {name} turned away from their food without eating, looking unwell.
+  Diarrhea                {name} has made several trips to the latrine today.
+  Constipation            {name} was seen straining at the latrine but returned without relief.
+  Loss of Appetite        {name} left their food untouched again today.
+  Bellyache               {name} has been curled tightly around their belly for most of the afternoon.
+  Bloating                {name}'s belly appears more rounded than usual.
+  Excessive Gas           An unpleasant odor has been following {name} around camp today.
+  Straining to Defecate   {name} returned from the latrine with discomfort plain on their face.
+  Blood in Stool          Something troubling was discovered at the latrine, apparently left by {name}.
+  Black/Tarry Stool       A dark, foul-smelling deposit was found at the latrine, believed to be {name}'s.
+  Regurgitation           {name} regurgitated their meal shortly after eating.
+  Difficulty Swallowing   {name} struggled to get even a small bite of food down without discomfort.
+
+  CARDIOVASCULAR
+  symptom               text
+  Irregular Heartbeat   {name}'s heartbeat seemed to skip and stutter when listened to closely.
+  Weak Pulse            {name}'s pulse is faint and difficult to find.
+  Fainting (Syncope)    {name} went limp without warning and had to be steadied before hitting the ground.
+  Cold Extremities      {name}'s extremities were noticeably cold to the touch despite the mild weather.
+
+  URINARY / REPRODUCTIVE
+  symptom                            text
+  Frequent Urination                 {name} has visited the latrine far more often than usual today.
+  Painful Urination                  {name} was heard making small sounds of pain at the latrine.
+  Blood in Urine                     Something alarming was noticed at the latrine, suggesting {name} may be unwell.
+  Incontinence                       A damp patch was found near where {name} had been sleeping.
+  Strong Urine Odor                  An unusually sharp odor seems to follow {name} from the latrine.
+  Swollen Abdomen (Fluid Buildup)    {name}'s belly has been swelling in a way that doesn't look like healthy weight gain.
+  Low Milk Production                {name}'s offspring have been crying more than usual, unsatisfied after nursing.
+
+  MUSCULOSKELETAL
+  symptom                   text
+  Limping                   {name} has been favoring one leg today, placing less weight on it with each step.
+  Paralysis                 {name} was found unable to move their hindquarters.
+  Stiffness                 {name} rose from their resting place slowly this morning, each movement careful and deliberate.
+  Joint Pain                {name} winced quietly when their leg was brushed, though they tried to hide it.
+  Broken Bone               {name} cried out when putting weight on one leg and has been reluctant to walk on it since.
+  Sprain                    {name} returned from patrol with a pronounced limp.
+  Muscle Cramps             {name} was found frozen mid-step, waiting for a cramp to pass.
+  Muscle Rigidity           {name}'s movements have become unusually stiff and stilted.
+  Muscle Wasting            {name} appears thinner than before, particularly around the haunches.
+  Trembling When Standing   {name} trembled visibly while trying to hold themselves upright.
+  Reluctance to Move        {name} has remained in their resting place all day, reluctant to stir.
+  Difficulty Rising         {name} struggled to push themselves upright this morning.
+  Loss of Balance           {name} stumbled sideways while simply standing still.
+  Numbness                  {name} showed no reaction when their foot was carefully prodded.
+
+  SYSTEMIC / GENERAL
+  symptom               text
+  Fever                 {name}'s body radiates an unusual heat, their nose dry to the touch.
+  Chills                {name} has been shivering despite the warmth of the den.
+  Fatigue               {name} dozed off mid-sentence while talking to a companion.
+  Lethargy              {name} has barely stirred from their resting place, moving only when necessary.
+  Weakness              {name} struggled to carry even a small amount of food back to camp.
+  Shivering             {name} has been shivering steadily since returning from patrol.
+  Panting               {name} has been panting heavily, their tongue lolling even in the shade.
+  Dehydration           {name}'s skin tented slightly when gently pinched — they haven't been drinking enough.
+  Excessive Thirst      {name} has visited the water source more times today than anyone can count.
+  Weight Loss           {name} looks notably leaner than they did recently.
+  Visible Ribs          {name}'s ribs are visible when they stretch, despite eating regularly.
+  Emaciation            {name} looks gaunt, their bones pressing visibly through their thinning skin.
+  Pot Belly             {name}'s belly hangs low and round, out of proportion with the rest of their frame.
+  Hunger Pangs          {name} was caught raiding the food stores in the early morning hours.
+  Shock                 {name} was found sitting with a blank stare, unresponsive and limp.
+  Sudden Collapse       {name} dropped without warning during the morning gathering.
+  Failure to Thrive     {name} has not grown as expected and seems weaker than others their age.
+  Heat Intolerance      {name} retreated to the shadiest corner of camp and refused to move during the afternoon.
+  Cold Intolerance      {name} pressed close to their companions for warmth even though the air is mild.
+  Night Sweats          {name}'s bedding was found damp with sweat despite the cool night air.
+  Enlarged Organs       {name}'s belly feels firm and swollen in a way that didn't used to be there.
+  Swollen Lymph Nodes   Small, firm lumps were felt beneath {name}'s jaw during an examination.
+  Aggression            {name} snapped at a companion without apparent cause.
+  Restlessness          {name} paced the length of the camp deep into the night.
+  Anxiety               {name} startled at every sound today, unable to settle.
+  Withdrawal            {name} has been avoiding their usual company, retreating to a quiet corner.
+
+  WOUNDS / SKIN
+  symptom                   text
+  Bleeding                  {name} was seen with blood matting around a wound.
+  Wound                     {name} was spotted tending to a fresh injury on their side.
+  Pain                      {name} flinched when a companion brushed against them.
+  Burn                      {name}'s skin is visibly singed, raw and tender to the touch.
+  Blistering                Fluid-filled swellings were found on {name}'s flank.
+  Bruising                  Dark patches were found beneath {name}'s skin, tender to the touch.
+  Itching                   {name} has been scratching at the same spot relentlessly.
+  Pus                       A foul-smelling yellow discharge was found seeping from a wound on {name}.
+  Swelling                  A notable lump has appeared on {name}'s leg, warm and firm.
+  Rash                      A patch of irritated, reddened skin was found on {name}'s flank.
+  Discharge                 An unusual fluid was found seeping from one of {name}'s wounds.
+  Inflammation              The skin around {name}'s injury is hot, tight, and visibly swollen.
+  Infection                 {name}'s wound has taken on an angry red color and an unpleasant smell.
+  Festering Wound           {name}'s wound has not closed and appears to be worsening.
+  Hair Loss                 A bare patch has appeared on {name}'s coat.
+  Matted Fur                {name}'s coat is tangled and matted, something unusual for them.
+  Dry Skin                  {name}'s coat has been dull and flaky lately.
+  Hot Spots                 {name} has been worrying at one spot on their flank until it is raw.
+  Scabs                     Several crusty scabs have formed along {name}'s back.
+  Flaky Skin (Dandruff)     A dusting of white flakes falls from {name}'s coat when they move.
+  Thickened Skin            A rough, leathery patch has formed on the sole of {name}'s foot.
+  Skin Discoloration        An area of {name}'s skin has changed to an unusual color.
+
+  HEAD / SENSES
+  symptom                   text
+  Glazed Eyes               {name}'s eyes have a distant, unfocused quality to them.
+  Sunken Eyes               {name}'s eyes look sunken, the hollows around them more pronounced than usual.
+  Cloudy Eye                One of {name}'s eyes has a milky cloudiness to it.
+  Squinting                 {name} has been squinting against the daylight.
+  Red Eyes                  The whites of {name}'s eyes are rimmed with red.
+  Eye Discharge             Crusty discharge has been collecting in the corners of {name}'s eyes.
+  Dilated Pupils            {name}'s pupils are wide even in bright light.
+  Unequal Pupil Size        {name}'s pupils are mismatched, one noticeably larger than the other.
+  Loss of Vision            {name} misjudged a jump they would normally make with ease.
+  Sensitivity to Light      {name} kept their eyes half-closed and turned away from the sun all day.
+  Blurred Vision            {name} has been squinting and moving closer to examine things they normally see clearly.
+  Loss of Hearing           {name} didn't respond when called from across camp.
+  Head Shaking              {name} has been shaking their head repeatedly throughout the day.
+  Ear Discharge             A dark, waxy discharge was spotted inside {name}'s ear.
+  Ear Odor                  An unpleasant smell was noticed when {name} shook their head nearby.
+  Bad Breath                {name}'s breath has been notably unpleasant today.
+  Gum Swelling              {name}'s gums look red and puffy when they open their mouth.
+  Pale Gums                 {name}'s gums are pale, nearly white.
+  Yellowing Gums            {name}'s gums have taken on a yellowish tint.
+  Foaming at Mouth          {name} was found with foam gathering at the corners of their mouth.
+  Toothache                 {name} has been avoiding chewing on one side.
+
+  OTHER
+  symptom               text
+  Hypersensitivity      {name} recoiled sharply when touched, as if the lightest contact caused pain.
+  Respiratory Illness   {name} has been struggling with their breathing throughout the day.
+  Poisoning             {name} is showing signs of severe distress — something is deeply wrong.
+  Drooling              Drool has been gathering at the corners of {name}'s mouth.
+
+
+──────────────────────────────────────────────
+Symptom_FlavorText                      [ DONE ]
+──────────────────────────────────────────────
+  Join table linking symptoms to flavor text templates (many-to-many).
+  Seeded as a 1:1 pairing at launch — one template per symptom.
+  Adding a second row for any symptom is all that's needed for random variation.
+
+  (No explicit table shown — fully derived from SymptomFlavorText data above.)
 
 
 ──────────────────────────────────────────────
