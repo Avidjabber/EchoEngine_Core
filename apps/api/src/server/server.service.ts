@@ -4,6 +4,7 @@ import { CreateDenDto } from './dto/create-den.dto';
 import { UpdateDenDto } from './dto/update-den.dto';
 import { UpdateGuildSettingsDto } from './dto/update-guild-settings.dto';
 import { ResetGuildSettingsDto } from './dto/reset-guild-settings.dto';
+import { ServerRepository } from './server.repository';
 
 const GUILD_SETTINGS_DEFAULTS = {
     defaultDailyEnergy:          100,
@@ -24,7 +25,6 @@ const GUILD_SETTINGS_DEFAULTS = {
     progressionEnabled: true,
     socialEnabled:      true,
 } as const;
-import { ServerRepository } from './server.repository';
 
 @Injectable()
 export class ServerService {
