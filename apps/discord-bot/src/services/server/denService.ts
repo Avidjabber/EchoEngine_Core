@@ -44,8 +44,8 @@ export async function getDen(guildId: string, channelId: string) {
     return apiClient.get<Den>(`/server/dens/single?guildId=${encodeURIComponent(guildId)}&channelId=${encodeURIComponent(channelId)}`);
 }
 
-export async function createDen(guildId: string, channelId: string, ownerId: string) {
-    return apiClient.post<CreateDenResponse>('/server/dens', { guildId, channelId, ownerId });
+export async function createDen(guildId: string, channelId: string) {
+    return apiClient.post<CreateDenResponse>('/server/dens', { guildId, channelId });
 }
 
 export async function updateDen(payload: UpdateDenPayload) {

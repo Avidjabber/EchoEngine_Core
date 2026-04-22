@@ -63,9 +63,9 @@ export class ServerRepository {
         });
     }
 
-    createGuildSettings(guildId: string, ownerId: string) {
+    createGuildSettings(guildId: string) {
         return this.db.guildSettings.create({
-            data: { guildId, ownerId },
+            data: { guildId },
         });
     }
 

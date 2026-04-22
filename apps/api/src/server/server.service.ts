@@ -137,7 +137,7 @@ export class ServerService {
         const existingSettings = await this.serverRepo.findGuildSettings(dto.guildId);
         const firstTimeSetup = !existingSettings;
         if (firstTimeSetup) {
-            await this.serverRepo.createGuildSettings(dto.guildId, dto.ownerId);
+            await this.serverRepo.createGuildSettings(dto.guildId);
         }
 
         return { den, firstTimeSetup };

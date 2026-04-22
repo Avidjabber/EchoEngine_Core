@@ -66,8 +66,7 @@ export function buildFlagsSettingsComponents(state: GuildSettingsState, guildNam
         return {
             type:       9,  // Section
             components: [
-                { type: 10, content: `**${label}** — ${enabled ? 'Enabled' : 'Disabled'}` },
-                { type: 10, content: `-# ${description}` },
+                { type: 10, content: `**${label}** — ${enabled ? 'Enabled' : 'Disabled'}\n-# ${description}` },
             ],
             accessory: {
                 type:      2,
@@ -92,12 +91,7 @@ export function buildFlagsSettingsComponents(state: GuildSettingsState, guildNam
         {
             type:       1,  // ActionRow
             components: [
-                { type: 2, label: 'Main', style: 2, custom_id: 'gs_section:main' },
-            ],
-        },
-        {
-            type:       1,  // ActionRow
-            components: [
+                { type: 2, label: 'Main',     style: 2, custom_id: 'gs_section:main' },
                 { type: 2, label: 'Cancel',   style: 4, custom_id: 'gs_cancel' },
                 { type: 2, label: 'Finalize', style: 3, custom_id: 'gs_finalize' },
             ],

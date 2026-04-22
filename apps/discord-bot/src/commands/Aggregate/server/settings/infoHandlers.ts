@@ -32,8 +32,6 @@ export async function handleGsiSection(interaction: ButtonInteraction): Promise<
         return;
     }
 
-    await interaction.deferUpdate();
-
     let components: object[];
 
     if (section === 'farming') {
@@ -44,7 +42,7 @@ export async function handleGsiSection(interaction: ButtonInteraction): Promise<
         components = buildInfoMainComponents(state, guildName);
     }
 
-    await interaction.editReply({
+    await interaction.update({
         flags:      MessageFlags.IsComponentsV2,
         components: components as never,
     });

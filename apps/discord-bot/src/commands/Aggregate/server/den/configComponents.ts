@@ -23,7 +23,7 @@ export function buildDenConfigComponents(state: DenConfigState, channelName: str
         return {
             type: 9,  // Section
             components: [
-                { type: 10, content: `${label}: **${enabled ? 'True' : 'False'}**` },
+                { type: 10, content: `**${label}:** ${enabled ? 'True' : 'False'}` },
             ],
             accessory: {
                 type:      2,

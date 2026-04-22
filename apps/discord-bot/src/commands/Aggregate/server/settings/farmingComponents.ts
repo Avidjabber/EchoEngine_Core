@@ -34,8 +34,7 @@ export function buildFarmingSettingsComponents(state: GuildSettingsState, guildN
     const sections = FARMING_FIELDS.map(({ key, label, description }) => ({
         type:       9,  // Section
         components: [
-            { type: 10, content: `**${label}** — ${state[key]}` },
-            { type: 10, content: `-# ${description}` },
+            { type: 10, content: `**${label}** — ${state[key]}\n-# ${description}` },
         ],
         accessory: {
             type:      2,

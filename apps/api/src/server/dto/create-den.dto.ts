@@ -9,7 +9,4 @@ export class CreateDenDto {
     @IsNotEmpty()
     declare channelId: string;
 
-    @IsString()
-    @IsNotEmpty()
-    declare ownerId: string;
 }

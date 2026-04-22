@@ -57,8 +57,7 @@ export function buildGuildSettingsComponents(state: GuildSettingsState, guildNam
     const numberSections = SETTINGS_NUMBER_FIELDS.map(({ key, label, description }) => ({
         type:       9,  // Section
         components: [
-            { type: 10, content: `**${label}** — ${formatValue(key, state)}` },
-            { type: 10, content: `-# ${description}` },
+            { type: 10, content: `**${label}** — ${formatValue(key, state)}\n-# ${description}` },
         ],
         accessory: {
             type:      2,
