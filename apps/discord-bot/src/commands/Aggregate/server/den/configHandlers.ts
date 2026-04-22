@@ -151,6 +151,51 @@ export async function handleDenToggle(interaction: ButtonInteraction): Promise<v
     });
 }
 
+// ── Reset defaults ───────────────────────────────────────────────────────────
+// customId format: den_reset_defaults:<channelId>
+
+export async function handleDenResetDefaults(interaction: ButtonInteraction): Promise<void> {
+    const channelId = interaction.customId.split(':')[1];
+
+    const state = getState(interaction.user.id, channelId);
+
+    if (!state) {
+        await interaction.reply({
+            flags:      MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
+            components: [
+                new ContainerBuilder()
+                    .setAccentColor(colors.error)
+                    .addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(messages.notYourButton),
+                    ),
+            ],
+        });
+        return;
+    }
+
+    const reset = {
+        ...state,
+        allowWorldSim:    true,
+        allowConditions:  true,
+        allowCombat:      true,
+        allowActivities:  true,
+        allowEvents:      true,
+        allowCrafting:    true,
+        allowProgression: true,
+        allowSocial:      true,
+    };
+
+    setState(interaction.user.id, channelId, reset);
+
+    const channel     = interaction.guild?.channels.cache.get(channelId);
+    const channelName = channel && 'name' in channel ? (channel.name as string) : channelId;
+
+    await interaction.update({
+        flags:      MessageFlags.IsComponentsV2,
+        components: buildDenConfigComponents(reset, channelName) as never,
+    });
+}
+
 // ── Done ────────────────────────────────────────────────────────────────────
 // customId format: den_done:<channelId>
 

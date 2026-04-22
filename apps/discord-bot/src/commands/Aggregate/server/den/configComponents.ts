@@ -52,8 +52,9 @@ export function buildDenConfigComponents(state: DenConfigState, channelName: str
         {
             type:       1,  // ActionRow
             components: [
-                { type: 2, label: 'Done',       style: 3, custom_id: `den_done:${state.channelId}` },
-                { type: 2, label: 'Delete Den', style: 4, custom_id: `den_delete:${state.channelId}` },
+                { type: 2, label: 'Reset Defaults', style: 2, custom_id: `den_reset_defaults:${state.channelId}` },
+                { type: 2, label: 'Done',            style: 3, custom_id: `den_done:${state.channelId}` },
+                { type: 2, label: 'Delete Den',      style: 4, custom_id: `den_delete:${state.channelId}` },
             ],
         },
     ];

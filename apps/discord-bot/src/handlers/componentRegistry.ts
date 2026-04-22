@@ -1,5 +1,5 @@
 import { ButtonInteraction, ModalSubmitInteraction, StringSelectMenuInteraction } from 'discord.js';
-import { handleDenListDone, handleDenListConfig, handleDenListPage, handleDenToggle, handleDenDone, handleDenDelete } from '../commands/Aggregate/server/den/configHandlers';
+import { handleDenListDone, handleDenListConfig, handleDenListPage, handleDenToggle, handleDenResetDefaults, handleDenDone, handleDenDelete } from '../commands/Aggregate/server/den/configHandlers';
 import { handleGsFieldButton, handleGsFieldModal, handleGsFarmButton, handleGsFarmModal, handleGsFlagToggle, handleGsSection, handleGsCancel, handleGsFinalize } from '../commands/Aggregate/server/settings/settingsHandlers';
 import { handleGsiSection, handleGsiDone } from '../commands/Aggregate/server/settings/infoHandlers';
 
@@ -27,8 +27,9 @@ export const buttonHandlers: ComponentHandler[] = [
     { prefix: 'den_list_done',    handler: interaction => handleDenListDone(interaction as ButtonInteraction) },
     { prefix: 'den_list_config:', handler: interaction => handleDenListConfig(interaction as ButtonInteraction) },
     { prefix: 'den_list_page:',   handler: interaction => handleDenListPage(interaction as ButtonInteraction) },
-    { prefix: 'den_toggle:',      handler: interaction => handleDenToggle(interaction as ButtonInteraction) },
-    { prefix: 'den_done:',        handler: interaction => handleDenDone(interaction as ButtonInteraction) },
+    { prefix: 'den_toggle:',          handler: interaction => handleDenToggle(interaction as ButtonInteraction) },
+    { prefix: 'den_reset_defaults:',  handler: interaction => handleDenResetDefaults(interaction as ButtonInteraction) },
+    { prefix: 'den_done:',            handler: interaction => handleDenDone(interaction as ButtonInteraction) },
     { prefix: 'den_delete:',      handler: interaction => handleDenDelete(interaction as ButtonInteraction) },
     { prefix: 'gs_field_btn:',    handler: interaction => handleGsFieldButton(interaction as ButtonInteraction) },
     { prefix: 'gs_farm_btn:',     handler: interaction => handleGsFarmButton(interaction as ButtonInteraction) },
