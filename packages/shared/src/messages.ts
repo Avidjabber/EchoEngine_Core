@@ -61,6 +61,10 @@ export const messages = {
     denConfigDeleted:     (userId: string, channelId: string) =>
         `*"Understood, <@${userId}> — <#${channelId}> is no longer one of my dens. I'll keep quiet there from now on."*`,
 
+    // ── Guild Settings ─────────────────────────────────────────────────────────
+    guildSettingsSaved: (userId: string) =>
+        `*"All done, <@${userId}>! I've updated the server settings."*`,
+
 } as const;
 
 export type MessageKey = keyof typeof messages;

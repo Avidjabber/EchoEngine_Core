@@ -2,11 +2,39 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { errorCodes } from '@echoengine/shared';
 import { CreateDenDto } from './dto/create-den.dto';
 import { UpdateDenDto } from './dto/update-den.dto';
+import { UpdateGuildSettingsDto } from './dto/update-guild-settings.dto';
 import { ServerRepository } from './server.repository';
 
 @Injectable()
 export class ServerService {
     constructor(private readonly serverRepo: ServerRepository) {}
+
+    async updateGuildSettings(dto: UpdateGuildSettingsDto) {
+        const existing = await this.serverRepo.findGuildSettings(dto.guildId);
+
+        if (!existing) {
+            throw new NotFoundException({
+                code: errorCodes.GUILD_SETTINGS_NOT_FOUND,
+                message: 'This guild has no settings configured yet.',
+            });
+        }
+
+        const { guildId, ...data } = dto;
+        return this.serverRepo.updateGuildSettings(guildId, data);
+    }
+
+    async getGuildSettings(guildId: string) {
+        const settings = await this.serverRepo.findGuildSettings(guildId);
+
+        if (!settings) {
+            throw new NotFoundException({
+                code: errorCodes.GUILD_SETTINGS_NOT_FOUND,
+                message: 'This guild has no settings configured yet.',
+            });
+        }
+
+        return settings;
+    }
 
     async removeDen(guildId: string, channelId: string) {
         const existing = await this.serverRepo.findDen(guildId, channelId);

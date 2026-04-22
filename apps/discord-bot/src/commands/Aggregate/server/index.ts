@@ -3,6 +3,7 @@ import { execute as denSet } from './den/set';
 import { execute as denRemove } from './den/remove';
 import { execute as denList } from './den/list';
 import { execute as denConfig } from './den/config';
+import { execute as settingsUpdate } from './settings/update';
 
 export const data = new SlashCommandBuilder()
     .setName('server')
@@ -38,14 +39,25 @@ export const data = new SlashCommandBuilder()
                             .setRequired(true),
                     ),
             ),
+    )
+    .addSubcommandGroup(group =>
+        group
+            .setName('settings')
+            .setDescription('Manage server-wide settings')
+            .addSubcommand(sub =>
+                sub
+                    .setName('update')
+                    .setDescription('View and update server-wide settings'),
+            ),
     );
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const group = interaction.options.getSubcommandGroup();
     const sub   = interaction.options.getSubcommand();
 
-    if (group === 'den' && sub === 'set')    return denSet(interaction);
-    if (group === 'den' && sub === 'remove') return denRemove(interaction);
-    if (group === 'den' && sub === 'list')   return denList(interaction);
-    if (group === 'den' && sub === 'config') return denConfig(interaction);
+    if (group === 'den' && sub === 'set')        return denSet(interaction);
+    if (group === 'den' && sub === 'remove')     return denRemove(interaction);
+    if (group === 'den' && sub === 'list')       return denList(interaction);
+    if (group === 'den' && sub === 'config')     return denConfig(interaction);
+    if (group === 'settings' && sub === 'update') return settingsUpdate(interaction);
 }
