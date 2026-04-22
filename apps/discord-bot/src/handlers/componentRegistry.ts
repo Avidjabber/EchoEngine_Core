@@ -1,6 +1,7 @@
 import { ButtonInteraction, ModalSubmitInteraction, StringSelectMenuInteraction } from 'discord.js';
 import { handleDenListDone, handleDenListConfig, handleDenListPage, handleDenToggle, handleDenDone, handleDenDelete } from '../commands/Aggregate/server/den/configHandlers';
 import { handleGsFieldButton, handleGsFieldModal, handleGsFarmButton, handleGsFarmModal, handleGsFlagToggle, handleGsSection, handleGsCancel, handleGsFinalize } from '../commands/Aggregate/server/settings/settingsHandlers';
+import { handleGsiSection, handleGsiDone } from '../commands/Aggregate/server/settings/infoHandlers';
 
 type AnyComponentInteraction =
     | ButtonInteraction
@@ -35,4 +36,6 @@ export const buttonHandlers: ComponentHandler[] = [
     { prefix: 'gs_section:',      handler: interaction => handleGsSection(interaction as ButtonInteraction) },
     { prefix: 'gs_cancel',        handler: interaction => handleGsCancel(interaction as ButtonInteraction) },
     { prefix: 'gs_finalize',      handler: interaction => handleGsFinalize(interaction as ButtonInteraction) },
+    { prefix: 'gsi_section:',     handler: interaction => handleGsiSection(interaction as ButtonInteraction) },
+    { prefix: 'gsi_done',         handler: interaction => handleGsiDone(interaction as ButtonInteraction) },
 ];

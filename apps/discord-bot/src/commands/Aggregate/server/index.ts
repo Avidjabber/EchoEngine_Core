@@ -4,6 +4,7 @@ import { execute as denRemove } from './den/remove';
 import { execute as denList } from './den/list';
 import { execute as denConfig } from './den/config';
 import { execute as settingsUpdate } from './settings/update';
+import { execute as settingsInfo }   from './settings/info';
 
 export const data = new SlashCommandBuilder()
     .setName('server')
@@ -48,6 +49,11 @@ export const data = new SlashCommandBuilder()
                 sub
                     .setName('update')
                     .setDescription('View and update server-wide settings'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('info')
+                    .setDescription('View the current server-wide settings'),
             ),
     );
 
@@ -60,4 +66,5 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (group === 'den' && sub === 'list')       return denList(interaction);
     if (group === 'den' && sub === 'config')     return denConfig(interaction);
     if (group === 'settings' && sub === 'update') return settingsUpdate(interaction);
+    if (group === 'settings' && sub === 'info')   return settingsInfo(interaction);
 }
