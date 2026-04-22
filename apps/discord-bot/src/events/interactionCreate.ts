@@ -13,7 +13,7 @@ function dispatch(handlers: ComponentHandler[], interaction: Interaction): Promi
 
 function isDenManagementCommand(interaction: Interaction): boolean {
     if (!interaction.isChatInputCommand()) return false;
-    const EXEMPT_SUBCOMMANDS = new Set(['set', 'remove', 'list']);
+    const EXEMPT_SUBCOMMANDS = new Set(['set', 'remove', 'list', 'config']);
     return (
         interaction.commandName === 'server' &&
         interaction.options.getSubcommandGroup(false) === 'den' &&
@@ -38,9 +38,19 @@ export default async function interactionCreate(
     interaction: Interaction,
     client: Client,
 ): Promise<void> {
-    if (interaction.isModalSubmit())      return dispatch(modalHandlers, interaction);
-    if (interaction.isStringSelectMenu()) return dispatch(selectMenuHandlers, interaction);
-    if (interaction.isButton())           return dispatch(buttonHandlers, interaction);
+    if (interaction.isModalSubmit() || interaction.isStringSelectMenu() || interaction.isButton()) {
+        const handlers = interaction.isModalSubmit()      ? modalHandlers
+                       : interaction.isStringSelectMenu() ? selectMenuHandlers
+                       : buttonHandlers;
+        try {
+            await dispatch(handlers, interaction);
+        } catch (err) {
+            if ((err as { code?: number }).code !== 10062) {
+                console.error('Unhandled error in component handler:', err);
+            }
+        }
+        return;
+    }
 
     if (!interaction.isChatInputCommand()) return;
 

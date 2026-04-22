@@ -7,6 +7,9 @@ export const errorCodes = {
     DEN_NOT_FOUND:       'DEN_NOT_FOUND',         // den does not exist (remove/lookup)
     DEN_NO_PERMISSION:   'DEN_NO_PERMISSION',     // bot lacks permission to post in channel
     NO_DENS_FOUND:       'NO_DENS_FOUND',         // guild has no dens registered (list)
+
+    // ── Guild Settings ────────────────────────────────────────────────────────
+    GUILD_SETTINGS_NOT_FOUND: 'GUILD_SETTINGS_NOT_FOUND', // guild has no settings row yet
 } as const;
 
 export type ErrorCode = typeof errorCodes[keyof typeof errorCodes];

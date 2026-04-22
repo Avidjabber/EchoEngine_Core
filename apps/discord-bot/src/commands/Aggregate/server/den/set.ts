@@ -17,10 +17,9 @@ import { createDen } from '../../../../services/server/denService';
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const guildId   = interaction.guildId!;
     const channelId = interaction.channelId;
-    const ownerId   = interaction.user.id;
     const channel   = interaction.channel as GuildTextBasedChannel;
 
-    const result = await createDen(guildId, channelId, ownerId);
+    const result = await createDen(guildId, channelId);
 
     if (!result.success) {
         const isDuplicate = result.error?.code === errorCodes.DEN_ALREADY_EXISTS;

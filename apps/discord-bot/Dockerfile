@@ -13,6 +13,10 @@ COPY tsconfig.base.json ./
 # Copy workspace root manifests
 COPY package.json ./
 
+# Copy shared package manifest and source (local workspace dep — not on npm)
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/shared/ ./packages/shared/
+
 # Copy bot package manifest and install dependencies
 COPY apps/discord-bot/package.json ./apps/discord-bot/
 RUN npm install --workspace=apps/discord-bot
