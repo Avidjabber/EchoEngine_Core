@@ -56,6 +56,19 @@ export const messages = {
     denAlreadyRegistered: (channelId: string) => `*"I've already made a nest in <#${channelId}>!"*`,
     denRegistrationFailed:(description: string) => `*"Oh dear, I ran into a little trouble setting that up: ${description}"*`,
     denRemoved:           (channelId: string) => `*"Understood — I'll stay quiet in <#${channelId}> from now on."*`,
+    denConfigSaved:       (userId: string, channelId: string) =>
+        `*"All sorted, <@${userId}>! I've updated the settings for <#${channelId}>."*`,
+    denConfigDeleted:     (userId: string, channelId: string) =>
+        `*"Understood, <@${userId}> — <#${channelId}> is no longer one of my dens. I'll keep quiet there from now on."*`,
+
+    // ── Guild Settings ─────────────────────────────────────────────────────────
+    guildSettingsSaved: (userId: string) =>
+        `*"All done, <@${userId}>! I've updated the server settings."*`,
+
+    guildSettingsResetting: `*"Hold on, resetting the server settings now..."*`,
+
+    guildSettingsReset: (userId: string) =>
+        `*"All done, <@${userId}>! The server settings have been reset back to their defaults."*`,
 
 } as const;
 
