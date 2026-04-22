@@ -3,6 +3,27 @@ import { errorCodes } from '@echoengine/shared';
 import { CreateDenDto } from './dto/create-den.dto';
 import { UpdateDenDto } from './dto/update-den.dto';
 import { UpdateGuildSettingsDto } from './dto/update-guild-settings.dto';
+import { ResetGuildSettingsDto } from './dto/reset-guild-settings.dto';
+
+const GUILD_SETTINGS_DEFAULTS = {
+    defaultDailyEnergy:          100,
+    doubleAgeMaxThreshold:       0,
+    maxCombatRounds:             50,
+    defaultProficiencyBonus:     2,
+    disciplineLevelCap:          null,
+    factionRepDecayRate:         5,
+    farmingSoilDegradationFilth: 0.02,
+    farmingSoilDegradationToxic: 0.05,
+    farmingCompostIncrement:     0.10,
+    worldSimEnabled:    true,
+    conditionsEnabled:  true,
+    combatEnabled:      true,
+    activitiesEnabled:  true,
+    eventsEnabled:      true,
+    craftingEnabled:    true,
+    progressionEnabled: true,
+    socialEnabled:      true,
+} as const;
 import { ServerRepository } from './server.repository';
 
 @Injectable()
@@ -21,6 +42,19 @@ export class ServerService {
 
         const { guildId, ...data } = dto;
         return this.serverRepo.updateGuildSettings(guildId, data);
+    }
+
+    async resetGuildSettings(dto: ResetGuildSettingsDto) {
+        const existing = await this.serverRepo.findGuildSettings(dto.guildId);
+
+        if (!existing) {
+            throw new NotFoundException({
+                code: errorCodes.GUILD_SETTINGS_NOT_FOUND,
+                message: 'This guild has no settings configured yet.',
+            });
+        }
+
+        return this.serverRepo.updateGuildSettings(dto.guildId, GUILD_SETTINGS_DEFAULTS);
     }
 
     async getGuildSettings(guildId: string) {

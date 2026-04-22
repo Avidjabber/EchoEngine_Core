@@ -72,3 +72,7 @@ export interface GuildSettingsUpdate {
 export async function updateGuildSettings(guildId: string, data: GuildSettingsUpdate) {
     return apiClient.patch<GuildSettings>('/server/settings', { guildId, ...data });
 }
+
+export async function resetGuildSettings(guildId: string) {
+    return apiClient.post<GuildSettings>('/server/settings/reset', { guildId });
+}

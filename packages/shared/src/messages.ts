@@ -65,6 +65,11 @@ export const messages = {
     guildSettingsSaved: (userId: string) =>
         `*"All done, <@${userId}>! I've updated the server settings."*`,
 
+    guildSettingsResetting: `*"Hold on, resetting the server settings now..."*`,
+
+    guildSettingsReset: (userId: string) =>
+        `*"All done, <@${userId}>! The server settings have been reset back to their defaults."*`,
+
 } as const;
 
 export type MessageKey = keyof typeof messages;

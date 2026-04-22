@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Patch, Post, Query
 import { CreateDenDto } from './dto/create-den.dto';
 import { UpdateDenDto } from './dto/update-den.dto';
 import { UpdateGuildSettingsDto } from './dto/update-guild-settings.dto';
+import { ResetGuildSettingsDto } from './dto/reset-guild-settings.dto';
 import { ServerService } from './server.service';
 
 @Controller('server')
@@ -16,6 +17,12 @@ export class ServerController {
     @Patch('settings')
     updateGuildSettings(@Body() dto: UpdateGuildSettingsDto) {
         return this.serverService.updateGuildSettings(dto);
+    }
+
+    @Post('settings/reset')
+    @HttpCode(HttpStatus.OK)
+    resetGuildSettings(@Body() dto: ResetGuildSettingsDto) {
+        return this.serverService.resetGuildSettings(dto);
     }
 
     @Get('dens')
