@@ -27,9 +27,9 @@ export class ApiClient {
         );
     }
 
-    async get<T>(path: string): Promise<Result<T>> {
+    async get<T>(path: string, params?: Record<string, string>): Promise<Result<T>> {
         return Result.wrap(async () => {
-            const { data } = await this.http.get<T>(path);
+            const { data } = await this.http.get<T>(path, { params });
             return Result.ok(data);
         });
     }

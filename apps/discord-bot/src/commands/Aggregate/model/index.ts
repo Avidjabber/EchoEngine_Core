@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
-import { execute as envConditionsUpload } from './envconditions/upload';
+import { execute as envConditionsUpload }   from './envconditions/upload';
+import { execute as envConditionsTemplate } from './envconditions/template';
 
 export const data = new SlashCommandBuilder()
     .setName('model')
@@ -19,6 +20,11 @@ export const data = new SlashCommandBuilder()
                             .setDescription('The .xlsx pack file to upload')
                             .setRequired(true),
                     ),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('template')
+                    .setDescription('Download a blank .xlsx template for env condition modifier packs'),
             ),
     );
 
@@ -26,5 +32,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const group = interaction.options.getSubcommandGroup();
     const sub   = interaction.options.getSubcommand();
 
-    if (group === 'envconditions' && sub === 'upload') return envConditionsUpload(interaction);
+    if (group === 'envconditions' && sub === 'upload')   return envConditionsUpload(interaction);
+    if (group === 'envconditions' && sub === 'template') return envConditionsTemplate(interaction);
 }

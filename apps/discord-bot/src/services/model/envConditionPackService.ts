@@ -1,6 +1,14 @@
 import { apiClient } from '../api';
 import type { WorldModifierRow, StatModifierRow, ProficiencyModifierRow } from '../../utils/parsers/envConditionPack';
 
+export interface EnvConditionTemplateData {
+    envConditions:   string[];
+    effectTypes:     string[];
+    relations:       string[];
+    stats:           string[];
+    proficiencyDefs: string[];
+}
+
 export type SavedRow =
     | { sheet: 'world_modifiers';       row: number; condition: string; effectType: string; relation: string; value: number | null }
     | { sheet: 'stat_modifiers';        row: number; condition: string; stat: string; value: number }
@@ -16,6 +24,13 @@ export interface RowError {
 export interface EnvConditionPackUploadResult {
     saved:  SavedRow[];
     errors: RowError[];
+}
+
+export async function fetchEnvConditionTemplateData(guildId: string) {
+    return apiClient.get<EnvConditionTemplateData>(
+        '/model/env-conditions/template-data',
+        { guildId },
+    );
 }
 
 export async function uploadEnvConditionPack(

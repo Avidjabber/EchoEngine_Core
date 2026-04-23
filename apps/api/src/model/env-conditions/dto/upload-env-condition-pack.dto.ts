@@ -44,3 +44,11 @@ export interface UploadEnvConditionPackResult {
     saved:  SavedRow[];
     errors: RowError[];
 }
+
+export interface EnvConditionTemplateData {
+    envConditions:   string[];
+    effectTypes:     string[];
+    relations:       string[];
+    stats:           string[];
+    proficiencyDefs: string[];
+}

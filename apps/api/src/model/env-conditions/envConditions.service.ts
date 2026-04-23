@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
     UploadEnvConditionPackDto,
     UploadEnvConditionPackResult,
+    EnvConditionTemplateData,
     SavedRow,
     RowError,
     WorldModifierDto,
@@ -27,6 +28,26 @@ function rowInput(...parts: (string | number | boolean | null | undefined)[]): s
 @Injectable()
 export class EnvConditionsService {
     constructor(private readonly repo: EnvConditionsRepository) {}
+
+    async getTemplateData(guildId: string): Promise<EnvConditionTemplateData> {
+        const [envConditions, effectTypes, relationTypes, stats, proficiencyDefs] = await Promise.all([
+            this.repo.findAllEnvConditions(),
+            this.repo.findEnvModifierEffectTypes(),
+            this.repo.findEnvConditionRelationTypes(),
+            this.repo.findAllStats(),
+            this.repo.findProficiencyDefs(guildId),
+        ]);
+
+        return {
+            envConditions:   envConditions.map(e  => e.codeName),
+            effectTypes:     effectTypes.map(e    => e.name),
+            relations:       relationTypes
+                .filter(r => VALID_WORLD_MODIFIER_RELATIONS.has(r.name.toLowerCase()))
+                .map(r => r.name),
+            stats:           stats.map(s          => s.name),
+            proficiencyDefs: proficiencyDefs.map(p => p.codeName),
+        };
+    }
 
     async uploadPack(dto: UploadEnvConditionPackDto): Promise<UploadEnvConditionPackResult> {
         const [envConditions, effectTypes, relationTypes, stats, proficiencyDefs] = await Promise.all([
