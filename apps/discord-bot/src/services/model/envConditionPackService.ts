@@ -26,9 +26,53 @@ export interface EnvConditionPackUploadResult {
     errors: RowError[];
 }
 
+export interface DownloadWorldModifier {
+    condition:  string;
+    effectType: string;
+    relation:   string;
+    value:      number | null;
+}
+
+export interface DownloadStatModifier {
+    condition: string;
+    stat:      string;
+    value:     number;
+}
+
+export interface DownloadProficiencyModifier {
+    condition:       string;
+    proficiency:     string;
+    value:           number;
+    hasDisadvantage: boolean;
+}
+
+export interface EnvConditionDownloadData {
+    templateData:         EnvConditionTemplateData;
+    worldModifiers:       DownloadWorldModifier[];
+    statModifiers:        DownloadStatModifier[];
+    proficiencyModifiers: DownloadProficiencyModifier[];
+}
+
 export async function fetchEnvConditionTemplateData(guildId: string) {
     return apiClient.get<EnvConditionTemplateData>(
         '/model/env-conditions/template-data',
+        { guildId },
+    );
+}
+
+export interface EnvConditionResetResult {
+    worldModifiers:       number;
+    statModifiers:        number;
+    proficiencyModifiers: number;
+}
+
+export async function resetEnvConditionPack(guildId: string) {
+    return apiClient.post<EnvConditionResetResult>('/model/env-conditions/reset', { guildId });
+}
+
+export async function fetchEnvConditionDownloadData(guildId: string) {
+    return apiClient.get<EnvConditionDownloadData>(
+        '/model/env-conditions/download',
         { guildId },
     );
 }

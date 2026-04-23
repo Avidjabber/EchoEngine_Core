@@ -38,6 +38,54 @@ export class EnvConditionsRepository {
         });
     }
 
+    async getGuildModifiers(guildId: string) {
+        const [worldModifiers, statModifiers, proficiencyModifiers] = await Promise.all([
+            this.db.envCondition_Modifier.findMany({
+                where:   { guildId },
+                select:  {
+                    envCondition: { select: { codeName: true } },
+                    effectType:   { select: { name: true } },
+                    relationType: { select: { name: true } },
+                    value:        true,
+                },
+                orderBy: [{ envCondition: { codeName: 'asc' } }, { effectType: { name: 'asc' } }],
+            }),
+            this.db.envCondition_StatModifier.findMany({
+                where:   { guildId },
+                select:  {
+                    envCondition: { select: { codeName: true } },
+                    stat:         { select: { name: true } },
+                    value:        true,
+                },
+                orderBy: [{ envCondition: { codeName: 'asc' } }, { stat: { name: 'asc' } }],
+            }),
+            this.db.envCondition_ProficiencyModifier.findMany({
+                where:   { guildId },
+                select:  {
+                    envCondition: { select: { codeName: true } },
+                    proficiency:  { select: { codeName: true } },
+                    value:        true,
+                    hasDisadvantage: true,
+                },
+                orderBy: [{ envCondition: { codeName: 'asc' } }, { proficiency: { codeName: 'asc' } }],
+            }),
+        ]);
+        return { worldModifiers, statModifiers, proficiencyModifiers };
+    }
+
+    async deleteAllGuildModifiers(guildId: string) {
+        const [worldResult, statResult, profResult] = await Promise.all([
+            this.db.envCondition_Modifier.deleteMany({ where: { guildId } }),
+            this.db.envCondition_StatModifier.deleteMany({ where: { guildId } }),
+            this.db.envCondition_ProficiencyModifier.deleteMany({ where: { guildId } }),
+        ]);
+        return {
+            worldModifiers:       worldResult.count,
+            statModifiers:        statResult.count,
+            proficiencyModifiers: profResult.count,
+        };
+    }
+
     upsertEnvConditionModifier(row: {
         guildId:        string;
         envConditionId: number;

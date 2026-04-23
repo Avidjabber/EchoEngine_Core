@@ -3,6 +3,8 @@ import {
     UploadEnvConditionPackDto,
     UploadEnvConditionPackResult,
     EnvConditionTemplateData,
+    EnvConditionDownloadData,
+    EnvConditionResetResult,
     SavedRow,
     RowError,
     WorldModifierDto,
@@ -47,6 +49,38 @@ export class EnvConditionsService {
             stats:           stats.map(s          => s.name),
             proficiencyDefs: proficiencyDefs.map(p => p.codeName),
         };
+    }
+
+    async downloadPack(guildId: string): Promise<EnvConditionDownloadData> {
+        const [templateData, { worldModifiers, statModifiers, proficiencyModifiers }] = await Promise.all([
+            this.getTemplateData(guildId),
+            this.repo.getGuildModifiers(guildId),
+        ]);
+
+        return {
+            templateData,
+            worldModifiers:       worldModifiers.map(m => ({
+                condition:  m.envCondition.codeName,
+                effectType: m.effectType.name,
+                relation:   m.relationType.name,
+                value:      m.value ?? null,
+            })),
+            statModifiers:        statModifiers.map(m => ({
+                condition: m.envCondition.codeName,
+                stat:      m.stat.name,
+                value:     m.value,
+            })),
+            proficiencyModifiers: proficiencyModifiers.map(m => ({
+                condition:       m.envCondition.codeName,
+                proficiency:     m.proficiency.codeName,
+                value:           m.value,
+                hasDisadvantage: m.hasDisadvantage,
+            })),
+        };
+    }
+
+    async resetPack(guildId: string): Promise<EnvConditionResetResult> {
+        return this.repo.deleteAllGuildModifiers(guildId);
     }
 
     async uploadPack(dto: UploadEnvConditionPackDto): Promise<UploadEnvConditionPackResult> {

@@ -1,6 +1,8 @@
 import { ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { execute as envConditionsUpload }   from './envconditions/upload';
 import { execute as envConditionsTemplate } from './envconditions/template';
+import { execute as envConditionsDownload } from './envconditions/download';
+import { execute as envConditionsReset }    from './envconditions/reset';
 
 export const data = new SlashCommandBuilder()
     .setName('model')
@@ -25,8 +27,20 @@ export const data = new SlashCommandBuilder()
                 sub
                     .setName('template')
                     .setDescription('Download a blank .xlsx template for env condition modifier packs'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('download')
+                    .setDescription('Download this guild\'s current env condition modifier config as an .xlsx file'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('reset')
+                    .setDescription('Delete all env condition modifiers for this guild'),
             ),
     );
+
+export const publicSubcommands = new Set(['upload', 'template', 'download', 'reset']);
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const group = interaction.options.getSubcommandGroup();
@@ -34,4 +48,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
     if (group === 'envconditions' && sub === 'upload')   return envConditionsUpload(interaction);
     if (group === 'envconditions' && sub === 'template') return envConditionsTemplate(interaction);
+    if (group === 'envconditions' && sub === 'download') return envConditionsDownload(interaction);
+    if (group === 'envconditions' && sub === 'reset')    return envConditionsReset(interaction);
 }

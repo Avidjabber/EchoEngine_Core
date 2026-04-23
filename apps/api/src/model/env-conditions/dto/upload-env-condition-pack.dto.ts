@@ -52,3 +52,36 @@ export interface EnvConditionTemplateData {
     stats:           string[];
     proficiencyDefs: string[];
 }
+
+export interface DownloadWorldModifier {
+    condition:  string;
+    effectType: string;
+    relation:   string;
+    value:      number | null;
+}
+
+export interface DownloadStatModifier {
+    condition: string;
+    stat:      string;
+    value:     number;
+}
+
+export interface DownloadProficiencyModifier {
+    condition:       string;
+    proficiency:     string;
+    value:           number;
+    hasDisadvantage: boolean;
+}
+
+export interface EnvConditionResetResult {
+    worldModifiers:       number;
+    statModifiers:        number;
+    proficiencyModifiers: number;
+}
+
+export interface EnvConditionDownloadData {
+    templateData:         EnvConditionTemplateData;
+    worldModifiers:       DownloadWorldModifier[];
+    statModifiers:        DownloadStatModifier[];
+    proficiencyModifiers: DownloadProficiencyModifier[];
+}
