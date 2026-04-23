@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { Result, ApiResultError } from '../../models/result';
+import { Result, ApiResultError, Problem } from '../../models/result';
 
 export class ApiClient {
     private readonly http: AxiosInstance;
@@ -17,11 +17,12 @@ export class ApiClient {
         // Normalise all errors into Result.fail so callers never have to catch
         this.http.interceptors.response.use(
             response => response,
-            (err: AxiosError<{ message?: string; code?: string }>) => {
-                const status  = err.response?.status ?? 0;
-                const message = err.response?.data?.message ?? err.message;
-                const code    = err.response?.data?.code ?? `HTTP_${status}`;
-                return Promise.reject(new ApiResultError(code, `HTTP ${status}`, message));
+            (err: AxiosError<{ message?: string; code?: string; problems?: Problem[] }>) => {
+                const status   = err.response?.status ?? 0;
+                const message  = err.response?.data?.message ?? err.message;
+                const code     = err.response?.data?.code ?? `HTTP_${status}`;
+                const problems = err.response?.data?.problems ?? null;
+                return Promise.reject(new ApiResultError(code, `HTTP ${status}`, message, problems));
             },
         );
     }

@@ -10,6 +10,9 @@ export const errorCodes = {
 
     // ── Guild Settings ────────────────────────────────────────────────────────
     GUILD_SETTINGS_NOT_FOUND: 'GUILD_SETTINGS_NOT_FOUND', // guild has no settings row yet
+
+    // ── Model / Pack Uploads ──────────────────────────────────────────────────
+    ENV_CONDITION_PACK_VALIDATION_FAILED: 'ENV_CONDITION_PACK_VALIDATION_FAILED',
 } as const;
 
 export type ErrorCode = typeof errorCodes[keyof typeof errorCodes];
