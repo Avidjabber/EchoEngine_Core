@@ -653,13 +653,14 @@ model EnvCondition_StatModifier {
 
 // Per-guild proficiency roll modifier applied when an environmental condition is active.
 // value is applied once per active stack — two sources of Cold each apply the modifier independently.
-// hasDisadvantage triggers if at least one stack is active (not per stack).
+// hasDisadvantage / hasAdvantage trigger if at least one stack is active (not per stack); mutually exclusive with each other and with a non-zero value.
 model EnvCondition_ProficiencyModifier {
   guildId          String @db.VarChar(50)
   envConditionId   Int
   proficiencyDefId Int
   value            Float   @default(0.0)  // flat additive modifier to the skill roll; applied once per active stack
   hasDisadvantage  Boolean @default(false) // triggers if at least one stack is active (not per stack)
+  hasAdvantage     Boolean @default(false) // triggers if at least one stack is active (not per stack)
 
   guild        GuildSettings  @relation(fields: [guildId],          references: [guildId], onDelete: Cascade)
   envCondition EnvCondition   @relation(fields: [envConditionId],   references: [id],      onDelete: Cascade)

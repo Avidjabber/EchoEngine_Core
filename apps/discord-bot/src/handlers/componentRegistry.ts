@@ -1,10 +1,23 @@
-import { ButtonInteraction, ModalSubmitInteraction, StringSelectMenuInteraction } from 'discord.js';
+import { ButtonInteraction, MessageComponentInteraction, ModalSubmitInteraction, StringSelectMenuInteraction } from 'discord.js';
 import { handleDenListDone, handleDenListConfig, handleDenListPage, handleDenToggle, handleDenResetDefaults, handleDenDone, handleDenDelete } from '../commands/Aggregate/server/den/configHandlers';
 import { handleGsFieldButton, handleGsFieldModal, handleGsFarmButton, handleGsFarmModal, handleGsFlagToggle, handleGsSection, handleGsCancel, handleGsFinalize } from '../commands/Aggregate/server/settings/settingsHandlers';
 import { handleGsiSection, handleGsiDone } from '../commands/Aggregate/server/settings/infoHandlers';
+import { handleEcListPage, handleEcListFilter } from '../commands/Aggregate/config/envcondition/listHandlers';
+import { handleEcInfoDetail, handleEcInfoBack, handleEcInfoPage } from '../commands/Aggregate/config/envcondition/infoHandlers';
+import { handleEcRstPage, handleEcRstPick, handleEcRstConfirm, handleEcRstBack, handleEcRstAllConfirm, handleEcRstAllBack } from '../commands/Aggregate/config/envcondition/resetHandlers';
+import {
+    handleEcEdit,
+    handleEcUpdCpage, handleEcUpdCpick, handleEcUpdCback,
+    handleEcUpdType, handleEcUpdEt, handleEcUpdRel, handleEcUpdStat, handleEcUpdProf,
+    handleEcUpdSet, handleEcUpdUnset,
+    handleEcUpdVal, handleEcUpdDisadv, handleEcUpdAdv, handleEcUpdRetype, handleEcUpdSave, handleEcUpdCancel,
+    handleEcUpdConfirm, handleEcUpdConfBack,
+    handleEcUpdRemove, handleEcUpdRmConfirm, handleEcUpdRmBack,
+    handleEcUpdValModal,
+} from '../commands/Aggregate/config/envcondition/updateHandlers';
 
 type AnyComponentInteraction =
-    | ButtonInteraction
+    | MessageComponentInteraction
     | StringSelectMenuInteraction
     | ModalSubmitInteraction;
 
@@ -15,12 +28,20 @@ export interface ComponentHandler {
 
 // ── Modal handlers ─────────────────────────────────────────────────────────────
 export const modalHandlers: ComponentHandler[] = [
-    { prefix: 'gs_field_modal:', handler: interaction => handleGsFieldModal(interaction as ModalSubmitInteraction) },
-    { prefix: 'gs_farm_modal:', handler: interaction => handleGsFarmModal(interaction as ModalSubmitInteraction) },
+    { prefix: 'gs_field_modal:',   handler: interaction => handleGsFieldModal(interaction as ModalSubmitInteraction) },
+    { prefix: 'gs_farm_modal:',    handler: interaction => handleGsFarmModal(interaction as ModalSubmitInteraction) },
+    { prefix: 'ec_upd_val_modal',  handler: interaction => handleEcUpdValModal(interaction as ModalSubmitInteraction) },
 ];
 
 // ── Select menu handlers ───────────────────────────────────────────────────────
-export const selectMenuHandlers: ComponentHandler[] = [];
+export const selectMenuHandlers: ComponentHandler[] = [
+    { prefix: 'ec_list_filter', handler: interaction => handleEcListFilter(interaction as StringSelectMenuInteraction) },
+    { prefix: 'ec_upd_type',    handler: interaction => handleEcUpdType(interaction as StringSelectMenuInteraction) },
+    { prefix: 'ec_upd_et',      handler: interaction => handleEcUpdEt(interaction as StringSelectMenuInteraction) },
+    { prefix: 'ec_upd_rel',     handler: interaction => handleEcUpdRel(interaction as StringSelectMenuInteraction) },
+    { prefix: 'ec_upd_stat',    handler: interaction => handleEcUpdStat(interaction as StringSelectMenuInteraction) },
+    { prefix: 'ec_upd_prof',    handler: interaction => handleEcUpdProf(interaction as StringSelectMenuInteraction) },
+];
 
 // ── Button handlers ────────────────────────────────────────────────────────────
 export const buttonHandlers: ComponentHandler[] = [
@@ -39,4 +60,31 @@ export const buttonHandlers: ComponentHandler[] = [
     { prefix: 'gs_finalize',      handler: interaction => handleGsFinalize(interaction as ButtonInteraction) },
     { prefix: 'gsi_section:',     handler: interaction => handleGsiSection(interaction as ButtonInteraction) },
     { prefix: 'gsi_done',         handler: interaction => handleGsiDone(interaction as ButtonInteraction) },
+    { prefix: 'ec_edit:',        handler: interaction => handleEcEdit(interaction as ButtonInteraction) },
+    { prefix: 'ec_list_page:',   handler: interaction => handleEcListPage(interaction as ButtonInteraction) },
+    { prefix: 'ec_info_d:',      handler: interaction => handleEcInfoDetail(interaction as ButtonInteraction) },
+    { prefix: 'ec_info_back:',   handler: interaction => handleEcInfoBack(interaction as ButtonInteraction) },
+    { prefix: 'ec_info_page:',   handler: interaction => handleEcInfoPage(interaction as ButtonInteraction) },
+    { prefix: 'ec_rst_page:',    handler: interaction => handleEcRstPage(interaction as ButtonInteraction) },
+    { prefix: 'ec_rst_pick:',    handler: interaction => handleEcRstPick(interaction as ButtonInteraction) },
+    { prefix: 'ec_rst_confirm:',    handler: interaction => handleEcRstConfirm(interaction as ButtonInteraction) },
+    { prefix: 'ec_rst_back:',       handler: interaction => handleEcRstBack(interaction as ButtonInteraction) },
+    { prefix: 'ec_rst_all_confirm', handler: interaction => handleEcRstAllConfirm(interaction as ButtonInteraction) },
+    { prefix: 'ec_rst_all_back',    handler: interaction => handleEcRstAllBack(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_cpage:',   handler: interaction => handleEcUpdCpage(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_cpick:',   handler: interaction => handleEcUpdCpick(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_cback',    handler: interaction => handleEcUpdCback(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_set:',     handler: interaction => handleEcUpdSet(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_unset',    handler: interaction => handleEcUpdUnset(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_val',      handler: interaction => handleEcUpdVal(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_disadv',   handler: interaction => handleEcUpdDisadv(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_adv',     handler: interaction => handleEcUpdAdv(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_retype',   handler: interaction => handleEcUpdRetype(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_save',      handler: interaction => handleEcUpdSave(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_confirm',    handler: interaction => handleEcUpdConfirm(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_conf_back',  handler: interaction => handleEcUpdConfBack(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_remove',     handler: interaction => handleEcUpdRemove(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_rm_confirm', handler: interaction => handleEcUpdRmConfirm(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_rm_back',    handler: interaction => handleEcUpdRmBack(interaction as ButtonInteraction) },
+    { prefix: 'ec_upd_cancel',     handler: interaction => handleEcUpdCancel(interaction as ButtonInteraction) },
 ];

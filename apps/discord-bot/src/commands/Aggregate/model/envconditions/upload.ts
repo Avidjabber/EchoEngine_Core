@@ -11,6 +11,7 @@ import {
     ProficiencyModifierRow,
 } from '../../../../utils/parsers/envConditionPack';
 import { uploadEnvConditionPack, RowError } from '../../../../services/model/envConditionPackService';
+import { invalidateEnvConditionInfoCache } from '../../config/envcondition/infoState';
 import { buildResultMessages, buildFormatErrorMessages } from './uploadComponents';
 
 interface FormatCheckResult {
@@ -122,7 +123,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (validCount === 0) {
         // Nothing passed format checks — if no format errors the file was simply empty
         if (formatErrors.length === 0) {
-            for (const msg of buildResultMessages(interaction.user.id, [], [])) {
+            for (const msg of buildResultMessages(interaction.user.id, [], [], [])) {
                 await interaction.followUp(msg as never);
             }
         }
@@ -144,7 +145,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return;
     }
 
-    for (const msg of buildResultMessages(interaction.user.id, result.value!.saved, result.value!.errors)) {
+    invalidateEnvConditionInfoCache(guildId);
+
+    for (const msg of buildResultMessages(interaction.user.id, result.value!.saved, result.value!.errors, result.value!.overwrites)) {
         await interaction.followUp(msg as never);
     }
 }

@@ -16,7 +16,7 @@ function buildGuideComponents(data: EnvConditionTemplateData): object[] {
         `-# \`condition\` — Env condition codeName (see **reference** sheet)`,
         `-# \`effect_type\` — Valid values: ${effectList}`,
         `-# \`relation\` — Valid values: ${relationList}`,
-        `-# \`value\` — A number. Leave blank when relation is **block**.`,
+        `-# \`value\` — Decimal between **0.0 and 5.0** (magnitude only). The relation (increase/decrease) sets the direction. Leave blank when relation is **block**.`,
         ``,
         `**stat_modifiers** — Flat stat adjustments per condition stack`,
         `-# \`condition\` — Env condition codeName (see **reference** sheet)`,
@@ -26,8 +26,10 @@ function buildGuideComponents(data: EnvConditionTemplateData): object[] {
         `**proficiency_modifiers** — Proficiency roll adjustments`,
         `-# \`condition\` — Env condition codeName (see **reference** sheet)`,
         `-# \`proficiency\` — Guild proficiency codeName (see **reference** sheet)`,
-        `-# \`value\` — Roll modifier added to the result (default: 0)`,
+        `-# \`value\` — Flat roll modifier per stack (default: 0)`,
         `-# \`has_disadvantage\` — TRUE or FALSE (default: FALSE)`,
+        `-# \`has_advantage\` — TRUE or FALSE (default: FALSE)`,
+        `-# ⚠️ Set only one of **value**, **has_disadvantage**, or **has_advantage**`,
     ].join('\n');
 
     const notes = [

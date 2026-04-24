@@ -23,9 +23,9 @@ PHASE 2 — GUILD CONFIGURATION
 ═══════════════════════════════════════════════════════════════════════
 
   [ ]  Guild_DisciplineLevelCap
-  [ ]  EnvCondition_Modifier
-  [ ]  EnvCondition_StatModifier
-  [ ]  EnvCondition_ProficiencyModifier
+  [x]  EnvCondition_Modifier
+  [x]  EnvCondition_StatModifier
+  [x]  EnvCondition_ProficiencyModifier
   [ ]  Guild_ActionConfig
   [ ]  ActionType_DisciplineReward
   [ ]  ActionType_DisciplineRequirement

@@ -2,6 +2,7 @@ import {
     ActionRowBuilder,
     ButtonInteraction,
     ContainerBuilder,
+    GuildTextBasedChannel,
     MessageFlags,
     ModalBuilder,
     ModalSubmitInteraction,
@@ -344,7 +345,7 @@ export async function handleGsFinalize(interaction: ButtonInteraction): Promise<
             ),
         );
 
-    await interaction.channel?.send({
+    await (interaction.channel as GuildTextBasedChannel | null)?.send({
         flags:      MessageFlags.IsComponentsV2,
         components: [announcement],
     });

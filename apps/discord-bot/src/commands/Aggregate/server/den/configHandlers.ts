@@ -1,6 +1,7 @@
 import {
     ButtonInteraction,
     ContainerBuilder,
+    GuildTextBasedChannel,
     MessageFlags,
     TextDisplayBuilder,
 } from 'discord.js';
@@ -246,7 +247,7 @@ export async function handleDenDone(interaction: ButtonInteraction): Promise<voi
             ),
         );
 
-    await interaction.channel?.send({
+    await (interaction.channel as GuildTextBasedChannel | null)?.send({
         flags:      MessageFlags.IsComponentsV2,
         components: [savedContainer],
     });
@@ -304,7 +305,7 @@ export async function handleDenDelete(interaction: ButtonInteraction): Promise<v
             ),
         );
 
-    await interaction.channel?.send({
+    await (interaction.channel as GuildTextBasedChannel | null)?.send({
         flags:      MessageFlags.IsComponentsV2,
         components: [deletedContainer],
     });

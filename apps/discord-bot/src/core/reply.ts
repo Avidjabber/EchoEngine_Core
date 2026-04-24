@@ -28,6 +28,6 @@ export async function replyError(
     if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({ ...payload, flags: payload.flags | MessageFlags.Ephemeral });
     } else {
-        await interaction.editReply(payload);
+        await interaction.editReply(payload as never);
     }
 }

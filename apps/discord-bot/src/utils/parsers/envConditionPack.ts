@@ -22,6 +22,7 @@ export interface ProficiencyModifierRow {
     proficiency:     string | null;
     value:           number | null;
     hasDisadvantage: boolean | null;
+    hasAdvantage:    boolean | null;
 }
 
 export interface ParsedEnvConditionPack {
@@ -94,7 +95,7 @@ export async function parseEnvConditionPack(buffer: Buffer): Promise<ParsedEnvCo
     workbookReader.read();
 
     for await (const worksheet of workbookReader) {
-        const sheetName = worksheet.name.toLowerCase().replace(/\s+/g, '_');
+        const sheetName = (worksheet as unknown as { name: string }).name.toLowerCase().replace(/\s+/g, '_');
         let headerMap: Record<number, string> = {};
         let rowIndex = 0;
 
@@ -140,6 +141,7 @@ export async function parseEnvConditionPack(buffer: Buffer): Promise<ParsedEnvCo
                     proficiency:     cellStr(r['proficiency']),
                     value:           cellNum(r['value']),
                     hasDisadvantage: cellBool(r['has_disadvantage']),
+                    hasAdvantage:    cellBool(r['has_advantage']),
                 });
             }
         }

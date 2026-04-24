@@ -11,6 +11,13 @@ export class EnvConditionsRepository {
         });
     }
 
+    findAllEnvConditionsWithNames() {
+        return this.db.envCondition.findMany({
+            select:  { codeName: true, name: true },
+            orderBy: { name: 'asc' },
+        });
+    }
+
     findEnvModifierEffectTypes() {
         return this.db.effectType.findMany({
             where:  { isEnvModifier: true },
@@ -64,13 +71,34 @@ export class EnvConditionsRepository {
                 select:  {
                     envCondition: { select: { codeName: true } },
                     proficiency:  { select: { codeName: true } },
-                    value:        true,
+                    value:           true,
                     hasDisadvantage: true,
+                    hasAdvantage:    true,
                 },
                 orderBy: [{ envCondition: { codeName: 'asc' } }, { proficiency: { codeName: 'asc' } }],
             }),
         ]);
         return { worldModifiers, statModifiers, proficiencyModifiers };
+    }
+
+    findEnvConditionIdByCodeName(codeName: string) {
+        return this.db.envCondition.findUnique({
+            where:  { codeName },
+            select: { id: true },
+        });
+    }
+
+    async deleteConditionModifiers(guildId: string, envConditionId: number) {
+        const [worldResult, statResult, profResult] = await Promise.all([
+            this.db.envCondition_Modifier.deleteMany({ where: { guildId, envConditionId } }),
+            this.db.envCondition_StatModifier.deleteMany({ where: { guildId, envConditionId } }),
+            this.db.envCondition_ProficiencyModifier.deleteMany({ where: { guildId, envConditionId } }),
+        ]);
+        return {
+            worldModifiers:       worldResult.count,
+            statModifiers:        statResult.count,
+            proficiencyModifiers: profResult.count,
+        };
     }
 
     async deleteAllGuildModifiers(guildId: string) {
@@ -84,6 +112,18 @@ export class EnvConditionsRepository {
             statModifiers:        statResult.count,
             proficiencyModifiers: profResult.count,
         };
+    }
+
+    deleteWorldModifier(guildId: string, envConditionId: number, effectTypeId: number) {
+        return this.db.envCondition_Modifier.deleteMany({ where: { guildId, envConditionId, effectTypeId } });
+    }
+
+    deleteStatModifier(guildId: string, envConditionId: number, statId: number) {
+        return this.db.envCondition_StatModifier.deleteMany({ where: { guildId, envConditionId, statId } });
+    }
+
+    deleteProfModifier(guildId: string, envConditionId: number, proficiencyDefId: number) {
+        return this.db.envCondition_ProficiencyModifier.deleteMany({ where: { guildId, envConditionId, proficiencyDefId } });
     }
 
     upsertEnvConditionModifier(row: {
@@ -134,6 +174,7 @@ export class EnvConditionsRepository {
         proficiencyDefId: number;
         value:            number;
         hasDisadvantage:  boolean;
+        hasAdvantage:     boolean;
     }) {
         return this.db.envCondition_ProficiencyModifier.upsert({
             where: {
@@ -147,6 +188,7 @@ export class EnvConditionsRepository {
             update: {
                 value:           row.value,
                 hasDisadvantage: row.hasDisadvantage,
+                hasAdvantage:    row.hasAdvantage,
             },
         });
     }

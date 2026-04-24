@@ -3,9 +3,12 @@ import {
     UploadEnvConditionPackDto,
     UploadEnvConditionPackResult,
     EnvConditionTemplateData,
+    EnvConditionModifiersData,
     EnvConditionDownloadData,
+    EnvConditionListItem,
     EnvConditionResetResult,
     SavedRow,
+    OverwrittenRow,
     RowError,
     WorldModifierDto,
     StatModifierDto,
@@ -17,11 +20,11 @@ const VALID_WORLD_MODIFIER_RELATIONS = new Set(['increase', 'decrease', 'block']
 
 type WorldDbRow    = { guildId: string; envConditionId: number; effectTypeId: number; relationTypeId: number; value: number | null };
 type StatDbRow     = { guildId: string; envConditionId: number; statId: number; value: number };
-type ProfDbRow     = { guildId: string; envConditionId: number; proficiencyDefId: number; value: number; hasDisadvantage: boolean };
+type ProfDbRow     = { guildId: string; envConditionId: number; proficiencyDefId: number; value: number; hasDisadvantage: boolean; hasAdvantage: boolean };
 
 interface ValidatedWorldRow { dto: WorldModifierDto; db: WorldDbRow; savedShape: Extract<SavedRow, { sheet: 'world_modifiers' }> }
 interface ValidatedStatRow  { dto: StatModifierDto;  db: StatDbRow;  savedShape: Extract<SavedRow, { sheet: 'stat_modifiers' }> }
-interface ValidatedProfRow  { dto: ProficiencyModifierDto; db: ProfDbRow; savedShape: Extract<SavedRow, { sheet: 'proficiency_modifiers' }> }
+interface ValidatedProfRow  { dto: ProficiencyModifierDto; db: ProfDbRow; savedShape: Extract<SavedRow,  { sheet: 'proficiency_modifiers' }> }
 
 function rowInput(...parts: (string | number | boolean | null | undefined)[]): string {
     return parts.map(p => p ?? '?').join(' | ');
@@ -30,6 +33,10 @@ function rowInput(...parts: (string | number | boolean | null | undefined)[]): s
 @Injectable()
 export class EnvConditionsService {
     constructor(private readonly repo: EnvConditionsRepository) {}
+
+    async getConditionList(): Promise<EnvConditionListItem[]> {
+        return this.repo.findAllEnvConditionsWithNames();
+    }
 
     async getTemplateData(guildId: string): Promise<EnvConditionTemplateData> {
         const [envConditions, effectTypes, relationTypes, stats, proficiencyDefs] = await Promise.all([
@@ -48,6 +55,30 @@ export class EnvConditionsService {
                 .map(r => r.name),
             stats:           stats.map(s          => s.name),
             proficiencyDefs: proficiencyDefs.map(p => p.codeName),
+        };
+    }
+
+    async getModifiers(guildId: string): Promise<EnvConditionModifiersData> {
+        const { worldModifiers, statModifiers, proficiencyModifiers } = await this.repo.getGuildModifiers(guildId);
+        return {
+            worldModifiers:       worldModifiers.map(m => ({
+                condition:  m.envCondition.codeName,
+                effectType: m.effectType.name,
+                relation:   m.relationType.name,
+                value:      m.value ?? null,
+            })),
+            statModifiers:        statModifiers.map(m => ({
+                condition: m.envCondition.codeName,
+                stat:      m.stat.name,
+                value:     m.value,
+            })),
+            proficiencyModifiers: proficiencyModifiers.map(m => ({
+                condition:       m.envCondition.codeName,
+                proficiency:     m.proficiency.codeName,
+                value:           m.value,
+                hasDisadvantage: m.hasDisadvantage,
+                hasAdvantage:    m.hasAdvantage,
+            })),
         };
     }
 
@@ -75,6 +106,7 @@ export class EnvConditionsService {
                 proficiency:     m.proficiency.codeName,
                 value:           m.value,
                 hasDisadvantage: m.hasDisadvantage,
+                hasAdvantage:    m.hasAdvantage,
             })),
         };
     }
@@ -83,13 +115,51 @@ export class EnvConditionsService {
         return this.repo.deleteAllGuildModifiers(guildId);
     }
 
+    async resetCondition(guildId: string, conditionCodeName: string): Promise<EnvConditionResetResult | null> {
+        const condition = await this.repo.findEnvConditionIdByCodeName(conditionCodeName);
+        if (!condition) return null;
+        return this.repo.deleteConditionModifiers(guildId, condition.id);
+    }
+
+    async removeModifier(guildId: string, conditionCodeName: string, modifierType: 'world' | 'stat' | 'proficiency', key: string): Promise<boolean> {
+        const condition = await this.repo.findEnvConditionIdByCodeName(conditionCodeName);
+        if (!condition) return false;
+
+        if (modifierType === 'world') {
+            const effectTypes = await this.repo.findEnvModifierEffectTypes();
+            const et = effectTypes.find(e => e.name.toLowerCase() === key.toLowerCase());
+            if (!et) return false;
+            const result = await this.repo.deleteWorldModifier(guildId, condition.id, et.id);
+            return result.count > 0;
+        }
+
+        if (modifierType === 'stat') {
+            const stats = await this.repo.findAllStats();
+            const stat = stats.find(s => s.name.toLowerCase() === key.toLowerCase());
+            if (!stat) return false;
+            const result = await this.repo.deleteStatModifier(guildId, condition.id, stat.id);
+            return result.count > 0;
+        }
+
+        if (modifierType === 'proficiency') {
+            const proficiencyDefs = await this.repo.findProficiencyDefs(guildId);
+            const prof = proficiencyDefs.find(p => p.codeName.toLowerCase() === key.toLowerCase());
+            if (!prof) return false;
+            const result = await this.repo.deleteProfModifier(guildId, condition.id, prof.id);
+            return result.count > 0;
+        }
+
+        return false;
+    }
+
     async uploadPack(dto: UploadEnvConditionPackDto): Promise<UploadEnvConditionPackResult> {
-        const [envConditions, effectTypes, relationTypes, stats, proficiencyDefs] = await Promise.all([
+        const [envConditions, effectTypes, relationTypes, stats, proficiencyDefs, existing] = await Promise.all([
             this.repo.findAllEnvConditions(),
             this.repo.findEnvModifierEffectTypes(),
             this.repo.findEnvConditionRelationTypes(),
             this.repo.findAllStats(),
             this.repo.findProficiencyDefs(dto.guildId),
+            this.repo.getGuildModifiers(dto.guildId),
         ]);
 
         const envConditionMap   = new Map(envConditions.map(e  => [e.codeName.toLowerCase(),  e.id]));
@@ -98,6 +168,20 @@ export class EnvConditionsService {
         const statMap           = new Map(stats.map(s          => [s.name.toLowerCase(),      s.id]));
         const proficiencyDefMap = new Map(proficiencyDefs.map(p => [p.codeName.toLowerCase(), p.id]));
 
+        // Build existing-modifier lookup maps (same key format as the duplicate-detection `seen` maps)
+        const existingWorld = new Map(existing.worldModifiers.map(m => [
+            `${m.envCondition.codeName.toLowerCase()}|${m.effectType.name.toLowerCase()}`,
+            { relation: m.relationType.name, value: m.value ?? null },
+        ]));
+        const existingStat = new Map(existing.statModifiers.map(m => [
+            `${m.envCondition.codeName.toLowerCase()}|${m.stat.name.toLowerCase()}`,
+            { value: m.value },
+        ]));
+        const existingProf = new Map(existing.proficiencyModifiers.map(m => [
+            `${m.envCondition.codeName.toLowerCase()}|${m.proficiency.codeName.toLowerCase()}`,
+            { value: m.value, hasDisadvantage: m.hasDisadvantage, hasAdvantage: m.hasAdvantage },
+        ]));
+
         const errors: RowError[] = [];
 
         // Phase 1: validate all rows, build save lists
@@ -105,38 +189,114 @@ export class EnvConditionsService {
         const statToSave  = this.validateStatModifiers(dto.statModifiers,   dto.guildId, envConditionMap, statMap, errors);
         const profToSave  = this.validateProficiencyModifiers(dto.proficiencyModifiers, dto.guildId, envConditionMap, proficiencyDefMap, errors);
 
-        // Phase 2: save all valid rows in parallel across sheets, with per-row error capture
+        // Phase 2: categorize validated rows — skip rows whose values are identical to what's already saved
+        type WorldCandidate = { item: ValidatedWorldRow; old?: { relation: string; value: number | null } };
+        type StatCandidate  = { item: ValidatedStatRow;  old?: { value: number } };
+        type ProfCandidate  = { item: ValidatedProfRow;  old?: { value: number; hasDisadvantage: boolean; hasAdvantage: boolean } };
+
+        const worldCandidates: WorldCandidate[] = [];
+        for (const item of worldToSave) {
+            const key = `${item.dto.condition!.toLowerCase()}|${item.dto.effectType!.toLowerCase()}`;
+            const old = existingWorld.get(key);
+            if (!old) {
+                worldCandidates.push({ item });
+            } else if (old.relation.toLowerCase() !== item.savedShape.relation || old.value !== item.savedShape.value) {
+                worldCandidates.push({ item, old });
+            }
+            // else: unchanged — skip
+        }
+
+        const statCandidates: StatCandidate[] = [];
+        for (const item of statToSave) {
+            const key = `${item.dto.condition!.toLowerCase()}|${item.dto.stat!.toLowerCase()}`;
+            const old = existingStat.get(key);
+            if (!old) {
+                statCandidates.push({ item });
+            } else if (old.value !== item.savedShape.value) {
+                statCandidates.push({ item, old });
+            }
+        }
+
+        const profCandidates: ProfCandidate[] = [];
+        for (const item of profToSave) {
+            const key = `${item.dto.condition!.toLowerCase()}|${item.dto.proficiency!.toLowerCase()}`;
+            const old = existingProf.get(key);
+            if (!old) {
+                profCandidates.push({ item });
+            } else if (old.value !== item.savedShape.value || old.hasDisadvantage !== item.savedShape.hasDisadvantage || old.hasAdvantage !== item.savedShape.hasAdvantage) {
+                profCandidates.push({ item, old });
+            }
+        }
+
+        // Phase 3: save only new/changed rows in parallel
         const [worldResults, statResults, profResults] = await Promise.all([
-            Promise.allSettled(worldToSave.map(item => this.repo.upsertEnvConditionModifier(item.db))),
-            Promise.allSettled(statToSave.map(item  => this.repo.upsertStatModifier(item.db))),
-            Promise.allSettled(profToSave.map(item  => this.repo.upsertProficiencyModifier(item.db))),
+            Promise.allSettled(worldCandidates.map(c => this.repo.upsertEnvConditionModifier(c.item.db))),
+            Promise.allSettled(statCandidates.map(c  => this.repo.upsertStatModifier(c.item.db))),
+            Promise.allSettled(profCandidates.map(c  => this.repo.upsertProficiencyModifier(c.item.db))),
         ]);
 
-        // Phase 3: collect save results
-        const saved: SavedRow[] = [];
+        // Phase 4: collect results
+        const saved:      SavedRow[]       = [];
+        const overwrites: OverwrittenRow[] = [];
 
         worldResults.forEach((result, i) => {
-            const item = worldToSave[i];
+            const { item, old } = worldCandidates[i];
             if (result.status === 'fulfilled') {
                 saved.push(item.savedShape);
+                if (old) {
+                    overwrites.push({
+                        sheet:       'world_modifiers',
+                        row:         item.dto.row,
+                        condition:   item.savedShape.condition,
+                        effectType:  item.savedShape.effectType,
+                        oldRelation: old.relation,
+                        oldValue:    old.value,
+                        newRelation: item.savedShape.relation,
+                        newValue:    item.savedShape.value,
+                    });
+                }
             } else {
                 errors.push({ sheet: 'world_modifiers', row: item.dto.row, input: rowInput(item.dto.condition, item.dto.effectType, item.dto.relation, item.dto.value), message: 'Failed to save to database' });
             }
         });
 
         statResults.forEach((result, i) => {
-            const item = statToSave[i];
+            const { item, old } = statCandidates[i];
             if (result.status === 'fulfilled') {
                 saved.push(item.savedShape);
+                if (old) {
+                    overwrites.push({
+                        sheet:     'stat_modifiers',
+                        row:       item.dto.row,
+                        condition: item.savedShape.condition,
+                        stat:      item.savedShape.stat,
+                        oldValue:  old.value,
+                        newValue:  item.savedShape.value,
+                    });
+                }
             } else {
                 errors.push({ sheet: 'stat_modifiers', row: item.dto.row, input: rowInput(item.dto.condition, item.dto.stat, item.dto.value), message: 'Failed to save to database' });
             }
         });
 
         profResults.forEach((result, i) => {
-            const item = profToSave[i];
+            const { item, old } = profCandidates[i];
             if (result.status === 'fulfilled') {
                 saved.push(item.savedShape);
+                if (old) {
+                    overwrites.push({
+                        sheet:              'proficiency_modifiers',
+                        row:                item.dto.row,
+                        condition:          item.savedShape.condition,
+                        proficiency:        item.savedShape.proficiency,
+                        oldValue:           old.value,
+                        oldHasDisadvantage: old.hasDisadvantage,
+                        oldHasAdvantage:    old.hasAdvantage,
+                        newValue:           item.savedShape.value,
+                        newHasDisadvantage: item.savedShape.hasDisadvantage,
+                        newHasAdvantage:    item.savedShape.hasAdvantage,
+                    });
+                }
             } else {
                 errors.push({ sheet: 'proficiency_modifiers', row: item.dto.row, input: rowInput(item.dto.condition, item.dto.proficiency, item.dto.value, item.dto.hasDisadvantage), message: 'Failed to save to database' });
             }
@@ -148,7 +308,7 @@ export class EnvConditionsService {
             return si !== 0 ? si : a.row - b.row;
         });
 
-        return { saved, errors };
+        return { saved, errors, overwrites };
     }
 
     private validateWorldModifiers(
@@ -208,6 +368,11 @@ export class EnvConditionsService {
             const isBlock = relLower === 'block';
             if (!isBlock && row.value === null) {
                 errors.push({ sheet: 'world_modifiers', row: row.row, input, message: `value is required when relation is '${row.relation}'` });
+                continue;
+            }
+
+            if (!isBlock && (row.value! < 0 || row.value! > 5)) {
+                errors.push({ sheet: 'world_modifiers', row: row.row, input, message: `value must be between 0.0 and 5.0 for relation '${row.relation}' (enter positive magnitude — relation determines direction)` });
                 continue;
             }
 
@@ -318,13 +483,20 @@ export class EnvConditionsService {
                 continue;
             }
 
-            const value          = row.value          ?? 0;
+            const value           = row.value          ?? 0;
             const hasDisadvantage = row.hasDisadvantage ?? false;
+            const hasAdvantage    = row.hasAdvantage    ?? false;
+
+            const activeCount = (value !== 0 ? 1 : 0) + (hasDisadvantage ? 1 : 0) + (hasAdvantage ? 1 : 0);
+            if (activeCount > 1) {
+                errors.push({ sheet: 'proficiency_modifiers', row: row.row, input, message: 'Only one of value, has_disadvantage, or has_advantage may be set — choose one' });
+                continue;
+            }
 
             valid.push({
                 dto: row,
-                db:  { guildId, envConditionId, proficiencyDefId, value, hasDisadvantage },
-                savedShape: { sheet: 'proficiency_modifiers', row: row.row, condition: row.condition, proficiency: row.proficiency, value, hasDisadvantage },
+                db:  { guildId, envConditionId, proficiencyDefId, value, hasDisadvantage, hasAdvantage },
+                savedShape: { sheet: 'proficiency_modifiers', row: row.row, condition: row.condition, proficiency: row.proficiency, value, hasDisadvantage, hasAdvantage },
             });
         }
 

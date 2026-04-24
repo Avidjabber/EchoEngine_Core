@@ -3,6 +3,7 @@ import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
 import { replyError } from '../../../../core/reply';
 import { resetEnvConditionPack } from '../../../../services/model/envConditionPackService';
+import { invalidateEnvConditionInfoCache } from '../../config/envcondition/infoState';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -72,7 +73,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
     await confirmation.deferUpdate();
 
-    const result = await resetEnvConditionPack(interaction.guildId!);
+    const guildId = interaction.guildId!;
+    const result  = await resetEnvConditionPack(guildId);
 
     if (!result.success) {
         await interaction.editReply({
@@ -87,6 +89,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         } as never);
         return;
     }
+
+    invalidateEnvConditionInfoCache(guildId);
 
     const { worldModifiers, statModifiers, proficiencyModifiers } = result.value!;
     const total = worldModifiers + statModifiers + proficiencyModifiers;

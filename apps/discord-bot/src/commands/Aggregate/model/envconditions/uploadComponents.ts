@@ -1,6 +1,6 @@
 import { MessageFlags } from 'discord.js';
 import { colors } from '../../../../core/colors';
-import type { SavedRow, RowError } from '../../../../services/model/envConditionPackService';
+import type { SavedRow, OverwrittenRow, RowError } from '../../../../services/model/envConditionPackService';
 
 const TEXT_LIMIT = 3800;
 
@@ -23,10 +23,27 @@ function formatSavedRow(row: SavedRow): string {
                 : `${row.condition} | ${row.effectType} | ${row.relation}`;
         case 'stat_modifiers':
             return `${row.condition} | ${row.stat} | ${row.value}`;
-        case 'proficiency_modifiers':
-            return row.hasDisadvantage
-                ? `${row.condition} | ${row.proficiency} | ${row.value} | disadvantage`
-                : `${row.condition} | ${row.proficiency} | ${row.value}`;
+        case 'proficiency_modifiers': {
+            const flag = row.hasDisadvantage ? ' | disadvantage' : row.hasAdvantage ? ' | advantage' : '';
+            return `${row.condition} | ${row.proficiency} | ${row.value}${flag}`;
+        }
+    }
+}
+
+function formatOverwrittenRow(row: OverwrittenRow): string {
+    switch (row.sheet) {
+        case 'world_modifiers': {
+            const fmtVal = (v: number | null) => v !== null ? String(v) : 'N/A';
+            const oldStr = `${row.oldRelation} | ${fmtVal(row.oldValue)}`;
+            const newStr = `${row.newRelation} | ${fmtVal(row.newValue)}`;
+            return `${row.condition} | ${row.effectType} — ${oldStr} → ${newStr}`;
+        }
+        case 'stat_modifiers':
+            return `${row.condition} | ${row.stat} — ${row.oldValue} → ${row.newValue}`;
+        case 'proficiency_modifiers': {
+            const fmtProf = (v: number, d: boolean, a: boolean) => d ? `${v} | disadvantage` : a ? `${v} | advantage` : String(v);
+            return `${row.condition} | ${row.proficiency} — ${fmtProf(row.oldValue, row.oldHasDisadvantage, row.oldHasAdvantage)} → ${fmtProf(row.newValue, row.newHasDisadvantage, row.newHasAdvantage)}`;
+        }
     }
 }
 
@@ -75,13 +92,15 @@ function chunksToMessages(chunks: string[], accentColor: number): ResultMessage[
     return messages;
 }
 
-export function buildResultMessages(userId: string, saved: SavedRow[], errors: RowError[]): ResultMessage[] {
+export function buildResultMessages(userId: string, saved: SavedRow[], errors: RowError[], overwrites: OverwrittenRow[]): ResultMessage[] {
     const messages: ResultMessage[] = [];
 
-    const savedCount  = saved.length;
-    const errorCount  = errors.length;
-    const hasErrors   = errorCount > 0;
-    const hasSaved    = savedCount > 0;
+    const savedCount     = saved.length;
+    const errorCount     = errors.length;
+    const overwriteCount = overwrites.length;
+    const hasErrors      = errorCount > 0;
+    const hasSaved       = savedCount > 0;
+    const hasOverwrites  = overwriteCount > 0;
 
     // Announcement message
     const annoLines: string[] = [
@@ -93,12 +112,14 @@ export function buildResultMessages(userId: string, saved: SavedRow[], errors: R
     if (savedCount === 0 && errorCount === 0) {
         annoLines.push(`-# No rows were found in the file — nothing was written.`);
     } else {
-        if (hasSaved)  annoLines.push(`**${savedCount}** row${savedCount === 1 ? '' : 's'} saved`);
-        if (hasErrors) annoLines.push(`**${errorCount}** row${errorCount === 1 ? '' : 's'} failed`);
+        if (hasSaved)       annoLines.push(`**${savedCount}** row${savedCount === 1 ? '' : 's'} saved`);
+        if (hasOverwrites)  annoLines.push(`**${overwriteCount}** row${overwriteCount === 1 ? '' : 's'} overwrote existing values`);
+        if (hasErrors)      annoLines.push(`**${errorCount}** row${errorCount === 1 ? '' : 's'} failed`);
     }
 
-    const annoColor = hasSaved && hasErrors ? colors.special
+    const annoColor = hasErrors && hasSaved ? colors.special
         : hasErrors                         ? colors.error
+        : hasOverwrites                     ? colors.special
         : hasSaved                          ? colors.success
         : colors.info;
 
@@ -107,10 +128,11 @@ export function buildResultMessages(userId: string, saved: SavedRow[], errors: R
         components: [makeContainer(annoLines.join('\n'), annoColor)],
     });
 
-    // Success list
-    if (hasSaved) {
+    // New rows
+    const newSaved = saved.filter(r => !overwrites.some(o => o.sheet === r.sheet && o.row === r.row));
+    if (newSaved.length > 0) {
         const grouped = new Map<string, string[]>();
-        for (const row of saved) {
+        for (const row of newSaved) {
             if (!grouped.has(row.sheet)) grouped.set(row.sheet, []);
             grouped.get(row.sheet)!.push(`-# ${formatSavedRow(row)}`);
         }
@@ -126,7 +148,26 @@ export function buildResultMessages(userId: string, saved: SavedRow[], errors: R
         }
     }
 
-    // Failure list
+    // Overwrites
+    if (hasOverwrites) {
+        const grouped = new Map<string, string[]>();
+        for (const row of overwrites) {
+            if (!grouped.has(row.sheet)) grouped.set(row.sheet, []);
+            grouped.get(row.sheet)!.push(`-# ${formatOverwrittenRow(row)}`);
+        }
+
+        const lines: string[] = [`## Overwrote Existing Values`];
+        for (const [sheet, rows] of grouped) {
+            lines.push(`**${SHEET_LABELS[sheet] ?? sheet}** (${rows.length})`);
+            lines.push(...rows);
+        }
+
+        for (const msg of chunksToMessages(splitIntoChunks(lines), colors.special)) {
+            messages.push(msg);
+        }
+    }
+
+    // Failures
     if (hasErrors) {
         const grouped = new Map<string, string[]>();
         for (const err of errors) {

@@ -42,7 +42,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     await interaction.editReply({
         flags:      MessageFlags.IsComponentsV2,
         components: buildGuildSettingsComponents(
-            { guildId, ...settings },
+            settings,
             guildName,
         ) as never,
     });

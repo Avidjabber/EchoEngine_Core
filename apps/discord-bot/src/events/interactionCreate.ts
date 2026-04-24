@@ -38,6 +38,17 @@ export default async function interactionCreate(
     interaction: Interaction,
     client: Client,
 ): Promise<void> {
+    if (interaction.isAutocomplete()) {
+        const command = client.commands.get(interaction.commandName);
+        if (!command?.autocomplete) return;
+        try {
+            await command.autocomplete(interaction);
+        } catch (err) {
+            console.error('Unhandled error in autocomplete handler:', err);
+        }
+        return;
+    }
+
     if (interaction.isModalSubmit() || interaction.isStringSelectMenu() || interaction.isButton()) {
         const handlers = interaction.isModalSubmit()      ? modalHandlers
                        : interaction.isStringSelectMenu() ? selectMenuHandlers

@@ -10,6 +10,7 @@ declare module 'discord.js' {
 export interface CommandModule {
     data: { name: string; toJSON?: () => object };
     execute: (interaction: unknown) => Promise<void>;
+    autocomplete?: (interaction: unknown) => Promise<void>;
     usesModal?: boolean;
     modalSubcommands?: Set<string>;
     publicSubcommands?: Set<string>;

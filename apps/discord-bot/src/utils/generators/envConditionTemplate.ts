@@ -26,6 +26,7 @@ export async function generateEnvConditionTemplate(data: EnvConditionTemplateDat
         { header: 'value',       key: 'value',       width: 8  },
     ];
     styleHeaderRow(worldSheet.getRow(1));
+    worldSheet.getRow(1).getCell('value').note = 'Enter a decimal between 0.0 and 5.0.\nThe relation (increase/decrease) determines direction — always enter a positive magnitude.\nLeave blank when relation is "block".';
     worldSheet.views = [{ state: 'frozen', ySplit: 1 }];
 
     // stat_modifiers sheet
@@ -45,8 +46,11 @@ export async function generateEnvConditionTemplate(data: EnvConditionTemplateDat
         { header: 'proficiency',      key: 'proficiency',      width: 22 },
         { header: 'value',            key: 'value',            width: 8  },
         { header: 'has_disadvantage', key: 'has_disadvantage', width: 18 },
+        { header: 'has_advantage',    key: 'has_advantage',    width: 16 },
     ];
     styleHeaderRow(profSheet.getRow(1));
+    profSheet.getRow(1).getCell('has_disadvantage').note = 'TRUE or FALSE. Mutually exclusive with value and has_advantage — set only one.';
+    profSheet.getRow(1).getCell('has_advantage').note    = 'TRUE or FALSE. Mutually exclusive with value and has_disadvantage — set only one.';
     profSheet.views = [{ state: 'frozen', ySplit: 1 }];
 
     // reference sheet
@@ -95,6 +99,7 @@ export async function generateEnvConditionDownload(data: EnvConditionDownloadDat
         { header: 'value',       key: 'value',       width: 8  },
     ];
     styleHeaderRow(worldSheet.getRow(1));
+    worldSheet.getRow(1).getCell('value').note = 'Enter a decimal between 0.0 and 5.0.\nThe relation (increase/decrease) determines direction — always enter a positive magnitude.\nLeave blank when relation is "block".';
     worldSheet.views = [{ state: 'frozen', ySplit: 1 }];
     for (const row of data.worldModifiers) {
         worldSheet.addRow({
@@ -123,8 +128,11 @@ export async function generateEnvConditionDownload(data: EnvConditionDownloadDat
         { header: 'proficiency',      key: 'proficiency',      width: 22 },
         { header: 'value',            key: 'value',            width: 8  },
         { header: 'has_disadvantage', key: 'has_disadvantage', width: 18 },
+        { header: 'has_advantage',    key: 'has_advantage',    width: 16 },
     ];
     styleHeaderRow(profSheet.getRow(1));
+    profSheet.getRow(1).getCell('has_disadvantage').note = 'TRUE or FALSE. Mutually exclusive with value and has_advantage — set only one.';
+    profSheet.getRow(1).getCell('has_advantage').note    = 'TRUE or FALSE. Mutually exclusive with value and has_disadvantage — set only one.';
     profSheet.views = [{ state: 'frozen', ySplit: 1 }];
     for (const row of data.proficiencyModifiers) {
         profSheet.addRow({
@@ -132,6 +140,7 @@ export async function generateEnvConditionDownload(data: EnvConditionDownloadDat
             proficiency:      row.proficiency,
             value:            row.value,
             has_disadvantage: row.hasDisadvantage ? 'TRUE' : 'FALSE',
+            has_advantage:    row.hasAdvantage    ? 'TRUE' : 'FALSE',
         });
     }
 
