@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { messages } from '@echoengine/shared';
+import { colors } from '../../../../core/colors';
 import { replyLoading } from '../../../../core/reply';
 import { fetchAllProficiencies } from '../../../../services/model/proficiencyPackService';
 import { getCachedProficiencyList, setCachedProficiencyList } from './listCache';
@@ -17,7 +18,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         if (!result.success) {
             await interaction.editReply({
                 flags:      MessageFlags.IsComponentsV2,
-                components: [{ type: 17, accent_color: 0xe74c3c, components: [{ type: 10, content: messages.errorGeneric }] }],
+                components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: messages.errorGeneric }] }],
             } as never);
             return;
         }

@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { replyLoading } from '../../../../core/reply';
+import { colors } from '../../../../core/colors';
 import { fetchProficiencyByCodeName, fetchProficiencyTemplateData } from '../../../../services/model/proficiencyPackService';
 import { setUpdateState } from './updateState';
 import { buildUpdatePreviewCard } from './updateComponents';
@@ -11,7 +12,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
-            components: [{ type: 17, accent_color: 0xe74c3c, components: [{ type: 10, content: messages.invalidPerms }] }],
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: messages.invalidPerms }] }],
         } as never);
         return;
     }
@@ -28,7 +29,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (!templateResult.success) {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
-            components: [{ type: 17, accent_color: 0xe74c3c, components: [{ type: 10, content: messages.errorGeneric }] }],
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: messages.errorGeneric }] }],
         } as never);
         return;
     }
@@ -36,7 +37,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (!defResult.success) {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
-            components: [{ type: 17, accent_color: 0xe74c3c, components: [{ type: 10, content: `\`${codeName}\` is not a recognised proficiency codeName.` }] }],
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: `\`${codeName}\` is not a recognised proficiency codeName.` }] }],
         } as never);
         return;
     }

@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { replyLoading } from '../../../../core/reply';
+import { colors } from '../../../../core/colors';
 import { checkDeleteProficiency } from '../../../../services/model/proficiencyPackService';
 import { setDeleteState } from './deleteState';
 import { buildDeleteConfirmCard } from './deleteComponents';
@@ -11,7 +12,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
-            components: [{ type: 17, accent_color: 0xe74c3c, components: [{ type: 10, content: messages.invalidPerms }] }],
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: messages.invalidPerms }] }],
         } as never);
         return;
     }
@@ -25,7 +26,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (!checkResult.success) {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
-            components: [{ type: 17, accent_color: 0xe74c3c, components: [{ type: 10, content: messages.errorGeneric }] }],
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: messages.errorGeneric }] }],
         } as never);
         return;
     }
@@ -35,7 +36,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (check.status === 'not_found') {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
-            components: [{ type: 17, accent_color: 0xe74c3c, components: [{ type: 10, content: `\`${codeName}\` is not a recognised proficiency codeName.` }] }],
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: `\`${codeName}\` is not a recognised proficiency codeName.` }] }],
         } as never);
         return;
     }
@@ -45,7 +46,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
             flags:      MessageFlags.IsComponentsV2,
             components: [{
                 type:         17,
-                accent_color: 0xe74c3c,
+                accent_color: colors.error,
                 components:   [{ type: 10, content: `**${check.name}** (\`${codeName}\`) is still in use and cannot be deleted.\n-# Remove all references to this proficiency first.` }],
             }],
         } as never);
