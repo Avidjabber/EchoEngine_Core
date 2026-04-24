@@ -10,14 +10,18 @@ import {
     RowError,
 } from './dto/upload-proficiency-pack.dto';
 import { ProficienciesRepository } from './proficiencies.repository';
+import { validateName, validateCodeName, validateDescription } from '../../utils/contentFilter';
 
 type ExistingDef = Awaited<ReturnType<ProficienciesRepository['findGuildProficiencyDefs']>>[0];
 
 interface Candidate {
-    dto:      ProficiencyRowDto;
-    statId:   number;
-    statName: string;
-    existing: ExistingDef | undefined;
+    dto:         ProficiencyRowDto;
+    codeName:    string;
+    name:        string;
+    description: string | null;
+    statId:      number;
+    statName:    string;
+    existing:    ExistingDef | undefined;
 }
 
 function rowInput(...parts: (string | null | undefined)[]): string {
@@ -87,12 +91,35 @@ export class ProficienciesService {
                 continue;
             }
 
-            const codeNameLower = row.codeName.toLowerCase();
-            if (seen.has(codeNameLower)) {
-                errors.push({ row: row.row, input, message: `Duplicate of row ${seen.get(codeNameLower)}` });
+            const codeNameCheck = validateCodeName(row.codeName);
+            if (!codeNameCheck.valid) {
+                errors.push({ row: row.row, input, message: `code_name ${codeNameCheck.reason}` });
                 continue;
             }
-            seen.set(codeNameLower, row.row);
+
+            const nameCheck = validateName(row.name);
+            if (!nameCheck.valid) {
+                errors.push({ row: row.row, input, message: `name ${nameCheck.reason}` });
+                continue;
+            }
+
+            let cleanDescription: string | null = null;
+            if (row.description) {
+                const descCheck = validateDescription(row.description);
+                if (!descCheck.valid) {
+                    errors.push({ row: row.row, input, message: `description ${descCheck.reason}` });
+                    continue;
+                }
+                cleanDescription = descCheck.value;
+            }
+
+            const cleanCodeName = codeNameCheck.value;
+
+            if (seen.has(cleanCodeName)) {
+                errors.push({ row: row.row, input, message: `Duplicate of row ${seen.get(cleanCodeName)}` });
+                continue;
+            }
+            seen.set(cleanCodeName, row.row);
 
             const stat = statMap.get(row.stat.toLowerCase());
             if (!stat) {
@@ -100,26 +127,32 @@ export class ProficienciesService {
                 continue;
             }
 
-            candidates.push({ dto: row, statId: stat.id, statName: stat.name, existing: existingMap.get(codeNameLower) });
+            candidates.push({
+                dto:         row,
+                codeName:    cleanCodeName,
+                name:        nameCheck.value,
+                description: cleanDescription,
+                statId:      stat.id,
+                statName:    stat.name,
+                existing:    existingMap.get(cleanCodeName),
+            });
         }
-
-        const normalizeDesc = (v: string | null | undefined) => v?.trim() || null;
 
         const toSave = candidates.filter(c => {
             if (!c.existing) return true;
             return (
-                c.existing.name          !== c.dto.name ||
-                c.existing.stat.id       !== c.statId   ||
-                (c.existing.description ?? null) !== normalizeDesc(c.dto.description)
+                c.existing.name              !== c.name        ||
+                c.existing.stat.id           !== c.statId      ||
+                (c.existing.description ?? null) !== c.description
             );
         });
 
         const results = await Promise.allSettled(
             toSave.map(c => this.repo.upsertProficiencyDef({
                 guildId:     dto.guildId,
-                codeName:    c.dto.codeName!,
-                name:        c.dto.name!,
-                description: normalizeDesc(c.dto.description),
+                codeName:    c.codeName,
+                name:        c.name,
+                description: c.description,
                 statId:      c.statId,
             })),
         );
@@ -130,19 +163,19 @@ export class ProficienciesService {
         results.forEach((result, i) => {
             const c = toSave[i];
             if (result.status === 'fulfilled') {
-                saved.push({ row: c.dto.row, codeName: c.dto.codeName!, name: c.dto.name!, stat: c.statName });
+                saved.push({ row: c.dto.row, codeName: c.codeName, name: c.name, stat: c.statName });
                 if (c.existing) {
                     overwrites.push({
                         row:      c.dto.row,
-                        codeName: c.dto.codeName!,
+                        codeName: c.codeName,
                         oldName:  c.existing.name,
-                        newName:  c.dto.name!,
+                        newName:  c.name,
                         oldStat:  c.existing.stat.name,
                         newStat:  c.statName,
                     });
                 }
             } else {
-                errors.push({ row: c.dto.row, input: rowInput(c.dto.codeName, c.dto.name, c.dto.stat), message: 'Failed to save to database' });
+                errors.push({ row: c.dto.row, input: rowInput(c.codeName, c.name, c.dto.stat), message: 'Failed to save to database' });
             }
         });
 
