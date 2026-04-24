@@ -11,8 +11,7 @@ import {
 } from './dto/upload-proficiency-pack.dto';
 import { ProficienciesRepository } from './proficiencies.repository';
 import { validateName, validateCodeName, validateDescription } from '../../utils/contentFilter';
-
-type ExistingDef = Awaited<ReturnType<ProficienciesRepository['findGuildProficiencyDefs']>>[0];
+import { ApiCacheService, CachedProfDefFull } from '../../cache/api-cache.service';
 
 interface Candidate {
     dto:         ProficiencyRowDto;
@@ -21,7 +20,7 @@ interface Candidate {
     description: string | null;
     statId:      number;
     statName:    string;
-    existing:    ExistingDef | undefined;
+    existing:    CachedProfDefFull | undefined;
 }
 
 function rowInput(...parts: (string | null | undefined)[]): string {
@@ -30,10 +29,18 @@ function rowInput(...parts: (string | null | undefined)[]): string {
 
 @Injectable()
 export class ProficienciesService {
-    constructor(private readonly repo: ProficienciesRepository) {}
+    constructor(
+        private readonly repo:  ProficienciesRepository,
+        private readonly cache: ApiCacheService,
+    ) {}
 
     async getAll(guildId: string) {
-        const defs = await this.repo.findGuildProficiencyDefs(guildId);
+        let defs = this.cache.getProfDefsFull(guildId);
+        if (!defs) {
+            const raw = await this.repo.findGuildProficiencyDefs(guildId);
+            this.cache.setProfDefsFull(guildId, raw);
+            defs = raw;
+        }
         return defs.map(d => ({ codeName: d.codeName, name: d.name, stat: d.stat.name, description: d.description }));
     }
 
@@ -52,6 +59,7 @@ export class ProficienciesService {
     async deleteOne(guildId: string, codeName: string): Promise<{ deleted: boolean }> {
         try {
             await this.repo.deleteProficiencyDefByCodeName(guildId, codeName);
+            this.cache.invalidateProfDefs(guildId);
             return { deleted: true };
         } catch {
             return { deleted: false };
@@ -65,18 +73,29 @@ export class ProficienciesService {
     }
 
     async getTemplateData(guildId: string): Promise<ProficiencyTemplateData> {
-        const [stats, defs] = await Promise.all([
-            this.repo.findAllStats(),
-            this.repo.findGuildProficiencyDefs(guildId),
-        ]);
+        let stats = this.cache.getStats();
+        let defs  = this.cache.getProfDefsFull(guildId);
+
+        const toFetch: Promise<void>[] = [];
+        if (!stats) toFetch.push(
+            this.repo.findAllStats().then(r => { stats = r; this.cache.setStats(r); }),
+        );
+        if (!defs) toFetch.push(
+            this.repo.findGuildProficiencyDefs(guildId).then(r => { defs = r; this.cache.setProfDefsFull(guildId, r); }),
+        );
+        if (toFetch.length) await Promise.all(toFetch);
+
         return {
-            stats:         stats.map(s => s.name),
-            proficiencies: defs.map(d => d.codeName),
+            stats:         stats!.map(s => s.name),
+            proficiencies: defs!.map(d => d.codeName),
         };
     }
 
     async resetPack(guildId: string): Promise<ResetProficiencyPackResult> {
-        const defs = await this.repo.findGuildProficiencyDefs(guildId);
+        let defs = this.cache.getProfDefsFull(guildId);
+        if (!defs) {
+            defs = await this.repo.findGuildProficiencyDefs(guildId);
+        }
 
         const deleted: ResetProficiencyPackResult['deleted'] = [];
         const failed:  ResetProficiencyPackResult['failed']  = [];
@@ -86,7 +105,7 @@ export class ProficienciesService {
         );
 
         results.forEach((result, i) => {
-            const def = defs[i];
+            const def = defs![i];
             if (result.status === 'fulfilled') {
                 deleted.push({ codeName: def.codeName, name: def.name });
             } else {
@@ -94,17 +113,25 @@ export class ProficienciesService {
             }
         });
 
+        this.cache.invalidateProfDefs(guildId);
         return { deleted, failed };
     }
 
     async uploadPack(dto: UploadProficiencyPackDto): Promise<UploadProficiencyPackResult> {
-        const [stats, existingDefs] = await Promise.all([
-            this.repo.findAllStats(),
-            this.repo.findGuildProficiencyDefs(dto.guildId),
-        ]);
+        let stats    = this.cache.getStats();
+        let profDefs = this.cache.getProfDefsFull(dto.guildId);
 
-        const statMap     = new Map(stats.map(s       => [s.name.toLowerCase(), s]));
-        const existingMap = new Map(existingDefs.map(d => [d.codeName.toLowerCase(), d]));
+        const toFetch: Promise<void>[] = [];
+        if (!stats)    toFetch.push(
+            this.repo.findAllStats().then(r => { stats = r; this.cache.setStats(r); }),
+        );
+        if (!profDefs) toFetch.push(
+            this.repo.findGuildProficiencyDefs(dto.guildId).then(r => { profDefs = r; this.cache.setProfDefsFull(dto.guildId, r); }),
+        );
+        if (toFetch.length) await Promise.all(toFetch);
+
+        const statMap     = new Map(stats!.map(s    => [s.name.toLowerCase(), s]));
+        const existingMap = new Map(profDefs!.map(d => [d.codeName.toLowerCase(), d]));
 
         const errors:     RowError[]   = [];
         const candidates: Candidate[]  = [];
@@ -213,6 +240,7 @@ export class ProficienciesService {
 
         errors.sort((a, b) => a.row - b.row);
 
+        this.cache.invalidateProfDefs(dto.guildId);
         return { saved, errors, overwrites };
     }
 }

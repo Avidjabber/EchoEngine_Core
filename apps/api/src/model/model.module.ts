@@ -1,5 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { BotApiKeyMiddleware } from '../auth/middleware/bot-api-key.middleware';
+import { ApiCacheService } from '../cache/api-cache.service';
 import { EnvConditionsController } from './env-conditions/envConditions.controller';
 import { EnvConditionsService } from './env-conditions/envConditions.service';
 import { EnvConditionsRepository } from './env-conditions/envConditions.repository';
@@ -9,7 +10,7 @@ import { ProficienciesRepository } from './proficiencies/proficiencies.repositor
 
 @Module({
     controllers: [EnvConditionsController, ProficienciesController],
-    providers:   [EnvConditionsService, EnvConditionsRepository, ProficienciesService, ProficienciesRepository],
+    providers:   [ApiCacheService, EnvConditionsService, EnvConditionsRepository, ProficienciesService, ProficienciesRepository],
 })
 export class ModelModule implements NestModule {
     configure(consumer: MiddlewareConsumer): void {

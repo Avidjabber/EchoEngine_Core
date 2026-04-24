@@ -1,8 +1,4 @@
-import { AutocompleteInteraction, ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
-import { getCachedEnvConditionInfo, setCachedEnvConditionInfo } from './envcondition/infoState';
-import { fetchEnvConditionInfoData } from '../../../services/model/envConditionPackService';
-import { fetchProficiencyTemplateData } from '../../../services/model/proficiencyPackService';
-import { getCachedProficiencyList } from './proficiency/listCache';
+import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { execute as envconditionUpdate } from './envcondition/update';
 import { execute as envconditionDelete } from './envcondition/delete';
 import { execute as envconditionInfo }   from './envcondition/info';
@@ -33,8 +29,7 @@ export const data = new SlashCommandBuilder()
                     .addStringOption(opt =>
                         opt
                             .setName('condition')
-                            .setDescription('Env condition — omit to choose from a list')
-                            .setAutocomplete(true),
+                            .setDescription('Env condition — omit to choose from a list'),
                     ),
             )
             .addSubcommand(sub =>
@@ -44,8 +39,7 @@ export const data = new SlashCommandBuilder()
                     .addStringOption(opt =>
                         opt
                             .setName('condition')
-                            .setDescription('Env condition — omit to choose from a list')
-                            .setAutocomplete(true),
+                            .setDescription('Env condition — omit to choose from a list'),
                     ),
             )
             .addSubcommand(sub =>
@@ -87,8 +81,7 @@ export const data = new SlashCommandBuilder()
                         opt
                             .setName('codename')
                             .setDescription('Proficiency codeName to edit')
-                            .setRequired(true)
-                            .setAutocomplete(true),
+                            .setRequired(true),
                     ),
             )
             .addSubcommand(sub =>
@@ -99,8 +92,7 @@ export const data = new SlashCommandBuilder()
                         opt
                             .setName('codename')
                             .setDescription('Proficiency codeName to delete')
-                            .setRequired(true)
-                            .setAutocomplete(true),
+                            .setRequired(true),
                     ),
             )
             .addSubcommand(sub =>
@@ -111,8 +103,7 @@ export const data = new SlashCommandBuilder()
                         opt
                             .setName('codename')
                             .setDescription('Proficiency codeName to view')
-                            .setRequired(true)
-                            .setAutocomplete(true),
+                            .setRequired(true),
                     ),
             )
             .addSubcommand(sub =>
@@ -138,45 +129,4 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (group === 'proficiency'  && sub === 'delete') return proficiencyDelete(interaction);
     if (group === 'proficiency'  && sub === 'info')   return proficiencyInfo(interaction);
     if (group === 'proficiency'  && sub === 'list')   return proficiencyList(interaction);
-}
-
-export async function autocomplete(interaction: AutocompleteInteraction): Promise<void> {
-    const focused = interaction.options.getFocused().toLowerCase();
-    const guildId = interaction.guildId!;
-    const group   = interaction.options.getSubcommandGroup(false);
-
-    if (group === 'proficiency') {
-        const cached = getCachedProficiencyList(guildId);
-        if (cached) {
-            const choices = cached
-                .filter(p => !focused || p.name.toLowerCase().includes(focused) || p.codeName.toLowerCase().includes(focused))
-                .slice(0, 25)
-                .map(p => ({ name: `${p.name} (${p.codeName})`, value: p.codeName }));
-            await interaction.respond(choices);
-            return;
-        }
-        const result = await fetchProficiencyTemplateData(guildId);
-        if (!result.success) { await interaction.respond([]); return; }
-        const choices = result.value!.proficiencies
-            .filter(p => !focused || p.toLowerCase().includes(focused))
-            .slice(0, 25)
-            .map(p => ({ name: p, value: p }));
-        await interaction.respond(choices);
-        return;
-    }
-
-    let infoData = getCachedEnvConditionInfo(guildId);
-    if (!infoData) {
-        const result = await fetchEnvConditionInfoData(guildId);
-        if (!result.success) { await interaction.respond([]); return; }
-        infoData = result.value!;
-        setCachedEnvConditionInfo(guildId, infoData);
-    }
-
-    const choices = infoData.conditions
-        .filter(c => !focused || c.name.toLowerCase().includes(focused) || c.codeName.toLowerCase().includes(focused))
-        .slice(0, 25)
-        .map(c => ({ name: c.name, value: c.codeName }));
-
-    await interaction.respond(choices);
 }

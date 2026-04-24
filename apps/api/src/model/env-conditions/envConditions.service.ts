@@ -15,6 +15,7 @@ import {
     ProficiencyModifierDto,
 } from './dto/upload-env-condition-pack.dto';
 import { EnvConditionsRepository } from './envConditions.repository';
+import { ApiCacheService, CachedGuildModifiers } from '../../cache/api-cache.service';
 
 const VALID_WORLD_MODIFIER_RELATIONS = new Set(['increase', 'decrease', 'block']);
 
@@ -32,143 +33,146 @@ function rowInput(...parts: (string | number | boolean | null | undefined)[]): s
 
 @Injectable()
 export class EnvConditionsService {
-    constructor(private readonly repo: EnvConditionsRepository) {}
+    constructor(
+        private readonly repo:  EnvConditionsRepository,
+        private readonly cache: ApiCacheService,
+    ) {}
 
     async getConditionList(): Promise<EnvConditionListItem[]> {
-        return this.repo.findAllEnvConditionsWithNames();
+        let data = this.cache.getEnvConditionNames();
+        if (!data) {
+            data = await this.repo.findAllEnvConditionsWithNames();
+            this.cache.setEnvConditionNames(data);
+        }
+        return data;
     }
 
     async getTemplateData(guildId: string): Promise<EnvConditionTemplateData> {
-        const [envConditions, effectTypes, relationTypes, stats, proficiencyDefs] = await Promise.all([
-            this.repo.findAllEnvConditions(),
-            this.repo.findEnvModifierEffectTypes(),
-            this.repo.findEnvConditionRelationTypes(),
-            this.repo.findAllStats(),
-            this.repo.findProficiencyDefs(guildId),
-        ]);
+        let envConditions  = this.cache.getEnvConditions();
+        let effectTypes    = this.cache.getEffectTypes();
+        let relationTypes  = this.cache.getRelationTypes();
+        let stats          = this.cache.getStats();
+        let proficiencyDefs = this.cache.getProfDefsSlim(guildId);
+
+        const fetches: Promise<void>[] = [];
+
+        if (!envConditions)   fetches.push(this.repo.findAllEnvConditions()           .then(v => { envConditions   = v; this.cache.setEnvConditions(v); }));
+        if (!effectTypes)     fetches.push(this.repo.findEnvModifierEffectTypes()      .then(v => { effectTypes     = v; this.cache.setEffectTypes(v); }));
+        if (!relationTypes)   fetches.push(this.repo.findEnvConditionRelationTypes()   .then(v => { relationTypes   = v; this.cache.setRelationTypes(v); }));
+        if (!stats)           fetches.push(this.repo.findAllStats()                    .then(v => { stats           = v; this.cache.setStats(v); }));
+        if (!proficiencyDefs) fetches.push(this.repo.findProficiencyDefs(guildId)      .then(v => { proficiencyDefs = v; this.cache.setProfDefsSlim(guildId, v); }));
+
+        if (fetches.length) await Promise.all(fetches);
 
         return {
-            envConditions:   envConditions.map(e  => e.codeName),
-            effectTypes:     effectTypes.map(e    => e.name),
-            relations:       relationTypes
+            envConditions:   envConditions!.map(e  => e.codeName),
+            effectTypes:     effectTypes!.map(e    => e.name),
+            relations:       relationTypes!
                 .filter(r => VALID_WORLD_MODIFIER_RELATIONS.has(r.name.toLowerCase()))
                 .map(r => r.name),
-            stats:           stats.map(s          => s.name),
-            proficiencyDefs: proficiencyDefs.map(p => p.codeName),
+            stats:           stats!.map(s          => s.name),
+            proficiencyDefs: proficiencyDefs!.map(p => p.codeName),
         };
     }
 
     async getModifiers(guildId: string): Promise<EnvConditionModifiersData> {
-        const { worldModifiers, statModifiers, proficiencyModifiers } = await this.repo.getGuildModifiers(guildId);
-        return {
-            worldModifiers:       worldModifiers.map(m => ({
-                condition:  m.envCondition.codeName,
-                effectType: m.effectType.name,
-                relation:   m.relationType.name,
-                value:      m.value ?? null,
-            })),
-            statModifiers:        statModifiers.map(m => ({
-                condition: m.envCondition.codeName,
-                stat:      m.stat.name,
-                value:     m.value,
-            })),
-            proficiencyModifiers: proficiencyModifiers.map(m => ({
-                condition:       m.envCondition.codeName,
-                proficiency:     m.proficiency.codeName,
-                value:           m.value,
-                hasDisadvantage: m.hasDisadvantage,
-                hasAdvantage:    m.hasAdvantage,
-            })),
-        };
+        const raw = await this.getRawModifiers(guildId);
+        return this.mapModifiers(raw);
     }
 
     async downloadPack(guildId: string): Promise<EnvConditionDownloadData> {
-        const [templateData, { worldModifiers, statModifiers, proficiencyModifiers }] = await Promise.all([
+        const [templateData, raw] = await Promise.all([
             this.getTemplateData(guildId),
-            this.repo.getGuildModifiers(guildId),
+            this.getRawModifiers(guildId),
         ]);
 
         return {
             templateData,
-            worldModifiers:       worldModifiers.map(m => ({
-                condition:  m.envCondition.codeName,
-                effectType: m.effectType.name,
-                relation:   m.relationType.name,
-                value:      m.value ?? null,
-            })),
-            statModifiers:        statModifiers.map(m => ({
-                condition: m.envCondition.codeName,
-                stat:      m.stat.name,
-                value:     m.value,
-            })),
-            proficiencyModifiers: proficiencyModifiers.map(m => ({
-                condition:       m.envCondition.codeName,
-                proficiency:     m.proficiency.codeName,
-                value:           m.value,
-                hasDisadvantage: m.hasDisadvantage,
-                hasAdvantage:    m.hasAdvantage,
-            })),
+            ...this.mapModifiers(raw),
         };
     }
 
     async resetPack(guildId: string): Promise<EnvConditionResetResult> {
-        return this.repo.deleteAllGuildModifiers(guildId);
+        const result = await this.repo.deleteAllGuildModifiers(guildId);
+        this.cache.invalidateGuildModifiers(guildId);
+        return result;
     }
 
     async resetCondition(guildId: string, conditionCodeName: string): Promise<EnvConditionResetResult | null> {
         const condition = await this.repo.findEnvConditionIdByCodeName(conditionCodeName);
         if (!condition) return null;
-        return this.repo.deleteConditionModifiers(guildId, condition.id);
+        const result = await this.repo.deleteConditionModifiers(guildId, condition.id);
+        this.cache.invalidateGuildModifiers(guildId);
+        return result;
     }
 
     async removeModifier(guildId: string, conditionCodeName: string, modifierType: 'world' | 'stat' | 'proficiency', key: string): Promise<boolean> {
         const condition = await this.repo.findEnvConditionIdByCodeName(conditionCodeName);
         if (!condition) return false;
 
+        let removed = false;
+
         if (modifierType === 'world') {
-            const effectTypes = await this.repo.findEnvModifierEffectTypes();
+            let effectTypes = this.cache.getEffectTypes();
+            if (!effectTypes) {
+                effectTypes = await this.repo.findEnvModifierEffectTypes();
+                this.cache.setEffectTypes(effectTypes);
+            }
             const et = effectTypes.find(e => e.name.toLowerCase() === key.toLowerCase());
             if (!et) return false;
             const result = await this.repo.deleteWorldModifier(guildId, condition.id, et.id);
-            return result.count > 0;
-        }
-
-        if (modifierType === 'stat') {
-            const stats = await this.repo.findAllStats();
+            removed = result.count > 0;
+        } else if (modifierType === 'stat') {
+            let stats = this.cache.getStats();
+            if (!stats) {
+                stats = await this.repo.findAllStats();
+                this.cache.setStats(stats);
+            }
             const stat = stats.find(s => s.name.toLowerCase() === key.toLowerCase());
             if (!stat) return false;
             const result = await this.repo.deleteStatModifier(guildId, condition.id, stat.id);
-            return result.count > 0;
-        }
-
-        if (modifierType === 'proficiency') {
-            const proficiencyDefs = await this.repo.findProficiencyDefs(guildId);
+            removed = result.count > 0;
+        } else if (modifierType === 'proficiency') {
+            let proficiencyDefs = this.cache.getProfDefsSlim(guildId);
+            if (!proficiencyDefs) {
+                proficiencyDefs = await this.repo.findProficiencyDefs(guildId);
+                this.cache.setProfDefsSlim(guildId, proficiencyDefs);
+            }
             const prof = proficiencyDefs.find(p => p.codeName.toLowerCase() === key.toLowerCase());
             if (!prof) return false;
             const result = await this.repo.deleteProfModifier(guildId, condition.id, prof.id);
-            return result.count > 0;
+            removed = result.count > 0;
         }
 
-        return false;
+        if (removed) this.cache.invalidateGuildModifiers(guildId);
+        return removed;
     }
 
     async uploadPack(dto: UploadEnvConditionPackDto): Promise<UploadEnvConditionPackResult> {
-        const [envConditions, effectTypes, relationTypes, stats, proficiencyDefs, existing] = await Promise.all([
-            this.repo.findAllEnvConditions(),
-            this.repo.findEnvModifierEffectTypes(),
-            this.repo.findEnvConditionRelationTypes(),
-            this.repo.findAllStats(),
-            this.repo.findProficiencyDefs(dto.guildId),
+        let envConditions  = this.cache.getEnvConditions();
+        let effectTypes    = this.cache.getEffectTypes();
+        let relationTypes  = this.cache.getRelationTypes();
+        let stats          = this.cache.getStats();
+        let proficiencyDefs = this.cache.getProfDefsSlim(dto.guildId);
+
+        const lookupFetches: Promise<void>[] = [];
+        if (!envConditions)   lookupFetches.push(this.repo.findAllEnvConditions()         .then(v => { envConditions   = v; this.cache.setEnvConditions(v); }));
+        if (!effectTypes)     lookupFetches.push(this.repo.findEnvModifierEffectTypes()    .then(v => { effectTypes     = v; this.cache.setEffectTypes(v); }));
+        if (!relationTypes)   lookupFetches.push(this.repo.findEnvConditionRelationTypes() .then(v => { relationTypes   = v; this.cache.setRelationTypes(v); }));
+        if (!stats)           lookupFetches.push(this.repo.findAllStats()                  .then(v => { stats           = v; this.cache.setStats(v); }));
+        if (!proficiencyDefs) lookupFetches.push(this.repo.findProficiencyDefs(dto.guildId).then(v => { proficiencyDefs = v; this.cache.setProfDefsSlim(dto.guildId, v); }));
+
+        const [existing] = await Promise.all([
             this.repo.getGuildModifiers(dto.guildId),
+            ...lookupFetches,
         ]);
 
-        const envConditionMap   = new Map(envConditions.map(e  => [e.codeName.toLowerCase(),  e.id]));
-        const effectTypeMap     = new Map(effectTypes.map(e    => [e.name.toLowerCase(),      e.id]));
-        const relationTypeMap   = new Map(relationTypes.map(r  => [r.name.toLowerCase(),      r.id]));
-        const statMap           = new Map(stats.map(s          => [s.name.toLowerCase(),      s.id]));
-        const proficiencyDefMap = new Map(proficiencyDefs.map(p => [p.codeName.toLowerCase(), p.id]));
+        const envConditionMap   = new Map(envConditions!.map(e  => [e.codeName.toLowerCase(),  e.id]));
+        const effectTypeMap     = new Map(effectTypes!.map(e    => [e.name.toLowerCase(),      e.id]));
+        const relationTypeMap   = new Map(relationTypes!.map(r  => [r.name.toLowerCase(),      r.id]));
+        const statMap           = new Map(stats!.map(s          => [s.name.toLowerCase(),      s.id]));
+        const proficiencyDefMap = new Map(proficiencyDefs!.map(p => [p.codeName.toLowerCase(), p.id]));
 
-        // Build existing-modifier lookup maps (same key format as the duplicate-detection `seen` maps)
         const existingWorld = new Map(existing.worldModifiers.map(m => [
             `${m.envCondition.codeName.toLowerCase()}|${m.effectType.name.toLowerCase()}`,
             { relation: m.relationType.name, value: m.value ?? null },
@@ -184,12 +188,10 @@ export class EnvConditionsService {
 
         const errors: RowError[] = [];
 
-        // Phase 1: validate all rows, build save lists
         const worldToSave = this.validateWorldModifiers(dto.worldModifiers, dto.guildId, envConditionMap, effectTypeMap, relationTypeMap, errors);
         const statToSave  = this.validateStatModifiers(dto.statModifiers,   dto.guildId, envConditionMap, statMap, errors);
         const profToSave  = this.validateProficiencyModifiers(dto.proficiencyModifiers, dto.guildId, envConditionMap, proficiencyDefMap, errors);
 
-        // Phase 2: categorize validated rows — skip rows whose values are identical to what's already saved
         type WorldCandidate = { item: ValidatedWorldRow; old?: { relation: string; value: number | null } };
         type StatCandidate  = { item: ValidatedStatRow;  old?: { value: number } };
         type ProfCandidate  = { item: ValidatedProfRow;  old?: { value: number; hasDisadvantage: boolean; hasAdvantage: boolean } };
@@ -203,7 +205,6 @@ export class EnvConditionsService {
             } else if (old.relation.toLowerCase() !== item.savedShape.relation || old.value !== item.savedShape.value) {
                 worldCandidates.push({ item, old });
             }
-            // else: unchanged — skip
         }
 
         const statCandidates: StatCandidate[] = [];
@@ -228,14 +229,12 @@ export class EnvConditionsService {
             }
         }
 
-        // Phase 3: save only new/changed rows in parallel
         const [worldResults, statResults, profResults] = await Promise.all([
             Promise.allSettled(worldCandidates.map(c => this.repo.upsertEnvConditionModifier(c.item.db))),
             Promise.allSettled(statCandidates.map(c  => this.repo.upsertStatModifier(c.item.db))),
             Promise.allSettled(profCandidates.map(c  => this.repo.upsertProficiencyModifier(c.item.db))),
         ]);
 
-        // Phase 4: collect results
         const saved:      SavedRow[]       = [];
         const overwrites: OverwrittenRow[] = [];
 
@@ -308,7 +307,43 @@ export class EnvConditionsService {
             return si !== 0 ? si : a.row - b.row;
         });
 
+        this.cache.invalidateGuildModifiers(dto.guildId);
+
         return { saved, errors, overwrites };
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private async getRawModifiers(guildId: string): Promise<CachedGuildModifiers> {
+        let cached = this.cache.getGuildModifiers(guildId);
+        if (!cached) {
+            cached = await this.repo.getGuildModifiers(guildId);
+            this.cache.setGuildModifiers(guildId, cached);
+        }
+        return cached;
+    }
+
+    private mapModifiers(raw: CachedGuildModifiers): EnvConditionModifiersData {
+        return {
+            worldModifiers:       raw.worldModifiers.map(m => ({
+                condition:  m.envCondition.codeName,
+                effectType: m.effectType.name,
+                relation:   m.relationType.name,
+                value:      m.value ?? null,
+            })),
+            statModifiers:        raw.statModifiers.map(m => ({
+                condition: m.envCondition.codeName,
+                stat:      m.stat.name,
+                value:     m.value,
+            })),
+            proficiencyModifiers: raw.proficiencyModifiers.map(m => ({
+                condition:       m.envCondition.codeName,
+                proficiency:     m.proficiency.codeName,
+                value:           m.value,
+                hasDisadvantage: m.hasDisadvantage,
+                hasAdvantage:    m.hasAdvantage,
+            })),
+        };
     }
 
     private validateWorldModifiers(
