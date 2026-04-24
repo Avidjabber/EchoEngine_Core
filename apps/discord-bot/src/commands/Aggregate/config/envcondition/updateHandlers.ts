@@ -356,14 +356,6 @@ export async function handleEcUpdValModal(interaction: ModalSubmitInteraction): 
         return;
     }
 
-    if (state.modifierType === 'world' && (parsed < 0 || parsed > 5)) {
-        await interaction.reply({
-            flags:      MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
-            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: `*Value must be between 0.0 and 5.0. Enter the magnitude — the relation (increase/decrease) determines direction.*` }] }],
-        } as never);
-        return;
-    }
-
     const updated = { ...state, value: parsed };
     setUpdateState(userId, guildId, updated);
     await interaction.deferUpdate();
@@ -447,15 +439,6 @@ export async function handleEcUpdSave(interaction: ButtonInteraction): Promise<v
     }
 
     if (state.modifierType === 'proficiency' && state.proficiency) {
-        const activeCount = ((state.value ?? 0) !== 0 ? 1 : 0) + (state.hasDisadvantage ? 1 : 0) + (state.hasAdvantage ? 1 : 0);
-        if (activeCount > 1) {
-            await interaction.editReply({
-                flags:      MessageFlags.IsComponentsV2,
-                components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: 'Only one of value, disadvantage, or advantage may be set — choose one.' }] }],
-            } as never);
-            return;
-        }
-
         const existing = infoData?.proficiencyModifiers.find(m => m.condition === state.codeName && m.proficiency === state.proficiency);
         if (existing) {
             const oldDesc = describeProfModifier(existing.proficiency, existing.value, existing.hasDisadvantage, existing.hasAdvantage);
