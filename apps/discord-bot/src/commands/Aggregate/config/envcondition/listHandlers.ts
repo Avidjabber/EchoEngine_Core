@@ -48,3 +48,9 @@ export async function handleEcListFilter(interaction: StringSelectMenuInteractio
         components: buildEnvConditionListComponents(result.value!, 0, filter, isAdmin) as never,
     });
 }
+
+// customId: ec_list_done
+export async function handleEcListDone(interaction: ButtonInteraction): Promise<void> {
+    await interaction.deferUpdate();
+    await interaction.deleteReply();
+}

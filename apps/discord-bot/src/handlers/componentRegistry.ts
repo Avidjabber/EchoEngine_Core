@@ -2,9 +2,9 @@ import { ButtonInteraction, MessageComponentInteraction, ModalSubmitInteraction,
 import { handleDenListDone, handleDenListConfig, handleDenListPage, handleDenToggle, handleDenResetDefaults, handleDenDone, handleDenDelete } from '../commands/Aggregate/server/den/configHandlers';
 import { handleGsFieldButton, handleGsFieldModal, handleGsFarmButton, handleGsFarmModal, handleGsFlagToggle, handleGsSection, handleGsCancel, handleGsFinalize } from '../commands/Aggregate/server/settings/settingsHandlers';
 import { handleGsiSection, handleGsiDone } from '../commands/Aggregate/server/settings/infoHandlers';
-import { handleEcListPage, handleEcListFilter } from '../commands/Aggregate/config/envcondition/listHandlers';
-import { handleEcInfoDetail, handleEcInfoBack, handleEcInfoPage } from '../commands/Aggregate/config/envcondition/infoHandlers';
-import { handleEcRstPage, handleEcRstPick, handleEcRstConfirm, handleEcRstBack, handleEcRstAllConfirm, handleEcRstAllBack } from '../commands/Aggregate/config/envcondition/resetHandlers';
+import { handleEcListPage, handleEcListFilter, handleEcListDone } from '../commands/Aggregate/config/envcondition/listHandlers';
+import { handleEcInfoDetail, handleEcInfoBack, handleEcInfoPage, handleEcInfoDone } from '../commands/Aggregate/config/envcondition/infoHandlers';
+import { handleEcDelPage, handleEcDelPick, handleEcDelConfirm, handleEcDelBack } from '../commands/Aggregate/config/envcondition/deleteHandlers';
 import {
     handleEcEdit,
     handleEcUpdCpage, handleEcUpdCpick, handleEcUpdCback,
@@ -62,15 +62,15 @@ export const buttonHandlers: ComponentHandler[] = [
     { prefix: 'gsi_done',         handler: interaction => handleGsiDone(interaction as ButtonInteraction) },
     { prefix: 'ec_edit:',        handler: interaction => handleEcEdit(interaction as ButtonInteraction) },
     { prefix: 'ec_list_page:',   handler: interaction => handleEcListPage(interaction as ButtonInteraction) },
+    { prefix: 'ec_list_done',    handler: interaction => handleEcListDone(interaction as ButtonInteraction) },
     { prefix: 'ec_info_d:',      handler: interaction => handleEcInfoDetail(interaction as ButtonInteraction) },
     { prefix: 'ec_info_back:',   handler: interaction => handleEcInfoBack(interaction as ButtonInteraction) },
     { prefix: 'ec_info_page:',   handler: interaction => handleEcInfoPage(interaction as ButtonInteraction) },
-    { prefix: 'ec_rst_page:',    handler: interaction => handleEcRstPage(interaction as ButtonInteraction) },
-    { prefix: 'ec_rst_pick:',    handler: interaction => handleEcRstPick(interaction as ButtonInteraction) },
-    { prefix: 'ec_rst_confirm:',    handler: interaction => handleEcRstConfirm(interaction as ButtonInteraction) },
-    { prefix: 'ec_rst_back:',       handler: interaction => handleEcRstBack(interaction as ButtonInteraction) },
-    { prefix: 'ec_rst_all_confirm', handler: interaction => handleEcRstAllConfirm(interaction as ButtonInteraction) },
-    { prefix: 'ec_rst_all_back',    handler: interaction => handleEcRstAllBack(interaction as ButtonInteraction) },
+    { prefix: 'ec_info_done',    handler: interaction => handleEcInfoDone(interaction as ButtonInteraction) },
+    { prefix: 'ec_del_page:',    handler: interaction => handleEcDelPage(interaction as ButtonInteraction) },
+    { prefix: 'ec_del_pick:',    handler: interaction => handleEcDelPick(interaction as ButtonInteraction) },
+    { prefix: 'ec_del_confirm:', handler: interaction => handleEcDelConfirm(interaction as ButtonInteraction) },
+    { prefix: 'ec_del_back:',    handler: interaction => handleEcDelBack(interaction as ButtonInteraction) },
     { prefix: 'ec_upd_cpage:',   handler: interaction => handleEcUpdCpage(interaction as ButtonInteraction) },
     { prefix: 'ec_upd_cpick:',   handler: interaction => handleEcUpdCpick(interaction as ButtonInteraction) },
     { prefix: 'ec_upd_cback',    handler: interaction => handleEcUpdCback(interaction as ButtonInteraction) },

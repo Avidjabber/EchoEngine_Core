@@ -71,6 +71,11 @@ export function buildEnvConditionInfoListComponents(
         });
     }
 
+    components.push({
+        type:       1,
+        components: [{ type: 2, label: 'Done', style: 2, custom_id: 'ec_info_done' }],
+    });
+
     return components;
 }
 
@@ -131,12 +136,10 @@ export function buildEnvConditionInfoDetailComponents(
         },
         {
             type:       1,
-            components: [{
-                type:      2,
-                label:     '← Back',
-                style:     2,
-                custom_id: `ec_info_back:${listPage}`,
-            }],
+            components: [
+                { type: 2, label: '← Back', style: 2, custom_id: `ec_info_back:${listPage}` },
+                { type: 2, label: 'Done',   style: 2, custom_id: 'ec_info_done'             },
+            ],
         },
     ];
 }

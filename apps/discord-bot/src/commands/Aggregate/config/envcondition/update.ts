@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
+import { replyLoading } from '../../../../core/reply';
 import {
     fetchEnvConditionInfoData,
     fetchEnvConditionTemplateData,
@@ -10,6 +11,8 @@ import { setUpdateState } from './updateState';
 import { buildUpdatePickerComponents, buildUpdateTypeSelector } from './updateComponents';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    await replyLoading(interaction);
+
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,

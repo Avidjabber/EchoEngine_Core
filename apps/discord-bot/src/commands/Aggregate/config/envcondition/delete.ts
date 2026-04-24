@@ -1,11 +1,14 @@
 import { ChatInputCommandInteraction, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
+import { replyLoading } from '../../../../core/reply';
 import { fetchEnvConditionInfoData } from '../../../../services/model/envConditionPackService';
 import { getCachedEnvConditionInfo, setCachedEnvConditionInfo } from './infoState';
-import { buildEnvConditionResetPickerComponents, buildEnvConditionResetConfirmComponents, buildEnvConditionResetAllComponents } from './resetComponents';
+import { buildEnvConditionDeletePickerComponents, buildEnvConditionDeleteConfirmComponents } from './deleteComponents';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    await replyLoading(interaction);
+
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
@@ -20,7 +23,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
     const guildId  = interaction.guildId!;
     const codeName = interaction.options.getString('condition');
-    const resetAll = interaction.options.getBoolean('all') ?? false;
 
     let data = getCachedEnvConditionInfo(guildId);
 
@@ -43,14 +45,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         setCachedEnvConditionInfo(guildId, data);
     }
 
-    if (resetAll) {
-        await interaction.editReply({
-            flags:      MessageFlags.IsComponentsV2,
-            components: buildEnvConditionResetAllComponents(data) as never,
-        });
-        return;
-    }
-
     if (codeName) {
         const exists = data.conditions.some(c => c.codeName === codeName);
 
@@ -68,13 +62,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
-            components: buildEnvConditionResetConfirmComponents(data, codeName, -1) as never,
+            components: buildEnvConditionDeleteConfirmComponents(data, codeName, -1) as never,
         });
         return;
     }
 
     await interaction.editReply({
         flags:      MessageFlags.IsComponentsV2,
-        components: buildEnvConditionResetPickerComponents(data, 0) as never,
+        components: buildEnvConditionDeletePickerComponents(data, 0) as never,
     });
 }

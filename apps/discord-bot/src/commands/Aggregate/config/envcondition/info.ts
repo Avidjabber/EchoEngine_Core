@@ -7,7 +7,7 @@ import { getCachedEnvConditionInfo, setCachedEnvConditionInfo } from './infoStat
 import { buildEnvConditionInfoListComponents } from './infoComponents';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    await replyLoading(interaction, false);
+    await replyLoading(interaction);
 
     const guildId = interaction.guildId!;
 

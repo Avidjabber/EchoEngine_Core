@@ -529,23 +529,16 @@ export async function handleEcUpdRmConfirm(interaction: ButtonInteraction): Prom
     if (state.modifierType === 'proficiency' && state.proficiency)
         detail = describeProfModifier(state.proficiency, state.value ?? 0, state.hasDisadvantage, state.hasAdvantage);
 
-    await interaction.editReply({
-        flags:      MessageFlags.IsComponentsV2,
-        components: [{
-            type:         17,
-            accent_color: colors.success,
-            components:   [{ type: 10, content: `## Modifier Removed\n-# ${state.conditionName} · ${typeLabel}\n-# ${detail}` }],
-        }],
-    } as never);
-
     await interaction.followUp({
         flags:      MessageFlags.IsComponentsV2,
         components: [{
             type:         17,
             accent_color: colors.success,
-            components:   [{ type: 10, content: `## Modifier Removed\nUpdated by <@${userId}>\n\n-# ${state.conditionName} · ${typeLabel}\n-# ${detail}` }],
+            components:   [{ type: 10, content: `## Modifier Removed\nRemoved by <@${userId}>\n\n-# ${state.conditionName} · ${typeLabel}\n-# ${detail}` }],
         }],
     } as never);
+
+    await interaction.deleteReply();
 }
 
 // customId: ec_upd_rm_back  — back from remove confirmation to form
@@ -682,21 +675,14 @@ async function doSave(interaction: ButtonInteraction, state: EnvConditionUpdateS
     if (savedItem?.sheet === 'stat_modifiers')        detail = describeStatModifier(savedItem.stat, savedItem.value);
     if (savedItem?.sheet === 'proficiency_modifiers') detail = describeProfModifier(savedItem.proficiency, savedItem.value, savedItem.hasDisadvantage, savedItem.hasAdvantage);
 
-    await interaction.editReply({
-        flags:      MessageFlags.IsComponentsV2,
-        components: [{
-            type:         17,
-            accent_color: colors.success,
-            components:   [{ type: 10, content: `## Modifier Saved\n-# ${state.conditionName} · ${typeLabel}\n-# ${detail}` }],
-        }],
-    } as never);
-
     await interaction.followUp({
         flags:      MessageFlags.IsComponentsV2,
         components: [{
             type:         17,
             accent_color: colors.success,
-            components:   [{ type: 10, content: `## Modifier Saved\nUpdated by <@${interaction.user.id}>\n\n-# ${state.conditionName} · ${typeLabel}\n-# ${detail}` }],
+            components:   [{ type: 10, content: `## Modifier Saved\nSaved by <@${interaction.user.id}>\n\n-# ${state.conditionName} · ${typeLabel}\n-# ${detail}` }],
         }],
     } as never);
+
+    await interaction.deleteReply();
 }

@@ -107,6 +107,7 @@ export function buildEnvConditionListComponents(
                 ],
             },
             filterRow(filter),
+            { type: 1, components: [{ type: 2, label: 'Done', style: 2, custom_id: 'ec_list_done' }] },
         ];
     }
 
@@ -162,6 +163,7 @@ export function buildEnvConditionListComponents(
     }
 
     components.push(filterRow(filter));
+    components.push({ type: 1, components: [{ type: 2, label: 'Done', style: 2, custom_id: 'ec_list_done' }] });
 
     return components;
 }

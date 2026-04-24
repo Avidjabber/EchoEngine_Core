@@ -39,7 +39,13 @@ export const data = new SlashCommandBuilder()
             .addSubcommand(sub =>
                 sub
                     .setName('reset')
-                    .setDescription('Delete all env condition modifiers for this guild'),
+                    .setDescription('Reset env condition modifiers — omit to view the list, "all" to clear everything, or pass a codeName')
+                    .addStringOption(opt =>
+                        opt
+                            .setName('condition')
+                            .setDescription('"all" to reset everything, or a specific env condition codeName')
+                            .setRequired(false),
+                    ),
             ),
     )
     .addSubcommandGroup(group =>

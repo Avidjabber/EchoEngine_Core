@@ -75,3 +75,9 @@ export async function handleEcInfoPage(interaction: ButtonInteraction): Promise<
         components: buildEnvConditionInfoListComponents(data, page) as never,
     });
 }
+
+// customId: ec_info_done
+export async function handleEcInfoDone(interaction: ButtonInteraction): Promise<void> {
+    await interaction.deferUpdate();
+    await interaction.deleteReply();
+}

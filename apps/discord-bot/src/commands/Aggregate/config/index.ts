@@ -2,7 +2,7 @@ import { AutocompleteInteraction, ChatInputCommandInteraction, SlashCommandBuild
 import { getCachedEnvConditionInfo, setCachedEnvConditionInfo } from './envcondition/infoState';
 import { fetchEnvConditionInfoData } from '../../../services/model/envConditionPackService';
 import { execute as envconditionUpdate } from './envcondition/update';
-import { execute as envconditionReset }  from './envcondition/reset';
+import { execute as envconditionDelete } from './envcondition/delete';
 import { execute as envconditionInfo }   from './envcondition/info';
 import { execute as envconditionList }   from './envcondition/list';
 
@@ -32,18 +32,13 @@ export const data = new SlashCommandBuilder()
             )
             .addSubcommand(sub =>
                 sub
-                    .setName('reset')
+                    .setName('delete')
                     .setDescription('Remove all modifiers for a specific env condition in this guild')
                     .addStringOption(opt =>
                         opt
                             .setName('condition')
                             .setDescription('Env condition — omit to choose from a list')
                             .setAutocomplete(true),
-                    )
-                    .addBooleanOption(opt =>
-                        opt
-                            .setName('all')
-                            .setDescription('Reset every modifier for every condition in this guild'),
                     ),
             )
             .addSubcommand(sub =>
@@ -69,14 +64,14 @@ export const data = new SlashCommandBuilder()
             ),
     );
 
-export const publicSubcommands = new Set(['info']);
+export const publicSubcommands = new Set(['update', 'delete', 'info', 'list']);
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const group = interaction.options.getSubcommandGroup();
     const sub   = interaction.options.getSubcommand();
 
     if (group === 'envcondition' && sub === 'update') return envconditionUpdate(interaction);
-    if (group === 'envcondition' && sub === 'reset')  return envconditionReset(interaction);
+    if (group === 'envcondition' && sub === 'delete') return envconditionDelete(interaction);
     if (group === 'envcondition' && sub === 'info')   return envconditionInfo(interaction);
     if (group === 'envcondition' && sub === 'list')   return envconditionList(interaction);
 }
