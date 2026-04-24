@@ -33,6 +33,41 @@ export class ProficienciesRepository {
         });
     }
 
+    findGuildProficiencyDef(guildId: string, codeName: string) {
+        return this.db.proficiencyDef.findUnique({
+            where:  { guildId_codeName: { guildId, codeName } },
+            select: { codeName: true, name: true, description: true, stat: { select: { name: true } } },
+        });
+    }
+
+    checkDeleteProficiencyDef(guildId: string, codeName: string) {
+        return this.db.proficiencyDef.findUnique({
+            where:  { guildId_codeName: { guildId, codeName } },
+            select: {
+                name: true,
+                _count: {
+                    select: {
+                        entityProficiencies:           true,
+                        conditionEffects:              true,
+                        abilityProficiencyModifiers:   true,
+                        envConditionMods:              true,
+                        combatActionConditions:        true,
+                        actionStepConfigs:             true,
+                        guildSpeciesActionStepConfigs: true,
+                        eventEffects:                  true,
+                        eventCheckSteps:               true,
+                    },
+                },
+            },
+        });
+    }
+
+    deleteProficiencyDefByCodeName(guildId: string, codeName: string) {
+        return this.db.proficiencyDef.delete({
+            where: { guildId_codeName: { guildId, codeName } },
+        });
+    }
+
     deleteProficiencyDefById(id: number) {
         return this.db.proficiencyDef.delete({ where: { id } });
     }

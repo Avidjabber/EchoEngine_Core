@@ -2,7 +2,7 @@ import { ChatInputCommandInteraction, ContainerBuilder, MessageFlags, TextDispla
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
 import { resetGuildSettings } from '../../../../services/server/settingsService';
-import { invalidateInfoCache } from './infoState';
+import { setCachedInfo } from './infoState';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const guildId = interaction.guildId!;
@@ -33,7 +33,27 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return;
     }
 
-    invalidateInfoCache(guildId);
+    const s = result.value!;
+    setCachedInfo(guildId, {
+        guildId,
+        defaultDailyEnergy:          s.defaultDailyEnergy,
+        doubleAgeMaxThreshold:       s.doubleAgeMaxThreshold,
+        maxCombatRounds:             s.maxCombatRounds,
+        defaultProficiencyBonus:     s.defaultProficiencyBonus,
+        disciplineLevelCap:          s.disciplineLevelCap,
+        factionRepDecayRate:         s.factionRepDecayRate,
+        farmingSoilDegradationFilth: s.farmingSoilDegradationFilth,
+        farmingSoilDegradationToxic: s.farmingSoilDegradationToxic,
+        farmingCompostIncrement:     s.farmingCompostIncrement,
+        worldSimEnabled:    s.worldSimEnabled,
+        conditionsEnabled:  s.conditionsEnabled,
+        combatEnabled:      s.combatEnabled,
+        activitiesEnabled:  s.activitiesEnabled,
+        eventsEnabled:      s.eventsEnabled,
+        craftingEnabled:    s.craftingEnabled,
+        progressionEnabled: s.progressionEnabled,
+        socialEnabled:      s.socialEnabled,
+    });
 
     await interaction.editReply({
         flags:      MessageFlags.IsComponentsV2,

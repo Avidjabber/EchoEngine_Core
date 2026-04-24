@@ -6,6 +6,7 @@ import {
 import { messages } from '@echoengine/shared';
 import { replyError } from '../../../../core/reply';
 import { getDen } from '../../../../services/server/denService';
+import { getCachedDens } from '../../../../services/server/denCache';
 import { setState } from './configState';
 import { buildDenConfigComponents } from './configComponents';
 
@@ -14,14 +15,16 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const channel = interaction.options.getChannel('channel', true) as GuildChannel;
     const channelId = channel.id;
 
-    const result = await getDen(guildId, channelId);
+    let den = getCachedDens(guildId)?.find(d => d.channelId === channelId) ?? null;
 
-    if (!result.success) {
-        await replyError(interaction, messages.denNotFound);
-        return;
+    if (!den) {
+        const result = await getDen(guildId, channelId);
+        if (!result.success) {
+            await replyError(interaction, messages.denNotFound);
+            return;
+        }
+        den = result.value!;
     }
-
-    const den = result.value!;
 
     setState(interaction.user.id, channelId, {
         guildId,

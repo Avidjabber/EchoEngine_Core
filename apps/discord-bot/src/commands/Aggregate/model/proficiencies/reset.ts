@@ -2,6 +2,7 @@ import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { colors } from '../../../../core/colors';
 import { replyError, replyLoading } from '../../../../core/reply';
 import { resetProficiencyPack } from '../../../../services/model/proficiencyPackService';
+import { invalidateProficiencyListCache } from '../../config/proficiency/listCache';
 
 const TEXT_LIMIT = 3800;
 
@@ -74,6 +75,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         await replyError(interaction, 'Failed to reset proficiencies. Please try again.');
         return;
     }
+
+    invalidateProficiencyListCache(guildId);
 
     const { deleted, failed } = result.value!;
     const userId = interaction.user.id;

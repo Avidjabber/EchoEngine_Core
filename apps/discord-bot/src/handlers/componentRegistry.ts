@@ -5,6 +5,11 @@ import { handleGsiSection, handleGsiDone } from '../commands/Aggregate/server/se
 import { handleEcListPage, handleEcListFilter, handleEcListDone } from '../commands/Aggregate/config/envcondition/listHandlers';
 import { handleEcInfoDetail, handleEcInfoBack, handleEcInfoPage, handleEcInfoDone } from '../commands/Aggregate/config/envcondition/infoHandlers';
 import { handleEcDelPage, handleEcDelPick, handleEcDelConfirm, handleEcDelBack } from '../commands/Aggregate/config/envcondition/deleteHandlers';
+import { handleProfAddModal, handleProfAddCancel, handleProfAddFinalize } from '../commands/Aggregate/config/proficiency/addHandlers';
+import { handleProfUpdModal, handleProfUpdCancel, handleProfUpdUpdate, handleProfUpdFinalize } from '../commands/Aggregate/config/proficiency/updateHandlers';
+import { handleProfDelCancel, handleProfDelConfirm } from '../commands/Aggregate/config/proficiency/deleteHandlers';
+import { handleProfInfoDone } from '../commands/Aggregate/config/proficiency/infoHandlers';
+import { handleProfListPage, handleProfListInfo, handleProfListBack, handleProfListDone } from '../commands/Aggregate/config/proficiency/listHandlers';
 import {
     handleEcEdit,
     handleEcUpdCpage, handleEcUpdCpick, handleEcUpdCback,
@@ -31,6 +36,8 @@ export const modalHandlers: ComponentHandler[] = [
     { prefix: 'gs_field_modal:',   handler: interaction => handleGsFieldModal(interaction as ModalSubmitInteraction) },
     { prefix: 'gs_farm_modal:',    handler: interaction => handleGsFarmModal(interaction as ModalSubmitInteraction) },
     { prefix: 'ec_upd_val_modal',  handler: interaction => handleEcUpdValModal(interaction as ModalSubmitInteraction) },
+    { prefix: 'prof_add_modal',    handler: interaction => handleProfAddModal(interaction as ModalSubmitInteraction) },
+    { prefix: 'prof_upd_modal',    handler: interaction => handleProfUpdModal(interaction as ModalSubmitInteraction) },
 ];
 
 // ── Select menu handlers ───────────────────────────────────────────────────────
@@ -87,4 +94,16 @@ export const buttonHandlers: ComponentHandler[] = [
     { prefix: 'ec_upd_rm_confirm', handler: interaction => handleEcUpdRmConfirm(interaction as ButtonInteraction) },
     { prefix: 'ec_upd_rm_back',    handler: interaction => handleEcUpdRmBack(interaction as ButtonInteraction) },
     { prefix: 'ec_upd_cancel',     handler: interaction => handleEcUpdCancel(interaction as ButtonInteraction) },
+    { prefix: 'prof_add_cancel',   handler: interaction => handleProfAddCancel(interaction as ButtonInteraction) },
+    { prefix: 'prof_add_finalize', handler: interaction => handleProfAddFinalize(interaction as ButtonInteraction) },
+    { prefix: 'prof_upd_cancel',   handler: interaction => handleProfUpdCancel(interaction as ButtonInteraction) },
+    { prefix: 'prof_upd_update',   handler: interaction => handleProfUpdUpdate(interaction as ButtonInteraction) },
+    { prefix: 'prof_upd_finalize', handler: interaction => handleProfUpdFinalize(interaction as ButtonInteraction) },
+    { prefix: 'prof_del_cancel',   handler: interaction => handleProfDelCancel(interaction as ButtonInteraction) },
+    { prefix: 'prof_del_confirm',  handler: interaction => handleProfDelConfirm(interaction as ButtonInteraction) },
+    { prefix: 'prof_info_done',    handler: interaction => handleProfInfoDone(interaction as ButtonInteraction) },
+    { prefix: 'prof_list_info:',   handler: interaction => handleProfListInfo(interaction as ButtonInteraction) },
+    { prefix: 'prof_list_back:',   handler: interaction => handleProfListBack(interaction as ButtonInteraction) },
+    { prefix: 'prof_list_page:',   handler: interaction => handleProfListPage(interaction as ButtonInteraction) },
+    { prefix: 'prof_list_done',    handler: interaction => handleProfListDone(interaction as ButtonInteraction) },
 ];

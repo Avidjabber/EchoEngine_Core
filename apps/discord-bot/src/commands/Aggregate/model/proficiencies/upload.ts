@@ -5,6 +5,7 @@ import { colors } from '../../../../core/colors';
 import { replyError, replyLoading } from '../../../../core/reply';
 import { parseProficiencyPack, ParsedProficiencyPack } from '../../../../utils/parsers/proficiencyPack';
 import { uploadProficiencyPack } from '../../../../services/model/proficiencyPackService';
+import { invalidateProficiencyListCache } from '../../config/proficiency/listCache';
 import { buildUploadMessages } from './uploadComponents';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -40,6 +41,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         await replyError(interaction, messages.errorGeneric);
         return;
     }
+
+    invalidateProficiencyListCache(interaction.guildId!);
 
     const { saved, errors, overwrites } = result.value!;
 

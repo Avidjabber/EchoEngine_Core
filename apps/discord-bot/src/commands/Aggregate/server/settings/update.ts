@@ -3,47 +3,51 @@ import { messages } from '@echoengine/shared';
 import { replyError } from '../../../../core/reply';
 import { getGuildSettings } from '../../../../services/server/settingsService';
 import { setState } from './settingsState';
+import { getCachedInfo, setCachedInfo } from './infoState';
 import { buildGuildSettingsComponents } from './updateComponents';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const guildId   = interaction.guildId!;
     const guildName = interaction.guild!.name;
 
-    const result = await getGuildSettings(guildId);
+    let state = getCachedInfo(guildId);
 
-    if (!result.success) {
-        await replyError(interaction, messages.errorGeneric);
-        return;
+    if (!state) {
+        const result = await getGuildSettings(guildId);
+
+        if (!result.success) {
+            await replyError(interaction, messages.errorGeneric);
+            return;
+        }
+
+        const s = result.value!;
+        state = {
+            guildId,
+            defaultDailyEnergy:          s.defaultDailyEnergy,
+            doubleAgeMaxThreshold:       s.doubleAgeMaxThreshold,
+            maxCombatRounds:             s.maxCombatRounds,
+            defaultProficiencyBonus:     s.defaultProficiencyBonus,
+            disciplineLevelCap:          s.disciplineLevelCap,
+            factionRepDecayRate:         s.factionRepDecayRate,
+            farmingSoilDegradationFilth: s.farmingSoilDegradationFilth,
+            farmingSoilDegradationToxic: s.farmingSoilDegradationToxic,
+            farmingCompostIncrement:     s.farmingCompostIncrement,
+            worldSimEnabled:    s.worldSimEnabled,
+            conditionsEnabled:  s.conditionsEnabled,
+            combatEnabled:      s.combatEnabled,
+            activitiesEnabled:  s.activitiesEnabled,
+            eventsEnabled:      s.eventsEnabled,
+            craftingEnabled:    s.craftingEnabled,
+            progressionEnabled: s.progressionEnabled,
+            socialEnabled:      s.socialEnabled,
+        };
+        setCachedInfo(guildId, state);
     }
 
-    const settings = result.value!;
-
-    setState(interaction.user.id, guildId, {
-        guildId,
-        defaultDailyEnergy:          settings.defaultDailyEnergy,
-        doubleAgeMaxThreshold:       settings.doubleAgeMaxThreshold,
-        maxCombatRounds:             settings.maxCombatRounds,
-        defaultProficiencyBonus:     settings.defaultProficiencyBonus,
-        disciplineLevelCap:          settings.disciplineLevelCap,
-        factionRepDecayRate:         settings.factionRepDecayRate,
-        farmingSoilDegradationFilth: settings.farmingSoilDegradationFilth,
-        farmingSoilDegradationToxic: settings.farmingSoilDegradationToxic,
-        farmingCompostIncrement:     settings.farmingCompostIncrement,
-        worldSimEnabled:    settings.worldSimEnabled,
-        conditionsEnabled:  settings.conditionsEnabled,
-        combatEnabled:      settings.combatEnabled,
-        activitiesEnabled:  settings.activitiesEnabled,
-        eventsEnabled:      settings.eventsEnabled,
-        craftingEnabled:    settings.craftingEnabled,
-        progressionEnabled: settings.progressionEnabled,
-        socialEnabled:      settings.socialEnabled,
-    });
+    setState(interaction.user.id, guildId, state);
 
     await interaction.editReply({
         flags:      MessageFlags.IsComponentsV2,
-        components: buildGuildSettingsComponents(
-            settings,
-            guildName,
-        ) as never,
+        components: buildGuildSettingsComponents(state, guildName) as never,
     });
 }

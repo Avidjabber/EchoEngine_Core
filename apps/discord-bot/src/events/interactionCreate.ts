@@ -2,6 +2,7 @@ import { Client, ContainerBuilder, Interaction, MessageFlags, TextDisplayBuilder
 import { messages } from '@echoengine/shared';
 import { colors } from '../core/colors';
 import { getDens } from '../services/server/denService';
+import { getCachedDens, setCachedDens } from '../services/server/denCache';
 import { modalHandlers, selectMenuHandlers, buttonHandlers } from '../handlers/componentRegistry';
 import type { ComponentHandler } from '../handlers/componentRegistry';
 
@@ -73,8 +74,12 @@ export default async function interactionCreate(
         // /server den set is the only command exempt from den validation.
         // All other commands must be run inside a registered den channel.
         if (!isDenManagementCommand(interaction)) {
-            const densResult = await getDens(interaction.guildId!);
-            const dens = densResult.success ? (densResult.value ?? []) : [];
+            let dens = getCachedDens(interaction.guildId!);
+            if (!dens) {
+                const densResult = await getDens(interaction.guildId!);
+                dens = densResult.success ? (densResult.value ?? []) : [];
+                if (densResult.success) setCachedDens(interaction.guildId!, dens);
+            }
 
             if (!dens.length) {
                 await replyDenRestricted(interaction, messages.denNotSet);

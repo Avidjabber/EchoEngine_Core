@@ -32,6 +32,38 @@ function rowInput(...parts: (string | null | undefined)[]): string {
 export class ProficienciesService {
     constructor(private readonly repo: ProficienciesRepository) {}
 
+    async getAll(guildId: string) {
+        const defs = await this.repo.findGuildProficiencyDefs(guildId);
+        return defs.map(d => ({ codeName: d.codeName, name: d.name, stat: d.stat.name, description: d.description }));
+    }
+
+    async checkDelete(guildId: string, codeName: string): Promise<
+        | { status: 'not_found' }
+        | { status: 'has_dependencies'; name: string }
+        | { status: 'ok'; name: string }
+    > {
+        const def = await this.repo.checkDeleteProficiencyDef(guildId, codeName);
+        if (!def) return { status: 'not_found' };
+        const total = Object.values(def._count).reduce((sum, c) => sum + c, 0);
+        if (total > 0) return { status: 'has_dependencies', name: def.name };
+        return { status: 'ok', name: def.name };
+    }
+
+    async deleteOne(guildId: string, codeName: string): Promise<{ deleted: boolean }> {
+        try {
+            await this.repo.deleteProficiencyDefByCodeName(guildId, codeName);
+            return { deleted: true };
+        } catch {
+            return { deleted: false };
+        }
+    }
+
+    async getOne(guildId: string, codeName: string): Promise<{ codeName: string; name: string; stat: string; description: string | null } | null> {
+        const def = await this.repo.findGuildProficiencyDef(guildId, codeName);
+        if (!def) return null;
+        return { codeName: def.codeName, name: def.name, stat: def.stat.name, description: def.description };
+    }
+
     async getTemplateData(guildId: string): Promise<ProficiencyTemplateData> {
         const [stats, defs] = await Promise.all([
             this.repo.findAllStats(),
