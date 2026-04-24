@@ -66,11 +66,7 @@ function splitIntoChunks(lines: string[]): string[] {
 }
 
 function makeContainer(content: string, accentColor: number): object {
-    return {
-        type:         17,
-        accent_color: accentColor,
-        components:   [{ type: 10, content }],
-    };
+    return { type: 17, accent_color: accentColor, components: [{ type: 10, content }] };
 }
 
 function chunksToMessages(chunks: string[], accentColor: number): ResultMessage[] {
@@ -92,127 +88,109 @@ function chunksToMessages(chunks: string[], accentColor: number): ResultMessage[
     return messages;
 }
 
-export function buildResultMessages(userId: string, saved: SavedRow[], errors: RowError[], overwrites: OverwrittenRow[]): ResultMessage[] {
+function groupBySheet<T extends { sheet: string }>(rows: T[]): Map<string, T[]> {
+    const grouped = new Map<string, T[]>();
+    for (const row of rows) {
+        if (!grouped.has(row.sheet)) grouped.set(row.sheet, []);
+        grouped.get(row.sheet)!.push(row);
+    }
+    return grouped;
+}
+
+export function buildUploadMessages(
+    userId:       string,
+    formatErrors: RowError[],
+    saved:        SavedRow[],
+    overwrites:   OverwrittenRow[],
+    apiErrors:    RowError[],
+): ResultMessage[] {
     const messages: ResultMessage[] = [];
 
-    const savedCount     = saved.length;
-    const errorCount     = errors.length;
-    const overwriteCount = overwrites.length;
-    const hasErrors      = errorCount > 0;
-    const hasSaved       = savedCount > 0;
-    const hasOverwrites  = overwriteCount > 0;
+    const overwriteRows = new Set(overwrites.map(o => `${o.sheet}|${o.row}`));
+    const newSaved      = saved.filter(r => !overwriteRows.has(`${r.sheet}|${r.row}`));
 
-    // Announcement message
-    const annoLines: string[] = [
-        `## Env Condition Pack Upload`,
+    const newCount      = newSaved.length;
+    const overwriteCount = overwrites.length;
+    const formatErrCount = formatErrors.length;
+    const apiErrCount    = apiErrors.length;
+    const totalErrors    = formatErrCount + apiErrCount;
+    const hasSaved       = newCount > 0 || overwriteCount > 0;
+    const isEmpty        = !hasSaved && totalErrors === 0;
+
+    // Announcement
+    const annoLines = [
+        '## Env Condition Pack Upload',
         `Uploaded by <@${userId}>`,
-        ``,
+        '',
     ];
 
-    if (savedCount === 0 && errorCount === 0) {
-        annoLines.push(`-# No rows were found in the file — nothing was written.`);
+    if (isEmpty) {
+        annoLines.push('-# No rows were found in the file — nothing was written.');
     } else {
-        if (hasSaved)       annoLines.push(`**${savedCount}** row${savedCount === 1 ? '' : 's'} saved`);
-        if (hasOverwrites)  annoLines.push(`**${overwriteCount}** row${overwriteCount === 1 ? '' : 's'} overwrote existing values`);
-        if (hasErrors)      annoLines.push(`**${errorCount}** row${errorCount === 1 ? '' : 's'} failed`);
+        if (newCount > 0)       annoLines.push(`**${newCount}** row${newCount === 1 ? '' : 's'} added`);
+        if (overwriteCount > 0) annoLines.push(`**${overwriteCount}** row${overwriteCount === 1 ? '' : 's'} updated`);
+        if (totalErrors > 0)    annoLines.push(`**${totalErrors}** row${totalErrors === 1 ? '' : 's'} failed`);
     }
 
-    const annoColor = hasErrors && hasSaved ? colors.special
-        : hasErrors                         ? colors.error
-        : hasOverwrites                     ? colors.special
-        : hasSaved                          ? colors.success
-        : colors.info;
+    const annoColor = isEmpty                    ? colors.info
+        : totalErrors > 0 && hasSaved           ? colors.special
+        : totalErrors > 0                        ? colors.error
+        : overwriteCount > 0                     ? colors.special
+        : colors.success;
 
-    messages.push({
-        flags:      MessageFlags.IsComponentsV2,
-        components: [makeContainer(annoLines.join('\n'), annoColor)],
-    });
+    messages.push({ flags: MessageFlags.IsComponentsV2, components: [makeContainer(annoLines.join('\n'), annoColor)] });
 
-    // New rows
-    const newSaved = saved.filter(r => !overwrites.some(o => o.sheet === r.sheet && o.row === r.row));
-    if (newSaved.length > 0) {
-        const grouped = new Map<string, string[]>();
-        for (const row of newSaved) {
-            if (!grouped.has(row.sheet)) grouped.set(row.sheet, []);
-            grouped.get(row.sheet)!.push(`-# ${formatSavedRow(row)}`);
-        }
-
-        const lines: string[] = [`## Saved Rows`];
+    // Format/parse errors
+    if (formatErrCount > 0) {
+        const grouped = groupBySheet(formatErrors);
+        const lines = ['## Parse Errors'];
         for (const [sheet, rows] of grouped) {
             lines.push(`**${SHEET_LABELS[sheet] ?? sheet}** (${rows.length})`);
-            lines.push(...rows);
+            lines.push(...rows.map(e => `-# Row ${e.row} (${e.input}): ${e.message}`));
         }
+        for (const msg of chunksToMessages(splitIntoChunks(lines), colors.error)) {
+            messages.push(msg);
+        }
+    }
 
+    // New rows
+    if (newSaved.length > 0) {
+        const grouped = groupBySheet(newSaved);
+        const lines = ['## Added'];
+        for (const [sheet, rows] of grouped) {
+            lines.push(`**${SHEET_LABELS[sheet] ?? sheet}** (${rows.length})`);
+            lines.push(...rows.map(r => `-# ${formatSavedRow(r)}`));
+        }
         for (const msg of chunksToMessages(splitIntoChunks(lines), colors.success)) {
             messages.push(msg);
         }
     }
 
     // Overwrites
-    if (hasOverwrites) {
-        const grouped = new Map<string, string[]>();
-        for (const row of overwrites) {
-            if (!grouped.has(row.sheet)) grouped.set(row.sheet, []);
-            grouped.get(row.sheet)!.push(`-# ${formatOverwrittenRow(row)}`);
-        }
-
-        const lines: string[] = [`## Overwrote Existing Values`];
+    if (overwriteCount > 0) {
+        const grouped = groupBySheet(overwrites);
+        const lines = ['## Updated'];
         for (const [sheet, rows] of grouped) {
             lines.push(`**${SHEET_LABELS[sheet] ?? sheet}** (${rows.length})`);
-            lines.push(...rows);
+            lines.push(...rows.map(r => `-# ${formatOverwrittenRow(r)}`));
         }
-
         for (const msg of chunksToMessages(splitIntoChunks(lines), colors.special)) {
             messages.push(msg);
         }
     }
 
-    // Failures
-    if (hasErrors) {
-        const grouped = new Map<string, string[]>();
-        for (const err of errors) {
-            if (!grouped.has(err.sheet)) grouped.set(err.sheet, []);
-            grouped.get(err.sheet)!.push(`-# Row ${err.row} (${err.input}): ${err.message}`);
-        }
-
-        const lines: string[] = [`## Failed Rows`];
+    // API errors
+    if (apiErrCount > 0) {
+        const grouped = groupBySheet(apiErrors);
+        const lines = ['## Upload Errors'];
         for (const [sheet, rows] of grouped) {
             lines.push(`**${SHEET_LABELS[sheet] ?? sheet}** (${rows.length})`);
-            lines.push(...rows);
+            lines.push(...rows.map(e => `-# Row ${e.row} (${e.input}): ${e.message}`));
         }
-
         for (const msg of chunksToMessages(splitIntoChunks(lines), colors.error)) {
             messages.push(msg);
         }
     }
 
     return messages;
-}
-
-export function buildFormatErrorMessages(userId: string, errors: RowError[], validRowCount: number): ResultMessage[] {
-    if (errors.length === 0) return [];
-
-    const grouped = new Map<string, string[]>();
-    for (const err of errors) {
-        if (!grouped.has(err.sheet)) grouped.set(err.sheet, []);
-        grouped.get(err.sheet)!.push(`-# Row ${err.row} (${err.input}): ${err.message}`);
-    }
-
-    const lines: string[] = [
-        `## Env Condition Pack Upload`,
-        `Uploaded by <@${userId}>`,
-        ``,
-        `## Parse Errors`,
-    ];
-    for (const [sheet, rows] of grouped) {
-        lines.push(`**${SHEET_LABELS[sheet] ?? sheet}** (${rows.length})`);
-        lines.push(...rows);
-    }
-
-    if (validRowCount > 0) {
-        lines.push('');
-        lines.push(`-# ${validRowCount} row${validRowCount === 1 ? '' : 's'} passed format checks and ${validRowCount === 1 ? 'was' : 'were'} sent to the API for processing.`);
-    }
-
-    return chunksToMessages(splitIntoChunks(lines), colors.error);
 }

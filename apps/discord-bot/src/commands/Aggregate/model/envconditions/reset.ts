@@ -1,12 +1,11 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
-import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
-import { replyError } from '../../../../core/reply';
+import { replyError, replyLoading } from '../../../../core/reply';
 import { resetEnvConditionPack } from '../../../../services/model/envConditionPackService';
 import { invalidateEnvConditionInfoCache } from '../../config/envcondition/infoState';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await replyLoading(interaction);
 
     await interaction.editReply({
         flags:      MessageFlags.IsComponentsV2,
@@ -44,30 +43,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
             time:   30_000,
         });
     } catch {
-        await interaction.editReply({
-            flags:      MessageFlags.IsComponentsV2,
-            components: [
-                {
-                    type:         17,
-                    accent_color: colors.info,
-                    components:   [{ type: 10, content: 'Reset timed out. No changes were made.' }],
-                },
-            ],
-        } as never);
+        await interaction.deleteReply();
         return;
     }
 
     if (confirmation.customId === 'envconditions_reset_cancel') {
-        await confirmation.update({
-            flags:      MessageFlags.IsComponentsV2,
-            components: [
-                {
-                    type:         17,
-                    accent_color: colors.info,
-                    components:   [{ type: 10, content: 'Reset cancelled. No changes were made.' }],
-                },
-            ],
-        } as never);
+        await interaction.deleteReply();
         return;
     }
 
@@ -77,16 +58,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const result  = await resetEnvConditionPack(guildId);
 
     if (!result.success) {
-        await interaction.editReply({
-            flags:      MessageFlags.IsComponentsV2,
-            components: [
-                {
-                    type:         17,
-                    accent_color: colors.error,
-                    components:   [{ type: 10, content: messages.errorGeneric }],
-                },
-            ],
-        } as never);
+        await replyError(interaction, 'Failed to reset env condition modifiers. Please try again.');
         return;
     }
 
@@ -95,23 +67,30 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const { worldModifiers, statModifiers, proficiencyModifiers } = result.value!;
     const total = worldModifiers + statModifiers + proficiencyModifiers;
 
-    const summary = total === 0
-        ? 'No env condition modifiers were configured — nothing to clear.'
+    const content = total === 0
+        ? [
+            '## Env Condition Modifiers Reset',
+            `Reset by <@${interaction.user.id}>`,
+            '',
+            '-# No env condition modifiers were configured — nothing was cleared.',
+          ].join('\n')
         : [
-            '## Env Condition Modifiers Cleared',
+            '## Env Condition Modifiers Reset',
+            `Reset by <@${interaction.user.id}>`,
+            '',
             `-# ${worldModifiers} world modifier${worldModifiers !== 1 ? 's' : ''} deleted`,
             `-# ${statModifiers} stat modifier${statModifiers !== 1 ? 's' : ''} deleted`,
             `-# ${proficiencyModifiers} proficiency modifier${proficiencyModifiers !== 1 ? 's' : ''} deleted`,
           ].join('\n');
 
-    await interaction.editReply({
+    await interaction.followUp({
         flags:      MessageFlags.IsComponentsV2,
-        components: [
-            {
-                type:         17,
-                accent_color: total === 0 ? colors.info : colors.success,
-                components:   [{ type: 10, content: summary }],
-            },
-        ],
+        components: [{
+            type:         17,
+            accent_color: total === 0 ? colors.info : colors.success,
+            components:   [{ type: 10, content }],
+        }],
     } as never);
+
+    await interaction.deleteReply();
 }

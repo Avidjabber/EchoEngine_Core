@@ -1,7 +1,7 @@
 import { AttachmentBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
-import { replyError } from '../../../../core/reply';
+import { replyError, replyLoading } from '../../../../core/reply';
 import { fetchEnvConditionTemplateData, EnvConditionTemplateData } from '../../../../services/model/envConditionPackService';
 import { generateEnvConditionTemplate } from '../../../../utils/generators/envConditionTemplate';
 
@@ -49,7 +49,7 @@ function buildGuideComponents(data: EnvConditionTemplateData): object[] {
 }
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await replyLoading(interaction);
 
     const guildId = interaction.guildId!;
     const result  = await fetchEnvConditionTemplateData(guildId);

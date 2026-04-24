@@ -1,8 +1,8 @@
 import axios from 'axios';
-import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { ChatInputCommandInteraction } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
-import { replyError } from '../../../../core/reply';
+import { replyError, replyLoading } from '../../../../core/reply';
 import {
     parseEnvConditionPack,
     ParsedEnvConditionPack,
@@ -12,7 +12,7 @@ import {
 } from '../../../../utils/parsers/envConditionPack';
 import { uploadEnvConditionPack, RowError } from '../../../../services/model/envConditionPackService';
 import { invalidateEnvConditionInfoCache } from '../../config/envcondition/infoState';
-import { buildResultMessages, buildFormatErrorMessages } from './uploadComponents';
+import { buildUploadMessages } from './uploadComponents';
 
 interface FormatCheckResult {
     errors:     RowError[];
@@ -89,7 +89,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return;
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await replyLoading(interaction);
 
     let buffer: Buffer;
     try {
@@ -111,43 +111,27 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const { errors: formatErrors, validWorld, validStat, validProf } = runFormatChecks(parsed);
     const validCount = validWorld.length + validStat.length + validProf.length;
 
-    await interaction.editReply({ content: 'Upload processed.' });
+    let apiSaved:      import('../../../../services/model/envConditionPackService').SavedRow[]       = [];
+    let apiErrors:     RowError[]                                                                    = [];
+    let apiOverwrites: import('../../../../services/model/envConditionPackService').OverwrittenRow[] = [];
 
-    // Post parse errors immediately if any, before waiting on the API
-    if (formatErrors.length > 0) {
-        for (const msg of buildFormatErrorMessages(interaction.user.id, formatErrors, validCount)) {
-            await interaction.followUp(msg as never);
+    if (validCount > 0) {
+        const result = await uploadEnvConditionPack(interaction.guildId!, validWorld, validStat, validProf);
+
+        if (!result.success) {
+            await replyError(interaction, messages.errorGeneric);
+            return;
         }
+
+        invalidateEnvConditionInfoCache(interaction.guildId!);
+        apiSaved      = result.value!.saved;
+        apiErrors     = result.value!.errors;
+        apiOverwrites = result.value!.overwrites;
     }
 
-    if (validCount === 0) {
-        // Nothing passed format checks — if no format errors the file was simply empty
-        if (formatErrors.length === 0) {
-            for (const msg of buildResultMessages(interaction.user.id, [], [], [])) {
-                await interaction.followUp(msg as never);
-            }
-        }
-        return;
-    }
-
-    const guildId = interaction.guildId!;
-    const result  = await uploadEnvConditionPack(guildId, validWorld, validStat, validProf);
-
-    if (!result.success) {
-        await interaction.followUp({
-            flags:      MessageFlags.IsComponentsV2,
-            components: [{
-                type:         17,
-                accent_color: colors.error,
-                components:   [{ type: 10, content: messages.errorGeneric }],
-            }],
-        } as never);
-        return;
-    }
-
-    invalidateEnvConditionInfoCache(guildId);
-
-    for (const msg of buildResultMessages(interaction.user.id, result.value!.saved, result.value!.errors, result.value!.overwrites)) {
+    for (const msg of buildUploadMessages(interaction.user.id, formatErrors, apiSaved, apiOverwrites, apiErrors)) {
         await interaction.followUp(msg as never);
     }
+
+    await interaction.deleteReply();
 }

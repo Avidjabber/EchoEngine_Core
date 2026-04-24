@@ -1,12 +1,13 @@
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
+import { replyLoading } from '../../../../core/reply';
 import { fetchEnvConditionInfoData } from '../../../../services/model/envConditionPackService';
 import { getCachedEnvConditionInfo, setCachedEnvConditionInfo } from './infoState';
 import { buildEnvConditionInfoListComponents } from './infoComponents';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    await interaction.deferReply();
+    await replyLoading(interaction, false);
 
     const guildId = interaction.guildId!;
 
