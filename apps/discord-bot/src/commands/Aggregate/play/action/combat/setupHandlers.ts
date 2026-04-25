@@ -255,7 +255,7 @@ export async function handlePaCombatStart(interaction: ButtonInteraction): Promi
         return;
     }
 
-    const { activeCombatId, participants } = combatResult;
+    const { activeCombatId, participants, allowsFleeing } = combatResult;
     const typeLabel = type === 'spar' ? 'Spar' : 'Fight';
 
     // Channel announcement — @mentions everyone so they get notified
@@ -296,10 +296,10 @@ export async function handlePaCombatStart(interaction: ButtonInteraction): Promi
         const firstUserId     = entityUserMap.get(first.entityId);
         const turnMsg = await postTarget.send({
             components: buildTurnPromptComponents(
-                activeCombatId, first.entityId, firstEntityName, firstUserId, 1, 0,
+                activeCombatId, first.entityId, firstEntityName, firstUserId, 1, 0, allowsFleeing,
             ) as never,
         });
-        setTurnEntry(activeCombatId, turnMsg.id, postTarget.id, first.entityId, firstEntityName, firstUserId, 1);
+        setTurnEntry(activeCombatId, turnMsg.id, postTarget.id, first.entityId, firstEntityName, firstUserId, 1, allowsFleeing);
     }
 }
 

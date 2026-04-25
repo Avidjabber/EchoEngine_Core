@@ -15,7 +15,7 @@ export interface CombatParticipantOrder {
 }
 
 export type StartCombatResult =
-    | { success: true;  activeCombatId: number; removedEntityIds: number[]; participants: CombatParticipantOrder[] }
+    | { success: true;  activeCombatId: number; removedEntityIds: number[]; participants: CombatParticipantOrder[]; allowsFleeing: boolean }
     | { success: false;                          removedEntityIds: number[] };
 
 export interface CombatParticipantInfo {
@@ -47,6 +47,14 @@ export interface AvailableAction {
     isOnCooldown:  boolean;
 }
 
+export interface PendingReaction {
+    defenderEntityId:   number;
+    defenderEntityName: string;
+    defenderUserId:     string | null;
+    attackerEntityId:   number;
+    reactionProfiles:   Array<{ profileId: number; storedItemId: number; label: string }>;
+}
+
 export interface ActionResult {
     actionId:         number;
     actionLabel:      string;
@@ -60,6 +68,7 @@ export interface ActionResult {
         | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
         | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
         | { kind: 'no_op' };
+    pendingReaction?: PendingReaction;
 }
 
 export interface XpGrant {
@@ -89,6 +98,7 @@ export interface AdvanceTurnResult {
     nextUserId:             string | null;
     isAiControlled:         boolean;
     isAwaitingSecondWind:   boolean;
+    allowsFleeing:          boolean;
     round:                  number;
     winningAllyFactionId:   number | null;
 }
@@ -216,7 +226,7 @@ export class PlayCombatRepository {
 
         const initiationType = await this.db.combatInitiationType.findFirst({
             where:  { name: type },
-            select: { id: true },
+            select: { id: true, allowsFleeing: true },
         });
         if (!initiationType) throw new Error(`Unknown CombatInitiationType: ${type}`);
 
@@ -266,10 +276,11 @@ export class PlayCombatRepository {
         });
 
         return {
-            success:       true,
-            activeCombatId: combat.id,
+            success:         true,
+            activeCombatId:  combat.id,
             removedEntityIds,
-            participants:  participants.map(p => ({ entityId: p.entityId, allyFactionId: p.allyFactionId })),
+            participants:    participants.map(p => ({ entityId: p.entityId, allyFactionId: p.allyFactionId })),
+            allowsFleeing:   initiationType.allowsFleeing,
         };
     }
 
@@ -447,7 +458,7 @@ export class PlayCombatRepository {
             select: {
                 currentTurnOrder:  true,
                 currentRound:      true,
-                initiationType:    { select: { canSecondWind: true } },
+                initiationType:    { select: { canSecondWind: true, allowsFleeing: true } },
                 participants: {
                     where:   { hasFled: false, isDefeated: false },
                     select: {
@@ -473,6 +484,7 @@ export class PlayCombatRepository {
 
         const active        = combat.participants;
         const canSecondWind = combat.initiationType.canSecondWind;
+        const allowsFleeing = combat.initiationType.allowsFleeing;
 
         // Track round boundary (for global timeout counter only — does not drive effect expiry)
         const currentIdx    = active.findIndex(p => p.entityId === currentEntityId);
@@ -522,7 +534,7 @@ export class PlayCombatRepository {
                 where: { id: combatId },
                 data:  { isActive: false, winningAllyFactionId: winningAllyFactionId ?? null, ...(outcome ? { outcomeId: outcome.id } : {}), completedAt: new Date() },
             });
-            return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, isAwaitingSecondWind: false, round: newRound, winningAllyFactionId };
+            return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, isAwaitingSecondWind: false, allowsFleeing, round: newRound, winningAllyFactionId };
         }
 
         // Find next participant by turn order: first with turnOrder > current's, else wrap to first
@@ -551,6 +563,7 @@ export class PlayCombatRepository {
             nextUserId:           next.controllerUserId ?? next.entity.userId ?? null,
             isAiControlled:       next.isAiControlled,
             isAwaitingSecondWind,
+            allowsFleeing,
             round:                newRound,
             winningAllyFactionId: null,
         };
@@ -710,6 +723,19 @@ export class PlayCombatRepository {
             where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
             data:  { isDefeated: true },
         });
+    }
+
+    async flee(combatId: number, entityId: number): Promise<{ allowed: boolean }> {
+        const combat = await this.db.activeCombat.findUnique({
+            where:  { id: combatId },
+            select: { initiationType: { select: { allowsFleeing: true } } },
+        });
+        if (!combat?.initiationType.allowsFleeing) return { allowed: false };
+        await this.db.activeCombat_Participant.update({
+            where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
+            data:  { hasFled: true },
+        });
+        return { allowed: true };
     }
 
     async processAction(
@@ -922,6 +948,52 @@ export class PlayCombatRepository {
             outcome = { kind: 'behavior', effectName: profile.behaviorEffectType?.name ?? 'effect', guardedName, rounds };
         }
 
+        // ── Check for counterattack reaction ──────────────────────────────────
+        let pendingReaction: PendingReaction | undefined;
+        if (outcome.kind === 'hit' && !outcome.defeated && !outcome.knockedDown && targetPartInfo && actualTargetId !== null) {
+            const counterEffect = await this.db.activeCombat_BehaviorEffect.findFirst({
+                where: {
+                    affectedParticipantId: targetPartInfo.id,
+                    effectType: { enablesCounterattack: true, hasReactAction: true },
+                },
+            });
+            if (counterEffect) {
+                const defenderEntity = await this.db.entity.findUnique({
+                    where:  { id: actualTargetId },
+                    select: { name: true, userId: true, storage: { select: { storageId: true } } },
+                });
+                if (defenderEntity?.storage) {
+                    const reactItems = await this.db.storedItem.findMany({
+                        where: {
+                            storageId:     defenderEntity.storage.storageId,
+                            isEquipped:    true,
+                            chosenProfile: { isReactionAction: true },
+                        },
+                        select: {
+                            id:            true,
+                            chosenProfile: { select: { id: true, label: true, item: { select: { name: true } } } },
+                        },
+                    });
+                    const reactionProfiles = reactItems
+                        .filter(r => r.chosenProfile)
+                        .map(r => ({
+                            profileId:    r.chosenProfile!.id,
+                            storedItemId: r.id,
+                            label:        r.chosenProfile!.label ?? r.chosenProfile!.item?.name ?? 'Reaction',
+                        }));
+                    if (reactionProfiles.length > 0) {
+                        pendingReaction = {
+                            defenderEntityId:   actualTargetId,
+                            defenderEntityName: defenderEntity.name,
+                            defenderUserId:     defenderEntity.userId,
+                            attackerEntityId:   actorEntityId,
+                            reactionProfiles,
+                        };
+                    }
+                }
+            }
+        }
+
         // ── Create action log record ──────────────────────────────────────────
         const action = await this.db.activeCombat_Action.create({
             data: {
@@ -975,6 +1047,146 @@ export class PlayCombatRepository {
             targetName:       originalTargetName ?? targetEntity?.name ?? 'Unknown',
             actualTargetName: targetEntity?.name ?? 'Unknown',
             wasRedirected,
+            outcome,
+            pendingReaction,
+        };
+    }
+
+    async processReaction(
+        combatId:         number,
+        defenderEntityId: number,
+        profileId:        number,
+        storedItemId:     number,
+        attackerEntityId: number,
+        roundNumber:      number,
+    ): Promise<ActionResult> {
+        const [profile, combat, defender, attacker, existingCount] = await Promise.all([
+            this.db.itemEquipmentProfile.findUnique({
+                where:  { id: profileId },
+                select: {
+                    label:           true,
+                    isReactionAction: true,
+                    hitBonus:        true,
+                    damageBonus:     true,
+                    damageDiceCount: true,
+                    damageDiceSides: true,
+                    hitStat:         { select: { name: true } },
+                    damageStat:      { select: { name: true } },
+                    actionType:      { select: { dealsDamage: true } },
+                },
+            }),
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: { initiationType: { select: { canSecondWind: true } } },
+            }),
+            this.db.entity.findUnique({
+                where:  { id: defenderEntityId },
+                select: {
+                    name:  true,
+                    stats: { select: { strength: true, dexterity: true, constitution: true, intelligence: true, wisdom: true, charisma: true } },
+                },
+            }),
+            this.db.entity.findUnique({
+                where:  { id: attackerEntityId },
+                select: {
+                    name:    true,
+                    species: { select: { baseAc: true } },
+                    stats:   { select: { dexterity: true, currentHp: true, maxHp: true } },
+                    storage: { select: { storageId: true } },
+                },
+            }),
+            this.db.activeCombat_Action.count({ where: { activeCombatId: combatId, roundNumber } }),
+        ]);
+
+        if (!profile?.isReactionAction) throw new Error(`Profile ${profileId} is not a reaction action`);
+        const canSecondWind = combat?.initiationType.canSecondWind ?? false;
+        const dealsDamage   = profile.actionType?.dealsDamage ?? false;
+
+        let attackerAC = 10;
+        if (attacker?.storage) {
+            const equipped = await this.db.storedItem.findMany({
+                where:  { storageId: attacker.storage.storageId, isEquipped: true },
+                select: { chosenProfile: { select: { acModifier: true } } },
+            });
+            const equippedAcBonus = equipped.reduce((s, i) => s + (i.chosenProfile?.acModifier ?? 0), 0);
+            const dexMod = Math.floor(((attacker.stats?.dexterity ?? 10) - 10) / 2);
+            attackerAC   = (attacker.species?.baseAc ?? 10) + dexMod + equippedAcBonus;
+        }
+
+        const rollDice = (count: number, sides: number): number[] =>
+            Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
+        const statMod = (v: number) => Math.floor((v - 10) / 2);
+        const getStat = (name: string | undefined): number =>
+            name && defender?.stats ? ((defender.stats as Record<string, number>)[name] ?? 10) : 10;
+
+        let outcome: ActionResult['outcome'] = { kind: 'no_op' };
+        const logData: {
+            hitRoll?: number; hitModifier?: number; hit?: boolean;
+            damageRoll?: number; damageModifier?: number; damageDealt?: number; secondWindTriggered?: boolean;
+        } = {};
+
+        if (dealsDamage && attacker?.stats) {
+            const attackerPart = await this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: attackerEntityId },
+                select: { id: true, inSecondWind: true, isAiControlled: true },
+            });
+
+            const hitMod   = statMod(getStat(profile.hitStat?.name)) + profile.hitBonus;
+            const hitRoll  = rollDice(1, 20)[0]!;
+            const hitTotal = hitRoll + hitMod;
+            const isHit    = hitTotal >= attackerAC;
+
+            logData.hitRoll = hitRoll; logData.hitModifier = hitMod; logData.hit = isHit;
+
+            if (isHit && profile.damageDiceCount && profile.damageDiceSides) {
+                const damageMod   = statMod(getStat(profile.damageStat?.name)) + profile.damageBonus;
+                const diceRolls   = rollDice(profile.damageDiceCount, profile.damageDiceSides);
+                const diceSum     = diceRolls.reduce((a, b) => a + b, 0);
+                const totalDamage = Math.max(0, diceSum + damageMod);
+                const newHp       = (attacker.stats.currentHp ?? 0) - totalDamage;
+
+                logData.damageRoll = diceSum; logData.damageModifier = damageMod; logData.damageDealt = totalDamage;
+
+                await this.db.entityStats.update({ where: { entityId: attackerEntityId }, data: { currentHp: newHp } });
+
+                let knockedDown = false;
+                let defeated    = false;
+                if (newHp <= 0 && attackerPart) {
+                    if (attackerPart.isAiControlled || !canSecondWind || attackerPart.inSecondWind) {
+                        await this.db.activeCombat_Participant.update({ where: { id: attackerPart.id }, data: { isDefeated: true } });
+                        defeated = true;
+                    } else {
+                        knockedDown = true;
+                        logData.secondWindTriggered = true;
+                    }
+                }
+                outcome = { kind: 'hit', hitRoll: hitTotal, targetAC: attackerAC, diceRolls, totalDamage, hpAfter: Math.max(0, newHp), knockedDown, defeated };
+            } else {
+                outcome = { kind: 'miss', hitRoll: hitTotal, targetAC: attackerAC };
+            }
+        }
+
+        const action = await this.db.activeCombat_Action.create({
+            data: {
+                activeCombatId:     combatId,
+                roundNumber,
+                turnIndex:          existingCount + 1,
+                actorEntityId:      defenderEntityId,
+                actionCategoryId:   null,
+                equipmentProfileId: profileId,
+                targetEntityId:     attackerEntityId,
+                ...logData,
+            },
+            select: { id: true },
+        });
+
+        return {
+            actionId:         action.id,
+            actionLabel:      profile.label ?? 'Reaction',
+            actorName:        defender?.name ?? 'Unknown',
+            targetName:       attacker?.name ?? 'Unknown',
+            actualTargetName: attacker?.name ?? 'Unknown',
+            wasRedirected:    false,
             outcome,
         };
     }

@@ -85,25 +85,35 @@ export function buildTurnPromptComponents(
     userId:         string | undefined,
     round:          number,
     usedFlags:      number = 0,
+    allowsFleeing:  boolean = false,
 ): object[] {
     const ping = userId ? `<@${userId}>` : `**${entityName}**`;
+    const buttons: object[] = [
+        { type: 2, style: 1, label: 'Main Action',      custom_id: `pa_turn_main:${activeCombatId}:${entityId}`,  disabled: !!(usedFlags & 0b001) },
+        { type: 2, style: 2, label: 'Bonus Action',     custom_id: `pa_turn_bonus:${activeCombatId}:${entityId}`, disabled: !!(usedFlags & 0b010) },
+        { type: 2, style: 2, label: 'Item Interaction', custom_id: `pa_turn_item:${activeCombatId}:${entityId}`,  disabled: !!(usedFlags & 0b100) },
+        { type: 2, style: 4, label: 'End Turn',         custom_id: `pa_turn_end:${activeCombatId}:${entityId}` },
+    ];
+    if (allowsFleeing) {
+        buttons.push({ type: 2, style: 4, label: 'Flee', custom_id: `pa_turn_flee:${activeCombatId}:${entityId}` });
+    }
     return [{
         type:         17,
         accent_color: colors.info,
         components: [
             { type: 10, content: `${ping} — it's **${entityName}**'s turn!` },
             { type: 14 },
-            {
-                type: 1,
-                components: [
-                    { type: 2, style: 1, label: 'Main Action',      custom_id: `pa_turn_main:${activeCombatId}:${entityId}`,  disabled: !!(usedFlags & 0b001) },
-                    { type: 2, style: 2, label: 'Bonus Action',     custom_id: `pa_turn_bonus:${activeCombatId}:${entityId}`, disabled: !!(usedFlags & 0b010) },
-                    { type: 2, style: 2, label: 'Item Interaction', custom_id: `pa_turn_item:${activeCombatId}:${entityId}`,  disabled: !!(usedFlags & 0b100) },
-                    { type: 2, style: 4, label: 'End Turn',         custom_id: `pa_turn_end:${activeCombatId}:${entityId}` },
-                ],
-            },
+            { type: 1, components: buttons },
             { type: 10, content: `-# Round ${round}` },
         ],
+    }];
+}
+
+export function buildTurnAwaitingReactionComponents(entityName: string, defenderName: string): object[] {
+    return [{
+        type:         17,
+        accent_color: colors.info,
+        components:   [{ type: 10, content: `-# **${entityName}**'s turn — waiting for **${defenderName}**'s reaction...` }],
     }];
 }
 

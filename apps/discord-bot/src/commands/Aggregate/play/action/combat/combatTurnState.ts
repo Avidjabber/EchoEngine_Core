@@ -6,6 +6,7 @@ export interface TurnEntry {
     userId:              string | undefined;
     round:               number;
     usedFlags:           number;  // bit 0 = main, bit 1 = bonus, bit 2 = item
+    allowsFleeing:       boolean;
 }
 
 export const TURN_FLAG_MAIN  = 0b001;
@@ -22,8 +23,9 @@ export function setTurnEntry(
     entityName:          string,
     userId:              string | undefined,
     round:               number,
+    allowsFleeing:       boolean,
 ): void {
-    turnState.set(activeCombatId, { turnPromptMessageId, channelId, entityId, entityName, userId, round, usedFlags: 0 });
+    turnState.set(activeCombatId, { turnPromptMessageId, channelId, entityId, entityName, userId, round, usedFlags: 0, allowsFleeing });
 }
 
 export function getTurnEntry(activeCombatId: number): TurnEntry | undefined {

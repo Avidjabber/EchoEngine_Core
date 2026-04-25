@@ -65,7 +65,7 @@ export interface CombatParticipantOrder {
 }
 
 export type StartCombatResponse =
-    | { success: true;  activeCombatId: number; removedEntityIds: number[]; participants: CombatParticipantOrder[] }
+    | { success: true;  activeCombatId: number; removedEntityIds: number[]; participants: CombatParticipantOrder[]; allowsFleeing: boolean }
     | { success: false;                          removedEntityIds: number[] };
 
 export function fetchInviteTargets(guildId: string, initiatorEntityId: number, mode: 'spar' | 'fight') {
@@ -115,6 +115,14 @@ export type ActionResultOutcome =
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
     | { kind: 'no_op' };
 
+export interface PendingReaction {
+    defenderEntityId:   number;
+    defenderEntityName: string;
+    defenderUserId:     string | null;
+    attackerEntityId:   number;
+    reactionProfiles:   Array<{ profileId: number; storedItemId: number; label: string }>;
+}
+
 export interface ActionResult {
     actionId:         number;
     actionLabel:      string;
@@ -123,6 +131,7 @@ export interface ActionResult {
     actualTargetName: string;
     wasRedirected:    boolean;
     outcome:          ActionResultOutcome;
+    pendingReaction?: PendingReaction;
 }
 
 export function processAction(
@@ -158,4 +167,14 @@ export function acceptSecondWind(combatId: number, entityId: number) {
 
 export function declineSecondWind(combatId: number, entityId: number) {
     return apiClient.post<void>(`/play/combat/${combatId}/decline-second-wind`, { entityId });
+}
+
+export function flee(combatId: number, entityId: number) {
+    return apiClient.post<{ allowed: boolean }>(`/play/combat/${combatId}/flee`, { entityId });
+}
+
+export function processReaction(combatId: number, defenderEntityId: number, profileId: number, storedItemId: number, attackerEntityId: number, roundNumber: number) {
+    return apiClient.post<ActionResult>(`/play/combat/${combatId}/process-reaction`, {
+        defenderEntityId, profileId, storedItemId, attackerEntityId, roundNumber,
+    });
 }

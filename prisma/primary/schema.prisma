@@ -2399,6 +2399,7 @@ model ItemEquipmentProfile {
   cooldownRounds       Int     @default(0)
   durationRounds       Int     @default(0)   // 0 = instantaneous
   behaviorEffectTypeId Int?                  // set for stateful behaviors (guard, taunt, parry, etc.)
+  isReactionAction     Boolean @default(false)  // true = this profile can fire as a reaction (counterattack trigger); may also have actionCategoryId for normal turn use
   requiresVerbal       Boolean @default(false)  // action has a verbal component — blocked by conditions with blocksVerbal
   requiresSomatic      Boolean @default(false)  // action has a somatic component — blocked by conditions with blocksSomatic
   allowedInSpar        Boolean @default(true)
@@ -5445,6 +5446,7 @@ model CombatOutcome {
 // removesEffects:       strips existing active effects from the target (dispel)
 // preventedAsTarget:    effect-holder cannot be selected as a target (untargetable)
 // reflectsDamage:       a portion of incoming damage is dealt back to the attacker (reflect)
+// hasReactAction:       when this effect triggers reactively, fire the entity's equipped isReactionAction profile against the attacker
 model CombatEffectType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -5463,6 +5465,7 @@ model CombatEffectType {
   removesEffects       Boolean @default(false)
   preventedAsTarget    Boolean @default(false)
   reflectsDamage       Boolean @default(false)
+  hasReactAction       Boolean @default(false)
 
   combatEffects        ConditionDef_CombatEffect[]
   profileBehaviors      ItemEquipmentProfile[]        @relation("ProfileBehaviorEffect")
@@ -5787,7 +5790,7 @@ model ActiveCombat_Action {
   turnIndex      Int  // position within the round (for ordering)
 
   actorEntityId      Int
-  actionCategoryId   Int
+  actionCategoryId   Int?  // null for reaction actions (counterattack); set for all normal turn actions
   equipmentProfileId Int
 
   targetEntityId Int?  // null for self-targeted or area actions resolved entirely app-side
@@ -5806,9 +5809,9 @@ model ActiveCombat_Action {
 
   occurredAt DateTime @default(now()) @db.Timestamptz
 
-  activeCombat     ActiveCombat         @relation(fields: [activeCombatId],     references: [id], onDelete: Cascade)
-  actionCategory   CombatActionCategory @relation(fields: [actionCategoryId],   references: [id], onDelete: Restrict)
-  equipmentProfile ItemEquipmentProfile @relation(fields: [equipmentProfileId], references: [id], onDelete: Restrict)
+  activeCombat     ActiveCombat          @relation(fields: [activeCombatId],     references: [id], onDelete: Cascade)
+  actionCategory   CombatActionCategory? @relation(fields: [actionCategoryId],   references: [id], onDelete: Restrict)
+  equipmentProfile ItemEquipmentProfile  @relation(fields: [equipmentProfileId], references: [id], onDelete: Restrict)
   actorEntity      Entity               @relation("CombatActionActor",  fields: [actorEntityId],  references: [id], onDelete: Cascade)
   targetEntity     Entity?              @relation("CombatActionTarget", fields: [targetEntityId], references: [id], onDelete: SetNull)
   appliedConditions EntityCondition[]

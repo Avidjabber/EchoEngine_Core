@@ -52,4 +52,12 @@ export class PlayCombatService {
     declineSecondWind(combatId: number, entityId: number) {
         return this.repo.declineSecondWind(combatId, entityId);
     }
+
+    flee(combatId: number, entityId: number) {
+        return this.repo.flee(combatId, entityId);
+    }
+
+    processReaction(combatId: number, defenderEntityId: number, profileId: number, storedItemId: number, attackerEntityId: number, roundNumber: number) {
+        return this.repo.processReaction(combatId, defenderEntityId, profileId, storedItemId, attackerEntityId, roundNumber);
+    }
 }

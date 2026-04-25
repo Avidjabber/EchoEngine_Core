@@ -102,4 +102,26 @@ export class PlayCombatController {
         if (!body?.entityId) throw new BadRequestException('entityId is required');
         return this.service.declineSecondWind(id, body.entityId);
     }
+
+    @Post(':id/flee')
+    @HttpCode(HttpStatus.OK)
+    flee(
+        @Param('id', ParseIntPipe) id:   number,
+        @Body()                    body: { entityId: number },
+    ) {
+        if (!body?.entityId) throw new BadRequestException('entityId is required');
+        return this.service.flee(id, body.entityId);
+    }
+
+    @Post(':id/process-reaction')
+    @HttpCode(HttpStatus.OK)
+    processReaction(
+        @Param('id', ParseIntPipe) id:   number,
+        @Body()                    body: { defenderEntityId: number; profileId: number; storedItemId: number; attackerEntityId: number; roundNumber: number },
+    ) {
+        if (!body?.defenderEntityId || !body?.profileId || !body?.storedItemId || !body?.attackerEntityId || body?.roundNumber === undefined) {
+            throw new BadRequestException('defenderEntityId, profileId, storedItemId, attackerEntityId, and roundNumber are required');
+        }
+        return this.service.processReaction(id, body.defenderEntityId, body.profileId, body.storedItemId, body.attackerEntityId, body.roundNumber);
+    }
 }

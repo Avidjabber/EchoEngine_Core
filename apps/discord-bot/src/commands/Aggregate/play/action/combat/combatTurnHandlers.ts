@@ -1,7 +1,7 @@
 import { ButtonInteraction, MessageFlags, TextChannel, ThreadChannel } from 'discord.js';
 import { colors } from '../../../../../core/colors';
 import { messages } from '@echoengine/shared';
-import { fetchAvailableActions, advanceTurn, distributeCombatXp, acceptSecondWind, declineSecondWind } from '../../../../../services/play/combatService';
+import { fetchAvailableActions, advanceTurn, distributeCombatXp, acceptSecondWind, declineSecondWind, flee } from '../../../../../services/play/combatService';
 import type { AdvanceTurnResult, RoundEndEvent } from '../../../../../services/play/combatService';
 import { buildActionPickerComponents } from './combatActionComponents';
 import { buildTurnPromptComponents, buildTurnEndedComponents, buildSecondWindComponents, buildCombatOutcomeComponents } from './combatTurnComponents';
@@ -84,6 +84,39 @@ export async function handlePaTurnEnd(interaction: ButtonInteraction): Promise<v
     await processAdvanceResult(channel, activeCombatId, result.value);
 }
 
+// customId: pa_turn_flee:{activeCombatId}:{entityId}
+export async function handlePaTurnFlee(interaction: ButtonInteraction): Promise<void> {
+    const parts          = interaction.customId.split(':');
+    const activeCombatId = parseInt(parts[1], 10);
+    const entityId       = parseInt(parts[2], 10);
+
+    await interaction.deferUpdate();
+
+    const entry = getTurnEntry(activeCombatId);
+    if (!entry || entry.entityId !== entityId || entry.userId !== interaction.user.id) return;
+    if (!entry.allowsFleeing) return;
+
+    const fleeResult = await flee(activeCombatId, entityId).catch(() => null);
+    if (!fleeResult?.success || !fleeResult.value?.allowed) return;
+
+    await interaction.message.edit({
+        components: [{
+            type:         17,
+            accent_color: colors.warning,
+            components:   [{ type: 10, content: `-# **${entry.entityName}** has fled the battle.` }],
+        }],
+    } as never).catch(() => null);
+
+    const channel = interaction.channel as TextChannel | ThreadChannel;
+    const result  = await advanceTurn(activeCombatId, entityId);
+    if (!result.success || !result.value) {
+        deleteTurnEntry(activeCombatId);
+        return;
+    }
+
+    await processAdvanceResult(channel, activeCombatId, result.value);
+}
+
 // customId: pa_sw_accept:{activeCombatId}:{entityId}
 export async function handlePaSwAccept(interaction: ButtonInteraction): Promise<void> {
     const parts          = interaction.customId.split(':');
@@ -106,7 +139,7 @@ export async function handlePaSwAccept(interaction: ButtonInteraction): Promise<
     } as never).catch(() => null);
 
     const channel = interaction.channel as TextChannel | ThreadChannel;
-    await postNextTurnPrompt(channel, activeCombatId, entityId, entry.entityName, entry.userId ?? null, entry.round);
+    await postNextTurnPrompt(channel, activeCombatId, entityId, entry.entityName, entry.userId ?? null, entry.round, entry.allowsFleeing);
 }
 
 // customId: pa_sw_decline:{activeCombatId}:{entityId}
@@ -194,7 +227,7 @@ async function processAdvanceResult(
         return postSecondWindPrompt(channel, activeCombatId, current.nextEntityId!, current.nextEntityName!, current.nextUserId, current.round);
     }
 
-    return postNextTurnPrompt(channel, activeCombatId, current.nextEntityId!, current.nextEntityName!, current.nextUserId, current.round);
+    return postNextTurnPrompt(channel, activeCombatId, current.nextEntityId!, current.nextEntityName!, current.nextUserId, current.round, current.allowsFleeing);
 }
 
 async function postNextTurnPrompt(
@@ -204,11 +237,12 @@ async function postNextTurnPrompt(
     nextEntityName: string,
     nextUserId:     string | null,
     round:          number,
+    allowsFleeing:  boolean,
 ): Promise<void> {
     const msg = await channel.send({
-        components: buildTurnPromptComponents(activeCombatId, nextEntityId, nextEntityName, nextUserId ?? undefined, round, 0) as never,
+        components: buildTurnPromptComponents(activeCombatId, nextEntityId, nextEntityName, nextUserId ?? undefined, round, 0, allowsFleeing) as never,
     });
-    setTurnEntry(activeCombatId, msg.id, channel.id, nextEntityId, nextEntityName, nextUserId ?? undefined, round);
+    setTurnEntry(activeCombatId, msg.id, channel.id, nextEntityId, nextEntityName, nextUserId ?? undefined, round, allowsFleeing);
 }
 
 async function postSecondWindPrompt(

@@ -12,7 +12,9 @@ import {
     buildActionResultComponents,
 } from './combatActionComponents';
 import { getTurnEntry, markTurnFlagUsed, TURN_FLAG_MAIN, TURN_FLAG_BONUS, TURN_FLAG_ITEM } from './combatTurnState';
-import { buildTurnPromptComponents } from './combatTurnComponents';
+import { buildTurnPromptComponents, buildTurnAwaitingReactionComponents } from './combatTurnComponents';
+import { setReactionEntry } from './combatReactionState';
+import { buildReactionPromptComponents } from './combatReactionComponents';
 
 const FLAG_BY_SLOT     = [TURN_FLAG_MAIN, TURN_FLAG_BONUS, TURN_FLAG_ITEM] as const;
 const CATEGORY_BY_SLOT = ['main', 'bonus', 'item'] as const;
@@ -157,22 +159,48 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
     const flag = FLAG_BY_SLOT[catSlot];
     markTurnFlagUsed(activeCombatId, flag);
 
-    // Update the turn prompt buttons (disable the used one)
     const channel = interaction.channel as TextChannel | ThreadChannel;
     const turnMsg = await channel.messages.fetch(entry.turnPromptMessageId).catch(() => null);
-    if (turnMsg) {
-        await turnMsg.edit({
-            components: buildTurnPromptComponents(
-                activeCombatId, entry.entityId, entry.entityName, entry.userId, entry.round, entry.usedFlags,
-            ) as never,
-        }).catch(() => null);
-    }
 
     if (result.success && result.value) {
         // Post real result publicly
         await channel.send({
             components: buildActionResultComponents(result.value) as never,
         } as never).catch(() => null);
+
+        const reaction = result.value.pendingReaction;
+        if (reaction) {
+            // Disable turn prompt while awaiting reaction
+            if (turnMsg) {
+                await turnMsg.edit({
+                    components: buildTurnAwaitingReactionComponents(entry.entityName, reaction.defenderEntityName) as never,
+                }).catch(() => null);
+            }
+            // Post reaction prompt
+            const reactionMsg = await channel.send({
+                components: buildReactionPromptComponents(
+                    activeCombatId, reaction.defenderEntityId, reaction.defenderEntityName,
+                    reaction.defenderUserId ?? undefined, reaction.reactionProfiles,
+                ) as never,
+            }).catch(() => null);
+            if (reactionMsg) {
+                setReactionEntry(
+                    activeCombatId, reactionMsg.id, channel.id,
+                    reaction.defenderEntityId, reaction.defenderEntityName, reaction.defenderUserId ?? undefined,
+                    reaction.attackerEntityId, reaction.reactionProfiles,
+                );
+            }
+        } else {
+            // No reaction — just update turn prompt with disabled action slot
+            if (turnMsg) {
+                await turnMsg.edit({
+                    components: buildTurnPromptComponents(
+                        activeCombatId, entry.entityId, entry.entityName, entry.userId,
+                        entry.round, entry.usedFlags, entry.allowsFleeing,
+                    ) as never,
+                }).catch(() => null);
+            }
+        }
 
         // Acknowledge ephemeral
         const actionLabel = result.value.actionLabel;
@@ -182,6 +210,15 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
             components: [{ type: 17, accent_color: colors.success, components: [{ type: 10, content: `**${actionLabel}** → **${targetName}** — done!` }] }],
         } as never);
     } else {
+        // Error — still restore turn prompt
+        if (turnMsg) {
+            await turnMsg.edit({
+                components: buildTurnPromptComponents(
+                    activeCombatId, entry.entityId, entry.entityName, entry.userId,
+                    entry.round, entry.usedFlags, entry.allowsFleeing,
+                ) as never,
+            }).catch(() => null);
+        }
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
             components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: messages.errorGeneric }] }],
