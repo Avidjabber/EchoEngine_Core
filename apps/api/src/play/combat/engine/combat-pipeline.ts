@@ -38,6 +38,7 @@ function createContext(input: CombatActionInput): CombatActionContext {
         profile:             null,
         combatMeta:          null,
         existingActionCount: 0,
+        actorTurnOrder:      null,
         aborted:             false,
         abortReason:         null,
         actualTargetId:      input.targetEntityId,

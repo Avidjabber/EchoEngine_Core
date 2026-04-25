@@ -33,7 +33,8 @@ export interface ProfileSnapshot {
 }
 
 export interface CombatMetaSnapshot {
-    canSecondWind: boolean;
+    canSecondWind:    boolean;
+    currentTurnOrder: number;
 }
 
 // ── Snapshots loaded by TARGET ────────────────────────────────────────────────
@@ -72,6 +73,7 @@ export interface CombatActionContext {
     profile:             ProfileSnapshot | null;
     combatMeta:          CombatMetaSnapshot | null;
     existingActionCount: number;
+    actorTurnOrder:      number | null;
 
     // VALIDATE
     aborted:     boolean;

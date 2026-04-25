@@ -9,6 +9,12 @@ export async function runValidate(ctx: CombatActionContext, _svc: PipelineServic
         return;
     }
 
+    if (ctx.actorTurnOrder === null || ctx.actorTurnOrder !== ctx.combatMeta.currentTurnOrder) {
+        ctx.aborted     = true;
+        ctx.abortReason = 'It is not this entity\'s turn.';
+        return;
+    }
+
     if (ctx.profile.dealsDamage && ctx.actualTargetId === null) {
         ctx.aborted     = true;
         ctx.abortReason = 'A target is required for damaging actions.';

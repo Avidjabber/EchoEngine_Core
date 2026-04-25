@@ -205,6 +205,8 @@ async function processAdvanceResult(
 
     await postTurnEndEvents(channel, advance.turnEndEvents);
 
+    // Stage 1: AI entities pass their turns here. Stage 3 wires the NPC_AI pipeline phase
+    // to replace this loop with actual action selection.
     let current = advance;
     while (current.isAiControlled && !current.combatEnded) {
         await channel.send({

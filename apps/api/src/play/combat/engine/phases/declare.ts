@@ -3,7 +3,7 @@ import type { PipelineServices } from '../combat-pipeline';
 
 // Loads actor, profile, and combat meta from DB. All reads for the actor side happen here.
 export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServices): Promise<void> {
-    const [profileRow, combatRow, actorRow, existingCount] = await Promise.all([
+    const [profileRow, combatRow, actorRow, existingCount, actorParticipantRow] = await Promise.all([
         db.itemEquipmentProfile.findUnique({
             where:  { id: ctx.input.profileId },
             select: {
@@ -25,7 +25,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
         }),
         db.activeCombat.findUnique({
             where:  { id: ctx.input.combatId },
-            select: { initiationType: { select: { canSecondWind: true } } },
+            select: { currentTurnOrder: true, initiationType: { select: { canSecondWind: true } } },
         }),
         db.entity.findUnique({
             where:  { id: ctx.input.actorEntityId },
@@ -45,6 +45,10 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
         }),
         db.activeCombat_Action.count({
             where: { activeCombatId: ctx.input.combatId, roundNumber: ctx.input.roundNumber },
+        }),
+        db.activeCombat_Participant.findFirst({
+            where:  { activeCombatId: ctx.input.combatId, entityId: ctx.input.actorEntityId },
+            select: { turnOrder: true },
         }),
     ]);
 
@@ -69,7 +73,14 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
     }
 
     if (combatRow) {
-        ctx.combatMeta = { canSecondWind: combatRow.initiationType.canSecondWind };
+        ctx.combatMeta = {
+            canSecondWind:    combatRow.initiationType.canSecondWind,
+            currentTurnOrder: combatRow.currentTurnOrder,
+        };
+    }
+
+    if (actorParticipantRow) {
+        ctx.actorTurnOrder = actorParticipantRow.turnOrder;
     }
 
     if (actorRow) {
