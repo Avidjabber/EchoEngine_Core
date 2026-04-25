@@ -1,4 +1,4 @@
-import { ActivityType, Client, PresenceUpdateStatus } from 'discord.js';
+import { ActivityType, Client, PresenceStatusData, PresenceUpdateStatus } from 'discord.js';
 
 type PresenceOptions = {
     status?: string;
@@ -24,7 +24,7 @@ export function setBotPresence(
         ActivityType.Watching;
 
     client.user.setPresence({
-        status: resolvedStatus,
+        status: resolvedStatus as PresenceStatusData,
         activities: [{ name: activity, type: resolvedType }],
     });
 }

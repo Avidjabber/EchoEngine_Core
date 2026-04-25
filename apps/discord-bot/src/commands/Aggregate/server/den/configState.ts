@@ -21,18 +21,31 @@ export type DenConfigKey =
     | 'allowProgression'
     | 'allowSocial';
 
-const store = new Map<string, DenConfigState>();
+const TTL_MS = 20 * 60 * 1000;
+
+interface Entry {
+    data:      DenConfigState;
+    expiresAt: number;
+}
+
+const store = new Map<string, Entry>();
 
 function stateKey(userId: string, channelId: string): string {
     return `${userId}_${channelId}`;
 }
 
 export function setState(userId: string, channelId: string, state: DenConfigState): void {
-    store.set(stateKey(userId, channelId), state);
+    store.set(stateKey(userId, channelId), { data: state, expiresAt: Date.now() + TTL_MS });
 }
 
 export function getState(userId: string, channelId: string): DenConfigState | undefined {
-    return store.get(stateKey(userId, channelId));
+    const entry = store.get(stateKey(userId, channelId));
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+        store.delete(stateKey(userId, channelId));
+        return undefined;
+    }
+    return entry.data;
 }
 
 export function clearState(userId: string, channelId: string): void {

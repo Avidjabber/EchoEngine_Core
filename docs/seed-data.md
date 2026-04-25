@@ -1273,14 +1273,11 @@ dailyXpCap is null for all disciplines; only the stat progression row sets it.
 
   codeName          name             description                                                      baseXp  isStatProgression  dailyXpCap
   ────────────────  ───────────────  ───────────────────────────────────────────────────────────────  ──────  ─────────────────  ──────────
-  healing           Healing          Treating wounds, illness, and conditions                            100  false              null
-  crafting          Crafting         Creating items via recipes                                          100  false              null
-  farming           Farming          Growing, gathering, and tending plant-based resources               100  false              null
-  combat            Combat           Fighting effectiveness and battle experience                        100  false              null
-  scouting          Scouting         Patrol, territory awareness, and threat detection                   100  false              null
-  social            Social           Leadership, diplomacy, and faction influence                        100  false              null
-  training          Training         Mentoring other entities and accelerating their growth              100  false              null
-  stat_progression  StatProgression  Tracks XP toward stat points; excluded from discipline listings    1250  true               100
+  healing           Healing          Treating wounds, illness, and conditions                            100   false              null
+  crafting          Crafting         Creating items via recipes                                          100   false              null
+  farming           Farming          Growing, gathering, and tending plant-based resources               100   false              null
+  combat            Combat           Fighting effectiveness and battle experience                        100   false              null
+  stat_progression  StatProgression  Tracks XP toward stat points; excluded from discipline listings    6000  true               100
 
 NOTE — stat progression calibration:
   dailyXpCap = 100 XP/day. Casual player (~18 active days/mo) earns ~1,800 XP/mo →

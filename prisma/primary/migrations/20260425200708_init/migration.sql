@@ -374,6 +374,7 @@ CREATE TABLE "EnvCondition_ProficiencyModifier" (
     "proficiencyDefId" INTEGER NOT NULL,
     "value" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     "hasDisadvantage" BOOLEAN NOT NULL DEFAULT false,
+    "hasAdvantage" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "EnvCondition_ProficiencyModifier_pkey" PRIMARY KEY ("guildId","envConditionId","proficiencyDefId")
 );
@@ -1269,6 +1270,7 @@ CREATE TABLE "ItemEquipmentProfile" (
     "cooldownRounds" INTEGER NOT NULL DEFAULT 0,
     "durationRounds" INTEGER NOT NULL DEFAULT 0,
     "behaviorEffectTypeId" INTEGER,
+    "isReactionAction" BOOLEAN NOT NULL DEFAULT false,
     "requiresVerbal" BOOLEAN NOT NULL DEFAULT false,
     "requiresSomatic" BOOLEAN NOT NULL DEFAULT false,
     "allowedInSpar" BOOLEAN NOT NULL DEFAULT true,
@@ -2719,6 +2721,7 @@ CREATE TABLE "CombatEffectType" (
     "removesEffects" BOOLEAN NOT NULL DEFAULT false,
     "preventedAsTarget" BOOLEAN NOT NULL DEFAULT false,
     "reflectsDamage" BOOLEAN NOT NULL DEFAULT false,
+    "hasReactAction" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "CombatEffectType_pkey" PRIMARY KEY ("id")
 );
@@ -2840,6 +2843,7 @@ CREATE TABLE "ActiveCombat_BehaviorEffect" (
     "effectTypeId" INTEGER NOT NULL,
     "affectedParticipantId" INTEGER NOT NULL,
     "linkedParticipantId" INTEGER,
+    "sourceParticipantId" INTEGER,
     "roundsRemaining" INTEGER NOT NULL,
     "flatModifier" INTEGER,
     "percentModifier" DOUBLE PRECISION,
@@ -2854,15 +2858,17 @@ CREATE TABLE "ActiveCombat_Action" (
     "roundNumber" INTEGER NOT NULL,
     "turnIndex" INTEGER NOT NULL,
     "actorEntityId" INTEGER NOT NULL,
-    "actionCategoryId" INTEGER NOT NULL,
+    "actionCategoryId" INTEGER,
     "equipmentProfileId" INTEGER NOT NULL,
     "targetEntityId" INTEGER,
     "hitRoll" INTEGER,
     "hitModifier" INTEGER,
     "hit" BOOLEAN,
+    "isCritical" BOOLEAN NOT NULL DEFAULT false,
     "damageRoll" INTEGER,
     "damageModifier" INTEGER,
     "damageDealt" INTEGER,
+    "elementalDamageDealt" INTEGER,
     "healDealt" INTEGER,
     "reflectedDamage" INTEGER,
     "absorbedDamage" INTEGER,
@@ -4616,6 +4622,9 @@ CREATE INDEX "ActiveCombat_BehaviorEffect_affectedParticipantId_idx" ON "ActiveC
 CREATE INDEX "ActiveCombat_BehaviorEffect_linkedParticipantId_idx" ON "ActiveCombat_BehaviorEffect"("linkedParticipantId");
 
 -- CreateIndex
+CREATE INDEX "ActiveCombat_BehaviorEffect_sourceParticipantId_idx" ON "ActiveCombat_BehaviorEffect"("sourceParticipantId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ActiveCombat_BehaviorEffect_affectedParticipantId_effectTyp_key" ON "ActiveCombat_BehaviorEffect"("affectedParticipantId", "effectTypeId");
 
 -- CreateIndex
@@ -6204,6 +6213,9 @@ ALTER TABLE "ActiveCombat_BehaviorEffect" ADD CONSTRAINT "ActiveCombat_BehaviorE
 
 -- AddForeignKey
 ALTER TABLE "ActiveCombat_BehaviorEffect" ADD CONSTRAINT "ActiveCombat_BehaviorEffect_linkedParticipantId_fkey" FOREIGN KEY ("linkedParticipantId") REFERENCES "ActiveCombat_Participant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ActiveCombat_BehaviorEffect" ADD CONSTRAINT "ActiveCombat_BehaviorEffect_sourceParticipantId_fkey" FOREIGN KEY ("sourceParticipantId") REFERENCES "ActiveCombat_Participant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ActiveCombat_Action" ADD CONSTRAINT "ActiveCombat_Action_activeCombatId_fkey" FOREIGN KEY ("activeCombatId") REFERENCES "ActiveCombat"("id") ON DELETE CASCADE ON UPDATE CASCADE;

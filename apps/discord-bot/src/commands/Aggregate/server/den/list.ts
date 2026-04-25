@@ -5,17 +5,23 @@ import {
 import { messages } from '@echoengine/shared';
 import { replyError } from '../../../../core/reply';
 import { getDens } from '../../../../services/server/denService';
+import { getCachedDens, setCachedDens } from '../../../../services/server/denCache';
 import { buildDenListComponents } from './listComponents';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    const result = await getDens(interaction.guildId!);
+    const guildId = interaction.guildId!;
 
-    if (!result.success) {
-        await replyError(interaction, messages.apiError(result.error!));
-        return;
+    let dens = getCachedDens(guildId);
+
+    if (!dens) {
+        const result = await getDens(guildId);
+        if (!result.success) {
+            await replyError(interaction, messages.apiError(result.error!));
+            return;
+        }
+        dens = result.value ?? [];
+        setCachedDens(guildId, dens);
     }
-
-    const dens = result.value ?? [];
 
     if (!dens.length) {
         await replyError(interaction, messages.noDens);

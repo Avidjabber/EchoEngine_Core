@@ -653,13 +653,14 @@ model EnvCondition_StatModifier {
 
 // Per-guild proficiency roll modifier applied when an environmental condition is active.
 // value is applied once per active stack — two sources of Cold each apply the modifier independently.
-// hasDisadvantage triggers if at least one stack is active (not per stack).
+// hasDisadvantage / hasAdvantage trigger if at least one stack is active (not per stack); mutually exclusive with each other and with a non-zero value.
 model EnvCondition_ProficiencyModifier {
   guildId          String @db.VarChar(50)
   envConditionId   Int
   proficiencyDefId Int
   value            Float   @default(0.0)  // flat additive modifier to the skill roll; applied once per active stack
   hasDisadvantage  Boolean @default(false) // triggers if at least one stack is active (not per stack)
+  hasAdvantage     Boolean @default(false) // triggers if at least one stack is active (not per stack)
 
   guild        GuildSettings  @relation(fields: [guildId],          references: [guildId], onDelete: Cascade)
   envCondition EnvCondition   @relation(fields: [envConditionId],   references: [id],      onDelete: Cascade)
@@ -2398,6 +2399,7 @@ model ItemEquipmentProfile {
   cooldownRounds       Int     @default(0)
   durationRounds       Int     @default(0)   // 0 = instantaneous
   behaviorEffectTypeId Int?                  // set for stateful behaviors (guard, taunt, parry, etc.)
+  isReactionAction     Boolean @default(false)  // true = this profile can fire as a reaction (counterattack trigger); may also have actionCategoryId for normal turn use
   requiresVerbal       Boolean @default(false)  // action has a verbal component — blocked by conditions with blocksVerbal
   requiresSomatic      Boolean @default(false)  // action has a somatic component — blocked by conditions with blocksSomatic
   allowedInSpar        Boolean @default(true)
@@ -5444,6 +5446,7 @@ model CombatOutcome {
 // removesEffects:       strips existing active effects from the target (dispel)
 // preventedAsTarget:    effect-holder cannot be selected as a target (untargetable)
 // reflectsDamage:       a portion of incoming damage is dealt back to the attacker (reflect)
+// hasReactAction:       when this effect triggers reactively, fire the entity's equipped isReactionAction profile against the attacker
 model CombatEffectType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
@@ -5462,6 +5465,7 @@ model CombatEffectType {
   removesEffects       Boolean @default(false)
   preventedAsTarget    Boolean @default(false)
   reflectsDamage       Boolean @default(false)
+  hasReactAction       Boolean @default(false)
 
   combatEffects        ConditionDef_CombatEffect[]
   profileBehaviors      ItemEquipmentProfile[]        @relation("ProfileBehaviorEffect")
@@ -5699,8 +5703,9 @@ model ActiveCombat_Participant {
   entity          Entity                    @relation(fields: [entityId],       references: [id], onDelete: Cascade)
   dropTable       DropTable?                @relation(fields: [dropTableId],    references: [id], onDelete: SetNull)
   actionCooldowns   ActiveCombat_Participant_ActionCooldown[]
-  behaviorEffects   ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectTarget")
-  linkedBehaviors   ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectLinked")
+  behaviorEffects        ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectTarget")
+  linkedBehaviors        ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectLinked")
+  sourcedBehaviorEffects ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectSource")
   statEffects       ActiveCombat_StatEffect[]     @relation("StatEffectTarget")
   statEffectsCaused ActiveCombat_StatEffect[]     @relation("StatEffectSource")
 
@@ -5727,7 +5732,8 @@ model ActiveCombat_Participant_ActionCooldown {
 }
 
 // Persistent behavioral effects lasting one or more rounds (guard, taunt, parry, etc.).
-// At round start: decrement roundsRemaining and delete rows that reach 0.
+// Duration counts against the SOURCE participant's turn cycles, not global rounds.
+// Decremented at the START of the source participant's next turn; deleted when it reaches 0.
 //
 // STACKING: @@unique([affectedParticipantId, effectTypeId]) enforces one active instance per
 // entity per behavior type. Re-applying the same effect type always refreshes (upserts)
@@ -5741,6 +5747,9 @@ model ActiveCombat_Participant_ActionCooldown {
 //   reflect: affectedParticipantId = the reflecting entity; linkedParticipantId = null
 //            (attacker is resolved at hit-time; not pre-linked)
 //
+// sourceParticipantId: the participant who activated this effect. Always set for item/ability sources.
+//   Duration counts against this participant's turn cycles regardless of affectedParticipantId semantics.
+//
 // MAGNITUDE FIELDS — populated at application time from the item or ability; null if not applicable.
 //   flatModifier    — flat numeric value: absorb buffer HP, flat reflected damage amount, flat damage blocked, etc.
 //   percentModifier — fractional value (0.0–1.0): reflect % of incoming damage, guard damage reduction %, etc.
@@ -5752,6 +5761,7 @@ model ActiveCombat_BehaviorEffect {
 
   affectedParticipantId Int
   linkedParticipantId   Int?
+  sourceParticipantId   Int?
 
   roundsRemaining  Int
   flatModifier     Int?    // flat modification value; usage depends on effect type (see comment above)
@@ -5761,12 +5771,14 @@ model ActiveCombat_BehaviorEffect {
   effectType          CombatEffectType          @relation("ActiveBehaviorEffectType",  fields: [effectTypeId],           references: [id], onDelete: Restrict)
   affectedParticipant ActiveCombat_Participant  @relation("BehaviorEffectTarget",      fields: [affectedParticipantId],  references: [id], onDelete: Cascade)
   linkedParticipant   ActiveCombat_Participant? @relation("BehaviorEffectLinked",       fields: [linkedParticipantId],    references: [id], onDelete: Cascade)
+  sourceParticipant   ActiveCombat_Participant? @relation("BehaviorEffectSource",       fields: [sourceParticipantId],    references: [id], onDelete: SetNull)
 
   @@unique([affectedParticipantId, effectTypeId])
   @@index([activeCombatId])
   @@index([effectTypeId])
   @@index([affectedParticipantId])
   @@index([linkedParticipantId])
+  @@index([sourceParticipantId])
 }
 
 // One action taken during a combat turn — stored for Discord message reconstruction.
@@ -5778,7 +5790,7 @@ model ActiveCombat_Action {
   turnIndex      Int  // position within the round (for ordering)
 
   actorEntityId      Int
-  actionCategoryId   Int
+  actionCategoryId   Int?  // null for reaction actions (counterattack); set for all normal turn actions
   equipmentProfileId Int
 
   targetEntityId Int?  // null for self-targeted or area actions resolved entirely app-side
@@ -5786,9 +5798,11 @@ model ActiveCombat_Action {
   hitRoll        Int?
   hitModifier    Int?
   hit            Boolean?
+  isCritical     Boolean  @default(false)
   damageRoll     Int?
   damageModifier Int?
-  damageDealt    Int?
+  damageDealt         Int?  // primary damage only
+  elementalDamageDealt Int?  // elemental damage only; null when no elemental component
   healDealt       Int?
   reflectedDamage Int?  // damage returned to the attacker via a reflect behavior effect
   absorbedDamage  Int?  // damage intercepted by an absorb buffer instead of reducing HP
@@ -5797,9 +5811,9 @@ model ActiveCombat_Action {
 
   occurredAt DateTime @default(now()) @db.Timestamptz
 
-  activeCombat     ActiveCombat         @relation(fields: [activeCombatId],     references: [id], onDelete: Cascade)
-  actionCategory   CombatActionCategory @relation(fields: [actionCategoryId],   references: [id], onDelete: Restrict)
-  equipmentProfile ItemEquipmentProfile @relation(fields: [equipmentProfileId], references: [id], onDelete: Restrict)
+  activeCombat     ActiveCombat          @relation(fields: [activeCombatId],     references: [id], onDelete: Cascade)
+  actionCategory   CombatActionCategory? @relation(fields: [actionCategoryId],   references: [id], onDelete: Restrict)
+  equipmentProfile ItemEquipmentProfile  @relation(fields: [equipmentProfileId], references: [id], onDelete: Restrict)
   actorEntity      Entity               @relation("CombatActionActor",  fields: [actorEntityId],  references: [id], onDelete: Cascade)
   targetEntity     Entity?              @relation("CombatActionTarget", fields: [targetEntityId], references: [id], onDelete: SetNull)
   appliedConditions EntityCondition[]

@@ -10,6 +10,7 @@ export const errorCodes = {
 
     // ── Guild Settings ────────────────────────────────────────────────────────
     GUILD_SETTINGS_NOT_FOUND: 'GUILD_SETTINGS_NOT_FOUND', // guild has no settings row yet
+
 } as const;
 
 export type ErrorCode = typeof errorCodes[keyof typeof errorCodes];

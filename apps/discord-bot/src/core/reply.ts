@@ -6,6 +6,24 @@ import {
 } from 'discord.js';
 import { colors } from './colors';
 
+export async function replyLoading(
+    interaction: ChatInputCommandInteraction,
+    ephemeral   = true,
+): Promise<void> {
+    const flags = ephemeral
+        ? MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral
+        : MessageFlags.IsComponentsV2;
+
+    await interaction.reply({
+        flags,
+        components: [
+            new ContainerBuilder().addTextDisplayComponents(
+                new TextDisplayBuilder().setContent('-# Loading...'),
+            ),
+        ],
+    });
+}
+
 /**
  * Send an error message to an interaction using v2 components.
  * Handles both un-replied and already-deferred interactions automatically.
@@ -28,6 +46,6 @@ export async function replyError(
     if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({ ...payload, flags: payload.flags | MessageFlags.Ephemeral });
     } else {
-        await interaction.editReply(payload);
+        await interaction.editReply(payload as never);
     }
 }

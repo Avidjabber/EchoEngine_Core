@@ -1,12 +1,14 @@
 import {
     ButtonInteraction,
     ContainerBuilder,
+    GuildTextBasedChannel,
     MessageFlags,
     TextDisplayBuilder,
 } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
 import { getDen, getDens, removeDen, updateDen } from '../../../../services/server/denService';
+import { getCachedDens, setCachedDens, updateCachedDen, removeCachedDen } from '../../../../services/server/denCache';
 import { getState, clearState, setState, DenConfigKey } from './configState';
 import { buildDenConfigComponents } from './configComponents';
 import { buildDenListComponents } from './listComponents';
@@ -20,23 +22,25 @@ export async function handleDenListConfig(interaction: ButtonInteraction): Promi
 
     await interaction.deferUpdate();
 
-    const result = await getDen(guildId, channelId);
+    let den = getCachedDens(guildId)?.find(d => d.channelId === channelId) ?? null;
 
-    if (!result.success) {
-        await interaction.editReply({
-            flags:      MessageFlags.IsComponentsV2,
-            components: [
-                new ContainerBuilder()
-                    .setAccentColor(colors.error)
-                    .addTextDisplayComponents(
-                        new TextDisplayBuilder().setContent(messages.denNotFound),
-                    ),
-            ] as never,
-        });
-        return;
+    if (!den) {
+        const result = await getDen(guildId, channelId);
+        if (!result.success) {
+            await interaction.editReply({
+                flags:      MessageFlags.IsComponentsV2,
+                components: [
+                    new ContainerBuilder()
+                        .setAccentColor(colors.error)
+                        .addTextDisplayComponents(
+                            new TextDisplayBuilder().setContent(messages.denNotFound),
+                        ),
+                ] as never,
+            });
+            return;
+        }
+        den = result.value!;
     }
-
-    const den = result.value!;
 
     setState(interaction.user.id, channelId, {
         guildId,
@@ -91,23 +95,26 @@ export async function handleDenListPage(interaction: ButtonInteraction): Promise
 
     await interaction.deferUpdate();
 
-    const result = await getDens(guildId);
+    let dens = getCachedDens(guildId);
 
-    if (!result.success) {
-        await interaction.editReply({
-            flags:      MessageFlags.IsComponentsV2,
-            components: [
-                new ContainerBuilder()
-                    .setAccentColor(colors.error)
-                    .addTextDisplayComponents(
-                        new TextDisplayBuilder().setContent(messages.apiError(result.error!)),
-                    ),
-            ] as never,
-        });
-        return;
+    if (!dens) {
+        const result = await getDens(guildId);
+        if (!result.success) {
+            await interaction.editReply({
+                flags:      MessageFlags.IsComponentsV2,
+                components: [
+                    new ContainerBuilder()
+                        .setAccentColor(colors.error)
+                        .addTextDisplayComponents(
+                            new TextDisplayBuilder().setContent(messages.apiError(result.error!)),
+                        ),
+                ] as never,
+            });
+            return;
+        }
+        dens = result.value ?? [];
+        setCachedDens(guildId, dens);
     }
-
-    const dens = result.value ?? [];
 
     await interaction.editReply({
         flags:      MessageFlags.IsComponentsV2,
@@ -237,6 +244,7 @@ export async function handleDenDone(interaction: ButtonInteraction): Promise<voi
     }
 
     clearState(interaction.user.id, channelId);
+    updateCachedDen(state.guildId, result.value!);
 
     const savedContainer = new ContainerBuilder()
         .setAccentColor(colors.success)
@@ -246,7 +254,7 @@ export async function handleDenDone(interaction: ButtonInteraction): Promise<voi
             ),
         );
 
-    await interaction.channel?.send({
+    await (interaction.channel as GuildTextBasedChannel | null)?.send({
         flags:      MessageFlags.IsComponentsV2,
         components: [savedContainer],
     });
@@ -295,6 +303,7 @@ export async function handleDenDelete(interaction: ButtonInteraction): Promise<v
     }
 
     clearState(interaction.user.id, channelId);
+    removeCachedDen(state.guildId, channelId);
 
     const deletedContainer = new ContainerBuilder()
         .setAccentColor(colors.info)
@@ -304,7 +313,7 @@ export async function handleDenDelete(interaction: ButtonInteraction): Promise<v
             ),
         );
 
-    await interaction.channel?.send({
+    await (interaction.channel as GuildTextBasedChannel | null)?.send({
         flags:      MessageFlags.IsComponentsV2,
         components: [deletedContainer],
     });
