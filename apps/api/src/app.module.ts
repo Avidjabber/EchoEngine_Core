@@ -6,6 +6,7 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { ServerModule } from './server/server.module';
 import { ModelModule } from './model/model.module';
+import { PlayModule } from './play/play.module';
 
 @Module({
     imports: [
@@ -17,6 +18,7 @@ import { ModelModule } from './model/model.module';
         AuthModule,
         ServerModule,
         ModelModule,
+        PlayModule,
     ],
     controllers: [AppController],
     providers: [AppService],

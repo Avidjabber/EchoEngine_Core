@@ -7,15 +7,18 @@ import { EnvConditionsRepository } from './env-conditions/envConditions.reposito
 import { ProficienciesController } from './proficiencies/proficiencies.controller';
 import { ProficienciesService } from './proficiencies/proficiencies.service';
 import { ProficienciesRepository } from './proficiencies/proficiencies.repository';
+import { ActionsController } from './actions/actions.controller';
+import { ActionsService } from './actions/actions.service';
+import { ActionsRepository } from './actions/actions.repository';
 
 @Module({
-    controllers: [EnvConditionsController, ProficienciesController],
-    providers:   [ApiCacheService, EnvConditionsService, EnvConditionsRepository, ProficienciesService, ProficienciesRepository],
+    controllers: [EnvConditionsController, ProficienciesController, ActionsController],
+    providers:   [ApiCacheService, EnvConditionsService, EnvConditionsRepository, ProficienciesService, ProficienciesRepository, ActionsService, ActionsRepository],
 })
 export class ModelModule implements NestModule {
     configure(consumer: MiddlewareConsumer): void {
         consumer
             .apply(BotApiKeyMiddleware)
-            .forRoutes(EnvConditionsController, ProficienciesController);
+            .forRoutes(EnvConditionsController, ProficienciesController, ActionsController);
     }
 }

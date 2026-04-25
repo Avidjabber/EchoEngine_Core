@@ -10,6 +10,11 @@ import { handleProfUpdModal, handleProfUpdCancel, handleProfUpdUpdate, handlePro
 import { handleProfDelCancel, handleProfDelConfirm } from '../commands/Aggregate/config/proficiency/deleteHandlers';
 import { handleProfInfoDone } from '../commands/Aggregate/config/proficiency/infoHandlers';
 import { handleProfListPage, handleProfListInfo, handleProfListBack, handleProfListDone } from '../commands/Aggregate/config/proficiency/listHandlers';
+import { handlePaCharPage, handlePaCharPick, handlePaCharCancel }                                                                            from '../commands/Aggregate/play/action/characterSelectHandlers';
+import { handlePaActionBack, handlePaActionPick }                                                                                             from '../commands/Aggregate/play/action/actionSelectHandlers';
+import { handlePaCombatAddChar, handlePaCombatSignup, handlePaCombatRemove, handlePaCombatAddTeam, handlePaCombatCancel, handlePaCombatStart } from '../commands/Aggregate/play/action/combat/setupHandlers';
+import { handlePaInviteAccept, handlePaInviteReject }                                                                                         from '../commands/Aggregate/play/action/combat/inviteHandlers';
+import { handlePaEpickInvitePage, handlePaEpickSignupPage, handlePaEpickInvitePick, handlePaEpickSignupPick, handlePaEpickCancel }             from '../commands/Aggregate/play/action/combat/entityPickerHandlers';
 import {
     handleEcEdit,
     handleEcUpdCpage, handleEcUpdCpick, handleEcUpdCback,
@@ -52,6 +57,24 @@ export const selectMenuHandlers: ComponentHandler[] = [
 
 // ── Button handlers ────────────────────────────────────────────────────────────
 export const buttonHandlers: ComponentHandler[] = [
+    { prefix: 'pa_char_page:',          handler: interaction => handlePaCharPage(interaction as ButtonInteraction)        },
+    { prefix: 'pa_char_pick:',          handler: interaction => handlePaCharPick(interaction as ButtonInteraction)        },
+    { prefix: 'pa_char_cancel',         handler: interaction => handlePaCharCancel(interaction as ButtonInteraction)      },
+    { prefix: 'pa_action_back:',        handler: interaction => handlePaActionBack(interaction as ButtonInteraction)      },
+    { prefix: 'pa_action_pick:',        handler: interaction => handlePaActionPick(interaction as ButtonInteraction)      },
+    { prefix: 'pa_combat_add_char:',    handler: interaction => handlePaCombatAddChar(interaction as ButtonInteraction)   },
+    { prefix: 'pa_combat_signup:',      handler: interaction => handlePaCombatSignup(interaction as ButtonInteraction)    },
+    { prefix: 'pa_combat_remove:',      handler: interaction => handlePaCombatRemove(interaction as ButtonInteraction)    },
+    { prefix: 'pa_combat_add_team:',    handler: interaction => handlePaCombatAddTeam(interaction as ButtonInteraction)   },
+    { prefix: 'pa_combat_cancel:',      handler: interaction => handlePaCombatCancel(interaction as ButtonInteraction)    },
+    { prefix: 'pa_combat_start:',       handler: interaction => handlePaCombatStart(interaction as ButtonInteraction)     },
+    { prefix: 'pa_invite_accept:',      handler: interaction => handlePaInviteAccept(interaction as ButtonInteraction)    },
+    { prefix: 'pa_invite_reject:',      handler: interaction => handlePaInviteReject(interaction as ButtonInteraction)    },
+    { prefix: 'pa_epick_invite_page:',  handler: interaction => handlePaEpickInvitePage(interaction as ButtonInteraction) },
+    { prefix: 'pa_epick_signup_page:',  handler: interaction => handlePaEpickSignupPage(interaction as ButtonInteraction) },
+    { prefix: 'pa_epick_invite_pick:',  handler: interaction => handlePaEpickInvitePick(interaction as ButtonInteraction) },
+    { prefix: 'pa_epick_signup_pick:',  handler: interaction => handlePaEpickSignupPick(interaction as ButtonInteraction) },
+    { prefix: 'pa_epick_cancel',        handler: interaction => handlePaEpickCancel(interaction as ButtonInteraction)     },
     { prefix: 'den_list_done',    handler: interaction => handleDenListDone(interaction as ButtonInteraction) },
     { prefix: 'den_list_config:', handler: interaction => handleDenListConfig(interaction as ButtonInteraction) },
     { prefix: 'den_list_page:',   handler: interaction => handleDenListPage(interaction as ButtonInteraction) },

@@ -717,14 +717,12 @@ async function main() {
     await prisma.disciplineDef.createMany({
       skipDuplicates: true,
       data: [
-        { codeName: 'healing',          name: 'Healing',          description: 'Treating wounds, illness, and conditions',                                      baseXp: 100,  isStatProgression: false, dailyXpCap: null },
-        { codeName: 'crafting',         name: 'Crafting',         description: 'Creating items via recipes',                                                    baseXp: 100,  isStatProgression: false, dailyXpCap: null },
-        { codeName: 'farming',          name: 'Farming',          description: 'Growing, gathering, and tending plant-based resources',                         baseXp: 100,  isStatProgression: false, dailyXpCap: null },
-        { codeName: 'combat',           name: 'Combat',           description: 'Fighting effectiveness and battle experience',                                  baseXp: 100,  isStatProgression: false, dailyXpCap: null },
-        { codeName: 'scouting',         name: 'Scouting',         description: 'Patrol, territory awareness, and threat detection',                             baseXp: 100,  isStatProgression: false, dailyXpCap: null },
-        { codeName: 'social',           name: 'Social',           description: 'Leadership, diplomacy, and faction influence',                                  baseXp: 100,  isStatProgression: false, dailyXpCap: null },
-        { codeName: 'training',         name: 'Training',         description: 'Mentoring other entities and accelerating their growth',                        baseXp: 100,  isStatProgression: false, dailyXpCap: null },
-        { codeName: 'stat_progression', name: 'StatProgression',  description: 'Tracks XP toward stat points; excluded from discipline listings',               baseXp: 1250, isStatProgression: true,  dailyXpCap: 100  },
+        { codeName: 'healing',          name: 'Healing',          description: 'Treating wounds, illness, and conditions',             baseXp: 100,  isStatProgression: false, dailyXpCap: null },
+        { codeName: 'crafting',         name: 'Crafting',         description: 'Creating items via recipes',                            baseXp: 100,  isStatProgression: false, dailyXpCap: null },
+        { codeName: 'farming',          name: 'Farming',          description: 'Growing, gathering, and tending plant-based resources',  baseXp: 100,  isStatProgression: false, dailyXpCap: null },
+        { codeName: 'combat',           name: 'Combat',           description: 'Fighting effectiveness and battle experience',           baseXp: 100,  isStatProgression: false, dailyXpCap: null },
+        { codeName: 'scouting',         name: 'Scouting',         description: 'Patrol, territory awareness, and threat detection',      baseXp: 100,  isStatProgression: false, dailyXpCap: null },
+        { codeName: 'stat_progression', name: 'StatProgression',  description: 'Tracks XP toward stat points; excluded from discipline listings', baseXp: 6000, isStatProgression: true, dailyXpCap: 100 },
       ],
     })
 
@@ -751,6 +749,7 @@ async function main() {
         { id: 'farming_water',     description: '[internal] Daily tending action: water a PlotCrop',                                                                 cooldownHours: 24,   progressPoints: 1,    entityDailyLimit: null },
         { id: 'farming_prune',     description: '[internal] Weekly tending action: prune a PlotCrop',                                                                cooldownHours: 168,  progressPoints: 7,    entityDailyLimit: null },
         { id: 'farming_fertilize', description: '[internal] Weekly tending action: fertilize a PlotCrop',                                                            cooldownHours: 168,  progressPoints: 7,    entityDailyLimit: null },
+        { id: 'training',          description: 'Mentor selects a trainee and a discipline; grants XP in the chosen discipline plus stat progression',               cooldownHours: null, progressPoints: null, entityDailyLimit: 1   },
       ],
     })
 
@@ -1253,7 +1252,7 @@ async function main() {
         { name: 'foraging',      displayName: 'Foraging Run',        systemTypeId: 'foraging',          requiresCanMentor: false, allowApprenticesWithAdult: true,  requiresCanLeadEvents: false, minAge: null },
         { name: 'spar',          displayName: 'Spar',                systemTypeId: 'spar',              requiresCanMentor: false, allowApprenticesWithAdult: true,  requiresCanLeadEvents: false, minAge: null },
         { name: 'fight',         displayName: 'Fight',               systemTypeId: 'fight',             requiresCanMentor: false, allowApprenticesWithAdult: false, requiresCanLeadEvents: false, minAge: null },
-        { name: 'training',      displayName: 'Training Session',    systemTypeId: null,                requiresCanMentor: true,  allowApprenticesWithAdult: true,  requiresCanLeadEvents: false, minAge: null },
+        { name: 'training',      displayName: 'Training Session',    systemTypeId: 'training',          requiresCanMentor: true,  allowApprenticesWithAdult: true,  requiresCanLeadEvents: false, minAge: null },
         { name: 'crafting',      displayName: 'Crafting Session',    systemTypeId: 'crafting',          requiresCanMentor: false, allowApprenticesWithAdult: true,  requiresCanLeadEvents: false, minAge: null },
         { name: 'treat',         displayName: 'Treat Patient',       systemTypeId: 'healing',           requiresCanMentor: false, allowApprenticesWithAdult: true,  requiresCanLeadEvents: false, minAge: null },
         { name: 'diagnose',      displayName: 'Diagnose',            systemTypeId: 'diagnose',          requiresCanMentor: false, allowApprenticesWithAdult: true,  requiresCanLeadEvents: false, minAge: null },
