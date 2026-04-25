@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrimaryDatabaseService } from '../../database/primary.service';
 import { runCombatPipeline } from './engine/combat-pipeline';
-import { defaultRoller } from './engine/dice';
+import { defaultRoller } from '../../utils/dice';
 import type { CombatActionContext } from './engine/combat-action-context';
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ export interface PendingReaction {
 }
 
 export type ActionResultOutcome =
-    | { kind: 'hit'; hitRoll: number; targetAC: number; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
     | { kind: 'miss';     hitRoll: number; targetAC: number }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
@@ -798,6 +798,7 @@ export class PlayCombatService {
                     kind:                    'hit',
                     hitRoll:                 ctx.hitTotal!,
                     targetAC:                ctx.targetAC,
+                    isCritical:              ctx.isCritical,
                     diceRolls:               ctx.diceRolls,
                     totalDamage:             ctx.finalDamage,
                     damageTypeName:          ctx.profile?.damageTypeName          ?? null,

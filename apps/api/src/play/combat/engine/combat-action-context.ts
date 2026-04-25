@@ -100,6 +100,8 @@ export interface CombatActionContext {
     hitRoll:     number | null;  // raw d20 result (stored in action log)
     hitTotal:    number | null;  // hitRoll + hitModifier (shown in Discord)
     isHit:       boolean | null;
+    isCritical:  boolean;        // natural 20 — always hits, double dice
+    isFumble:    boolean;        // natural 1  — always misses
     diceRolls:   number[];
     rawDamage:   number;         // sum of dice before modifier
     finalDamage: number;         // max(0, rawDamage + damageModifier)

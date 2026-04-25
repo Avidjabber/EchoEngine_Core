@@ -32,7 +32,9 @@ export function buildActionResultComponents(result: ActionResult): object[] {
     let accentColor: number;
 
     if (outcome.kind === 'hit') {
-        const hitLine = `⚔ Rolled **${outcome.hitRoll}** vs AC ${outcome.targetAC} — **Hit!**`;
+        const hitLine = outcome.isCritical
+            ? `⚔ Rolled **${outcome.hitRoll}** vs AC ${outcome.targetAC} — ✨ **Critical Hit!**`
+            : `⚔ Rolled **${outcome.hitRoll}** vs AC ${outcome.targetAC} — **Hit!**`;
 
         const primaryType  = outcome.damageTypeName ?? 'damage';
         const primaryDice  = outcome.diceRolls.length > 0 ? ` (${outcome.diceRolls.join('+')})` : '';

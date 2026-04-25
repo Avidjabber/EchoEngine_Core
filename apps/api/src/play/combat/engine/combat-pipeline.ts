@@ -1,7 +1,7 @@
 import type { CombatActionContext, CombatActionInput } from './combat-action-context';
 import type { CombatInterceptor, CombatPhase } from './combat-interceptor.interface';
 import type { PrimaryDatabaseService } from '../../../database/primary.service';
-import type { DiceRoller } from './dice';
+import type { DiceRoller } from '../../../utils/dice';
 import { runDeclare }    from './phases/declare';
 import { runValidate }   from './phases/validate';
 import { runTarget }     from './phases/target';
@@ -53,6 +53,8 @@ function createContext(input: CombatActionInput): CombatActionContext {
         hitRoll:             null,
         hitTotal:            null,
         isHit:               null,
+        isCritical:          false,
+        isFumble:            false,
         diceRolls:            [],
         rawDamage:            0,
         finalDamage:          0,
