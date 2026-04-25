@@ -45,7 +45,7 @@ What is explicitly deferred:
 
 
 ─────────────────────────────────────────────
-STAGE 2 — EFFECTS AND REACTIONS  ← IN PROGRESS
+STAGE 2 — EFFECTS AND REACTIONS  ✓ COMPLETE
 ─────────────────────────────────────────────
 
 Adds the full effect layer and the reaction system.
@@ -64,8 +64,8 @@ Implementation order
     [x] Damage resistance / vulnerability / immunity
 
   Group 4 (heaviest — requires Groups 2 and 3):
-    [ ] Reactions
-    [ ] Pre-combat effects
+    [x] Reactions
+    [x] Pre-combat effects
 
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 

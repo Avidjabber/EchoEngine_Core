@@ -291,6 +291,8 @@ export class PlayCombatService {
             return created;
         });
 
+        await this._seedPreCombatEffects(combat.id, eligibleEntityIds);
+
         return {
             success:         true,
             activeCombatId:  combat.id,
@@ -650,26 +652,21 @@ export class PlayCombatService {
         return this._toActionResult(ctx);
     }
 
-    // Stage 1: reactions are not triggered by the pipeline yet.
-    // This endpoint exists to satisfy the HTTP surface; it is a no-op until stage 2.
     async processReaction(
-        _combatId:         number,
-        _defenderEntityId: number,
-        _profileId:        number,
-        _storedItemId:     number,
-        _attackerEntityId: number,
-        _roundNumber:      number,
+        combatId:         number,
+        defenderEntityId: number,
+        profileId:        number,
+        storedItemId:     number,
+        attackerEntityId: number,
+        roundNumber:      number,
     ): Promise<ActionResult> {
-        return {
-            actionId:         0,
-            actionLabel:      'Reaction',
-            actorName:        'Unknown',
-            targetName:       'Unknown',
-            actualTargetName: 'Unknown',
-            wasRedirected:  false,
-            outcome:        { kind: 'no_op' },
-            appliedEffects: [],
-        };
+        const ctx = await runCombatPipeline(
+            { combatId, actorEntityId: defenderEntityId, profileId, storedItemId, targetEntityId: attackerEntityId, roundNumber },
+            { db: this.db, roller: defaultRoller },
+            STAGE_2_INTERCEPTORS,
+        );
+        if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Reaction aborted');
+        return this._toActionResult(ctx);
     }
 
     // ── XP distribution ───────────────────────────────────────────────────────
@@ -1061,6 +1058,70 @@ export class PlayCombatService {
                 data:  { level: u.level, currentXp: u.currentXp },
             }))
         );
+    }
+
+    private async _seedPreCombatEffects(combatId: number, entityIds: number[]): Promise<void> {
+        const [preCombatEffects, dbParticipants] = await Promise.all([
+            this.db.entity_PreCombatEffect.findMany({
+                where:  { entityId: { in: entityIds }, expiresAt: { gt: new Date() } },
+                select: {
+                    entityId:          true,
+                    effectDefId:       true,
+                    equipmentProfileId: true,
+                    effectDef: {
+                        select: {
+                            durationRounds: true,
+                            stackBehavior:  { select: { name: true } },
+                        },
+                    },
+                    equipmentProfile: { select: { cooldownRounds: true } },
+                },
+            }),
+            this.db.activeCombat_Participant.findMany({
+                where:  { activeCombatId: combatId },
+                select: { id: true, entityId: true },
+            }),
+        ]);
+
+        if (preCombatEffects.length === 0) return;
+
+        const participantMap = new Map(dbParticipants.map(p => [p.entityId, p.id]));
+
+        for (const effect of preCombatEffects) {
+            const participantId = participantMap.get(effect.entityId);
+            if (!participantId) continue;
+
+            const stack = effect.effectDef.stackBehavior.name;
+
+            if (stack === 'ignore') {
+                const existing = await this.db.activeCombat_StatEffect.findFirst({
+                    where:  { activeCombatId: combatId, affectedParticipantId: participantId, effectDefId: effect.effectDefId },
+                    select: { id: true },
+                });
+                if (existing) continue;
+            } else if (stack === 'refresh') {
+                await this.db.activeCombat_StatEffect.deleteMany({
+                    where: { activeCombatId: combatId, affectedParticipantId: participantId, effectDefId: effect.effectDefId },
+                });
+            }
+
+            await this.db.activeCombat_StatEffect.create({
+                data: {
+                    activeCombatId:        combatId,
+                    effectDefId:           effect.effectDefId,
+                    affectedParticipantId: participantId,
+                    roundsRemaining:       effect.effectDef.durationRounds ?? null,
+                },
+            });
+
+            if (effect.equipmentProfileId && (effect.equipmentProfile?.cooldownRounds ?? 0) > 0) {
+                await this.db.activeCombat_Participant_ActionCooldown.upsert({
+                    where:  { participantId_equipmentProfileId: { participantId, equipmentProfileId: effect.equipmentProfileId } },
+                    create: { participantId, equipmentProfileId: effect.equipmentProfileId, roundsRemaining: effect.equipmentProfile!.cooldownRounds },
+                    update: { roundsRemaining: effect.equipmentProfile!.cooldownRounds },
+                });
+            }
+        }
     }
 
     private async _getActionEnergyCost(guildId: string, mode: 'spar' | 'fight'): Promise<number> {
