@@ -1,6 +1,5 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { PlayCombatService } from './play-combat.service';
-import { StartCombatTeam } from './play-combat.repository';
+import { PlayCombatService, StartCombatTeam } from './play-combat.service';
 
 interface StartCombatDto {
     guildId: string;
@@ -18,7 +17,7 @@ export class PlayCombatController {
         @Query('initiatorEntityId') initiatorEntityId: string,
         @Query('mode')              mode:              'spar' | 'fight',
     ) {
-        return this.service.getInviteTargets(guildId, parseInt(initiatorEntityId, 10), mode);
+        return this.service.findInviteTargets(guildId, parseInt(initiatorEntityId, 10), mode);
     }
 
     @Get('signup-targets')
@@ -28,7 +27,7 @@ export class PlayCombatController {
         @Query('initiatorFactionId') initiatorFactionId: string,
         @Query('mode')               mode:               'spar' | 'fight',
     ) {
-        return this.service.getSignupTargets(guildId, userId, parseInt(initiatorFactionId, 10), mode);
+        return this.service.findSignupTargets(guildId, userId, parseInt(initiatorFactionId, 10), mode);
     }
 
     @Post('start')

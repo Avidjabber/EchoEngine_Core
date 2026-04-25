@@ -256,7 +256,7 @@ async function postSecondWindPrompt(
     const msg = await channel.send({
         components: buildSecondWindComponents(activeCombatId, entityId, entityName, userId ?? undefined, round) as never,
     });
-    setTurnEntry(activeCombatId, msg.id, channel.id, entityId, entityName, userId ?? undefined, round);
+    setTurnEntry(activeCombatId, msg.id, channel.id, entityId, entityName, userId ?? undefined, round, false);
 }
 
 async function postCombatOutcome(

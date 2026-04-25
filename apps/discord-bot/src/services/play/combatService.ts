@@ -46,6 +46,7 @@ export interface AdvanceTurnResult {
     nextUserId:             string | null;
     isAiControlled:         boolean;
     isAwaitingSecondWind:   boolean;
+    allowsFleeing:          boolean;
     round:                  number;
     winningAllyFactionId:   number | null;
 }

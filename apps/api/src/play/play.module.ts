@@ -5,11 +5,10 @@ import { PlayEntitiesService } from './entities/play-entities.service';
 import { PlayEntitiesRepository } from './entities/play-entities.repository';
 import { PlayCombatController } from './combat/play-combat.controller';
 import { PlayCombatService } from './combat/play-combat.service';
-import { PlayCombatRepository } from './combat/play-combat.repository';
 
 @Module({
     controllers: [PlayEntitiesController, PlayCombatController],
-    providers:   [PlayEntitiesService, PlayEntitiesRepository, PlayCombatService, PlayCombatRepository],
+    providers:   [PlayEntitiesService, PlayEntitiesRepository, PlayCombatService],
 })
 export class PlayModule implements NestModule {
     configure(consumer: MiddlewareConsumer): void {
