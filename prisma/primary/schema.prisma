@@ -5798,9 +5798,11 @@ model ActiveCombat_Action {
   hitRoll        Int?
   hitModifier    Int?
   hit            Boolean?
+  isCritical     Boolean  @default(false)
   damageRoll     Int?
   damageModifier Int?
-  damageDealt    Int?
+  damageDealt         Int?  // primary damage only
+  elementalDamageDealt Int?  // elemental damage only; null when no elemental component
   healDealt       Int?
   reflectedDamage Int?  // damage returned to the attacker via a reflect behavior effect
   absorbedDamage  Int?  // damage intercepted by an absorb buffer instead of reducing HP
