@@ -72,8 +72,18 @@ export interface XpGrant {
     newLevel:      number;
 }
 
+export interface RoundEndEvent {
+    kind:       'dot' | 'hot';
+    entityId:   number;
+    entityName: string;
+    amount:     number;
+    hpAfter:    number;
+    defeated:   boolean;
+}
+
 export interface AdvanceTurnResult {
     combatEnded:            boolean;
+    turnEndEvents:          RoundEndEvent[];
     nextEntityId:           number | null;
     nextEntityName:         string | null;
     nextUserId:             string | null;
@@ -461,28 +471,66 @@ export class PlayCombatRepository {
         });
         if (!combat) throw new Error(`Combat ${combatId} not found`);
 
-        const active       = combat.participants;
+        const active        = combat.participants;
         const canSecondWind = combat.initiationType.canSecondWind;
 
+        // Track round boundary (for global timeout counter only — does not drive effect expiry)
+        const currentIdx    = active.findIndex(p => p.entityId === currentEntityId);
+        const nextIdx       = active.length > 0 ? (currentIdx + 1) % active.length : 0;
+        const roundBoundary = active.length > 0 && nextIdx <= currentIdx;
+
+        let newRound = combat.currentRound;
+        if (roundBoundary) newRound++;
+
+        // Fire DoT/HoT for effects sourced by the ending participant; decrement their stat effects
+        // and cooldowns. This fires on the same turn the effect was applied (durationRounds = 1
+        // fires once here, then the effect is deleted).
+        const endingParticipant = active.find(p => p.entityId === currentEntityId);
+        const turnEndEvents = endingParticipant
+            ? await this._processTurnEnd(combatId, endingParticipant.id, canSecondWind)
+            : [];
+
+        // Reload participants — DoT may have changed isDefeated states
+        type ParticipantRow = typeof active[0];
+        const freshActive: ParticipantRow[] = await this.db.activeCombat_Participant.findMany({
+            where:   { activeCombatId: combatId, hasFled: false, isDefeated: false },
+            select: {
+                entityId:         true,
+                allyFactionId:    true,
+                turnOrder:        true,
+                isAiControlled:   true,
+                inSecondWind:     true,
+                controllerUserId: true,
+                entity: {
+                    select: {
+                        name:   true,
+                        userId: true,
+                        stats:  { select: { currentHp: true } },
+                    },
+                },
+            },
+            orderBy: { turnOrder: 'asc' },
+        });
+
         // Check if combat is over: fewer than 2 distinct ally factions remain
-        const factions = new Set(active.map(p => p.allyFactionId));
+        const factions = new Set(freshActive.map(p => p.allyFactionId));
         if (factions.size < 2) {
-            const winningAllyFactionId = factions.size === 1 ? [...factions][0] : null;
+            const winningAllyFactionId = factions.size === 1 ? [...factions][0]! : null;
             const outcomeName = winningAllyFactionId !== null ? 'win' : 'draw';
             const outcome = await this.db.combatOutcome.findFirst({ where: { name: outcomeName }, select: { id: true } });
             await this.db.activeCombat.update({
                 where: { id: combatId },
                 data:  { isActive: false, winningAllyFactionId: winningAllyFactionId ?? null, ...(outcome ? { outcomeId: outcome.id } : {}), completedAt: new Date() },
             });
-            return { combatEnded: true, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, isAwaitingSecondWind: false, round: combat.currentRound, winningAllyFactionId };
+            return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, isAwaitingSecondWind: false, round: newRound, winningAllyFactionId };
         }
 
-        const currentIdx = active.findIndex(p => p.entityId === currentEntityId);
-        const nextIdx    = (currentIdx + 1) % active.length;
-        const next       = active[nextIdx]!;
+        // Find next participant by turn order: first with turnOrder > current's, else wrap to first
+        const currentTurnOrder = active.find(p => p.entityId === currentEntityId)?.turnOrder ?? 0;
+        const next = freshActive.find(p => p.turnOrder > currentTurnOrder) ?? freshActive[0]!;
 
-        let newRound = combat.currentRound;
-        if (nextIdx <= currentIdx) newRound++;
+        // Decrement behavior effects sourced by the next participant at the start of their turn
+        await this._processTurnStart(combatId, next.id);
 
         await this.db.activeCombat.update({
             where: { id: combatId },
@@ -496,15 +544,148 @@ export class PlayCombatRepository {
             (next.entity.stats?.currentHp ?? 1) <= 0;
 
         return {
-            combatEnded:           false,
-            nextEntityId:          next.entityId,
-            nextEntityName:        next.entity.name,
-            nextUserId:            next.controllerUserId ?? next.entity.userId ?? null,
-            isAiControlled:        next.isAiControlled,
+            combatEnded:          false,
+            turnEndEvents,
+            nextEntityId:         next.entityId,
+            nextEntityName:       next.entity.name,
+            nextUserId:           next.controllerUserId ?? next.entity.userId ?? null,
+            isAiControlled:       next.isAiControlled,
             isAwaitingSecondWind,
-            round:                 newRound,
-            winningAllyFactionId:  null,
+            round:                newRound,
+            winningAllyFactionId: null,
         };
+    }
+
+    // Fires at the end of a participant's turn.
+    // Rolls DoT/HoT for all stat effects they sourced, decrements those effects, and decrements
+    // their action cooldowns. A durationRounds = 1 effect fires here then is immediately deleted.
+    private async _processTurnEnd(combatId: number, participantId: number, canSecondWind: boolean): Promise<RoundEndEvent[]> {
+        const events: RoundEndEvent[] = [];
+        const rollDice = (count: number, sides: number): number[] =>
+            Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
+
+        // Load stat effects sourced by this participant, with DoT/HoT defs on affected targets
+        const statEffects = await this.db.activeCombat_StatEffect.findMany({
+            where: {
+                activeCombatId:      combatId,
+                sourceParticipantId: participantId,
+                affectedParticipant: { isDefeated: false, hasFled: false },
+            },
+            select: {
+                id:                    true,
+                roundsRemaining:       true,
+                affectedParticipantId: true,
+                affectedParticipant: {
+                    select: {
+                        id:             true,
+                        entityId:       true,
+                        inSecondWind:   true,
+                        isAiControlled: true,
+                        entity: {
+                            select: {
+                                name:  true,
+                                stats: { select: { currentHp: true, maxHp: true } },
+                            },
+                        },
+                    },
+                },
+                effectDef: {
+                    select: {
+                        damageOverTime: { select: { diceCount: true, diceSides: true, flatDamage: true } },
+                        healOverTime:   { select: { diceCount: true, diceSides: true, flatHeal: true } },
+                    },
+                },
+            },
+        });
+
+        // Aggregate DoT and HoT per affected participant
+        type ParticipantInfo = typeof statEffects[0]['affectedParticipant'];
+        const participantById  = new Map<number, ParticipantInfo>();
+        const dotByParticipant = new Map<number, number>();
+        const hotByParticipant = new Map<number, number>();
+
+        for (const effect of statEffects) {
+            const p = effect.affectedParticipant;
+            participantById.set(p.id, p);
+            for (const dot of effect.effectDef.damageOverTime) {
+                const total = rollDice(dot.diceCount, dot.diceSides).reduce((a, b) => a + b, 0) + dot.flatDamage;
+                dotByParticipant.set(p.id, (dotByParticipant.get(p.id) ?? 0) + total);
+            }
+            for (const hot of effect.effectDef.healOverTime) {
+                const total = rollDice(hot.diceCount, hot.diceSides).reduce((a, b) => a + b, 0) + hot.flatHeal;
+                hotByParticipant.set(p.id, (hotByParticipant.get(p.id) ?? 0) + total);
+            }
+        }
+
+        // Track running HP to chain HoT → DoT on the same target
+        const hpSnapshot = new Map<number, number>();
+        for (const [pid, p] of participantById) {
+            hpSnapshot.set(pid, p.entity.stats?.currentHp ?? 0);
+        }
+
+        // Apply HoT first
+        for (const [targetParticipantId, heal] of hotByParticipant) {
+            const p     = participantById.get(targetParticipantId)!;
+            const maxHp = p.entity.stats?.maxHp ?? (hpSnapshot.get(targetParticipantId) ?? 0);
+            const newHp = Math.min(maxHp, (hpSnapshot.get(targetParticipantId) ?? 0) + heal);
+            hpSnapshot.set(targetParticipantId, newHp);
+            await this.db.entityStats.update({ where: { entityId: p.entityId }, data: { currentHp: newHp } });
+            events.push({ kind: 'hot', entityId: p.entityId, entityName: p.entity.name, amount: heal, hpAfter: newHp, defeated: false });
+        }
+
+        // Apply DoT
+        for (const [targetParticipantId, damage] of dotByParticipant) {
+            const p     = participantById.get(targetParticipantId)!;
+            const newHp = (hpSnapshot.get(targetParticipantId) ?? 0) - damage;
+            hpSnapshot.set(targetParticipantId, newHp);
+            await this.db.entityStats.update({ where: { entityId: p.entityId }, data: { currentHp: newHp } });
+            let defeated = false;
+            if (newHp <= 0 && (p.isAiControlled || !canSecondWind || p.inSecondWind)) {
+                await this.db.activeCombat_Participant.update({
+                    where: { id: targetParticipantId },
+                    data:  { isDefeated: true },
+                });
+                defeated = true;
+            }
+            // If HP ≤ 0 and second wind is available: leave HP at newHp;
+            // advanceTurn detects isAwaitingSecondWind when it's their next turn.
+            events.push({ kind: 'dot', entityId: p.entityId, entityName: p.entity.name, amount: damage, hpAfter: Math.max(0, newHp), defeated });
+        }
+
+        // Decrement stat effects sourced by this participant (delete at 1 → fires this turn then gone)
+        await this.db.$transaction([
+            this.db.activeCombat_StatEffect.deleteMany({
+                where: { activeCombatId: combatId, sourceParticipantId: participantId, roundsRemaining: 1 },
+            }),
+            this.db.activeCombat_StatEffect.updateMany({
+                where: { activeCombatId: combatId, sourceParticipantId: participantId, roundsRemaining: { gt: 1 } },
+                data:  { roundsRemaining: { decrement: 1 } },
+            }),
+            // Decrement this participant's action cooldowns
+            this.db.activeCombat_Participant_ActionCooldown.deleteMany({
+                where: { participantId, roundsRemaining: 1 },
+            }),
+            this.db.activeCombat_Participant_ActionCooldown.updateMany({
+                where: { participantId, roundsRemaining: { gt: 1 } },
+                data:  { roundsRemaining: { decrement: 1 } },
+            }),
+        ]);
+
+        return events;
+    }
+
+    // Fires at the start of a participant's turn.
+    // Decrements behavior effects they sourced, deleting any that reach 0.
+    private async _processTurnStart(combatId: number, participantId: number): Promise<void> {
+        await this.db.$transaction([
+            this.db.activeCombat_BehaviorEffect.deleteMany({
+                where: { activeCombatId: combatId, sourceParticipantId: participantId, roundsRemaining: 1 },
+            }),
+            this.db.activeCombat_BehaviorEffect.updateMany({
+                where: { activeCombatId: combatId, sourceParticipantId: participantId, roundsRemaining: { gt: 1 } },
+                data:  { roundsRemaining: { decrement: 1 } },
+            }),
+        ]);
     }
 
     async acceptSecondWind(combatId: number, entityId: number): Promise<void> {
@@ -731,7 +912,7 @@ export class PlayCombatRepository {
             if (actorPart) {
                 await this.db.activeCombat_BehaviorEffect.upsert({
                     where:  { affectedParticipantId_effectTypeId: { affectedParticipantId: actorPart.id, effectTypeId: profile.behaviorEffectTypeId } },
-                    create: { activeCombatId: combatId, affectedParticipantId: actorPart.id, linkedParticipantId: linkedPart?.id ?? null, effectTypeId: profile.behaviorEffectTypeId, roundsRemaining: rounds },
+                    create: { activeCombatId: combatId, affectedParticipantId: actorPart.id, linkedParticipantId: linkedPart?.id ?? null, sourceParticipantId: actorPart.id, effectTypeId: profile.behaviorEffectTypeId, roundsRemaining: rounds },
                     update: { roundsRemaining: rounds, linkedParticipantId: linkedPart?.id ?? null },
                 });
             }

@@ -29,8 +29,18 @@ export interface AvailableAction {
     isOnCooldown:  boolean;
 }
 
+export interface RoundEndEvent {
+    kind:       'dot' | 'hot';
+    entityId:   number;
+    entityName: string;
+    amount:     number;
+    hpAfter:    number;
+    defeated:   boolean;
+}
+
 export interface AdvanceTurnResult {
     combatEnded:            boolean;
+    turnEndEvents:          RoundEndEvent[];
     nextEntityId:           number | null;
     nextEntityName:         string | null;
     nextUserId:             string | null;

@@ -2,7 +2,7 @@ import { ButtonInteraction, MessageFlags, TextChannel, ThreadChannel } from 'dis
 import { colors } from '../../../../../core/colors';
 import { messages } from '@echoengine/shared';
 import { fetchAvailableActions, advanceTurn, distributeCombatXp, acceptSecondWind, declineSecondWind } from '../../../../../services/play/combatService';
-import type { AdvanceTurnResult } from '../../../../../services/play/combatService';
+import type { AdvanceTurnResult, RoundEndEvent } from '../../../../../services/play/combatService';
 import { buildActionPickerComponents } from './combatActionComponents';
 import { buildTurnPromptComponents, buildTurnEndedComponents, buildSecondWindComponents, buildCombatOutcomeComponents } from './combatTurnComponents';
 import { getTurnEntry, setTurnEntry, deleteTurnEntry } from './combatTurnState';
@@ -140,6 +140,24 @@ export async function handlePaSwDecline(interaction: ButtonInteraction): Promise
     await processAdvanceResult(channel, activeCombatId, result.value);
 }
 
+async function postTurnEndEvents(
+    channel: TextChannel | ThreadChannel,
+    events:  RoundEndEvent[],
+): Promise<void> {
+    if (events.length === 0) return;
+    const lines = events.map(e => {
+        if (e.kind === 'dot') {
+            return e.defeated
+                ? `-# **${e.entityName}** takes ${e.amount} damage and is defeated.`
+                : `-# **${e.entityName}** takes ${e.amount} damage (${e.hpAfter} HP remaining).`;
+        }
+        return `-# **${e.entityName}** heals for ${e.amount} (${e.hpAfter} HP remaining).`;
+    });
+    await channel.send({
+        components: [{ type: 17, accent_color: colors.warning, components: [{ type: 10, content: lines.join('\n') }] }],
+    } as never).catch(() => null);
+}
+
 async function processAdvanceResult(
     channel:        TextChannel | ThreadChannel,
     activeCombatId: number,
@@ -147,9 +165,12 @@ async function processAdvanceResult(
 ): Promise<void> {
     if (advance.combatEnded) {
         deleteTurnEntry(activeCombatId);
+        await postTurnEndEvents(channel, advance.turnEndEvents);
         await postCombatOutcome(channel, activeCombatId, advance.winningAllyFactionId);
         return;
     }
+
+    await postTurnEndEvents(channel, advance.turnEndEvents);
 
     let current = advance;
     while (current.isAiControlled && !current.combatEnded) {
@@ -160,6 +181,7 @@ async function processAdvanceResult(
         const skipResult = await advanceTurn(activeCombatId, current.nextEntityId!);
         if (!skipResult.success || !skipResult.value) { deleteTurnEntry(activeCombatId); return; }
         current = skipResult.value;
+        await postTurnEndEvents(channel, current.turnEndEvents);
     }
 
     if (current.combatEnded) {

@@ -5700,8 +5700,9 @@ model ActiveCombat_Participant {
   entity          Entity                    @relation(fields: [entityId],       references: [id], onDelete: Cascade)
   dropTable       DropTable?                @relation(fields: [dropTableId],    references: [id], onDelete: SetNull)
   actionCooldowns   ActiveCombat_Participant_ActionCooldown[]
-  behaviorEffects   ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectTarget")
-  linkedBehaviors   ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectLinked")
+  behaviorEffects        ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectTarget")
+  linkedBehaviors        ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectLinked")
+  sourcedBehaviorEffects ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectSource")
   statEffects       ActiveCombat_StatEffect[]     @relation("StatEffectTarget")
   statEffectsCaused ActiveCombat_StatEffect[]     @relation("StatEffectSource")
 
@@ -5728,7 +5729,8 @@ model ActiveCombat_Participant_ActionCooldown {
 }
 
 // Persistent behavioral effects lasting one or more rounds (guard, taunt, parry, etc.).
-// At round start: decrement roundsRemaining and delete rows that reach 0.
+// Duration counts against the SOURCE participant's turn cycles, not global rounds.
+// Decremented at the START of the source participant's next turn; deleted when it reaches 0.
 //
 // STACKING: @@unique([affectedParticipantId, effectTypeId]) enforces one active instance per
 // entity per behavior type. Re-applying the same effect type always refreshes (upserts)
@@ -5742,6 +5744,9 @@ model ActiveCombat_Participant_ActionCooldown {
 //   reflect: affectedParticipantId = the reflecting entity; linkedParticipantId = null
 //            (attacker is resolved at hit-time; not pre-linked)
 //
+// sourceParticipantId: the participant who activated this effect. Always set for item/ability sources.
+//   Duration counts against this participant's turn cycles regardless of affectedParticipantId semantics.
+//
 // MAGNITUDE FIELDS — populated at application time from the item or ability; null if not applicable.
 //   flatModifier    — flat numeric value: absorb buffer HP, flat reflected damage amount, flat damage blocked, etc.
 //   percentModifier — fractional value (0.0–1.0): reflect % of incoming damage, guard damage reduction %, etc.
@@ -5753,6 +5758,7 @@ model ActiveCombat_BehaviorEffect {
 
   affectedParticipantId Int
   linkedParticipantId   Int?
+  sourceParticipantId   Int?
 
   roundsRemaining  Int
   flatModifier     Int?    // flat modification value; usage depends on effect type (see comment above)
@@ -5762,12 +5768,14 @@ model ActiveCombat_BehaviorEffect {
   effectType          CombatEffectType          @relation("ActiveBehaviorEffectType",  fields: [effectTypeId],           references: [id], onDelete: Restrict)
   affectedParticipant ActiveCombat_Participant  @relation("BehaviorEffectTarget",      fields: [affectedParticipantId],  references: [id], onDelete: Cascade)
   linkedParticipant   ActiveCombat_Participant? @relation("BehaviorEffectLinked",       fields: [linkedParticipantId],    references: [id], onDelete: Cascade)
+  sourceParticipant   ActiveCombat_Participant? @relation("BehaviorEffectSource",       fields: [sourceParticipantId],    references: [id], onDelete: SetNull)
 
   @@unique([affectedParticipantId, effectTypeId])
   @@index([activeCombatId])
   @@index([effectTypeId])
   @@index([affectedParticipantId])
   @@index([linkedParticipantId])
+  @@index([sourceParticipantId])
 }
 
 // One action taken during a combat turn — stored for Discord message reconstruction.
