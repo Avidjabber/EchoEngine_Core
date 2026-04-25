@@ -1,4 +1,4 @@
-import { ButtonInteraction, MessageFlags, TextChannel } from 'discord.js';
+import { ButtonInteraction, ChannelType, ForumChannel, MessageFlags, TextChannel } from 'discord.js';
 import { colors } from '../../../../../core/colors';
 import { messages } from '@echoengine/shared';
 import {
@@ -9,6 +9,8 @@ import { buildTeamComponents, buildControlComponents } from './setupComponents';
 import { buildEntityPickerComponents } from './entityPickerComponents';
 import { setCachedPickerEntities, invalidatePickerCache } from './entityPickerCache';
 import { fetchInviteTargets, fetchSignupTargets, startCombat } from '../../../../../services/play/combatService';
+import { buildCombatAnnouncementComponents, buildCombatStateComponents, buildTurnPromptComponents } from './combatTurnComponents';
+import { setTurnEntry } from './combatTurnState';
 
 function errReply(interaction: ButtonInteraction, content: string) {
     return interaction.editReply({
@@ -197,12 +199,13 @@ export async function handlePaCombatStart(interaction: ButtonInteraction): Promi
         if (msg) await msg.delete().catch(() => null);
     }
 
-    // Snapshot state before cleanup
+    // Snapshot state before cleanup (includes userId for turn pings)
     const snapshotTeams = setup.teams.map(t => ({
         messageId: t.messageId,
-        entities:  t.entities.map(e => ({ entityId: e.entityId, entityName: e.entityName })),
+        entities:  t.entities.map(e => ({ entityId: e.entityId, entityName: e.entityName, userId: e.userId })),
     }));
     const entityNameMap = new Map(snapshotTeams.flatMap(t => t.entities.map(e => [e.entityId, e.entityName])));
+    const entityUserMap = new Map(snapshotTeams.flatMap(t => t.entities.map(e => [e.entityId, e.userId])));
     const { guildId, type, controlMessageId } = setup;
 
     const result = await startCombat(
@@ -252,27 +255,67 @@ export async function handlePaCombatStart(interaction: ButtonInteraction): Promi
         return;
     }
 
-    // Build team listing from remaining entities (removed ones filtered out)
-    const removedSet = new Set(removedEntityIds);
-    const remainingTeams = snapshotTeams
-        .map((t, i) => ({
-            label:    `Team ${i + 1}`,
-            entities: t.entities.filter(e => !removedSet.has(e.entityId)),
-        }))
-        .filter(t => t.entities.length > 0);
-
+    const { activeCombatId, participants } = combatResult;
     const typeLabel = type === 'spar' ? 'Spar' : 'Fight';
-    let content = `## ${typeLabel} has started!\n`;
-    content += remainingTeams.map(t => `**${t.label}:** ${t.entities.map(e => e.entityName).join(', ')}`).join('\n');
-    if (removedNames.length > 0) {
-        content += `\n-# ${removedNames.join(', ')} did not have enough energy and were removed before the session began.`;
-    }
 
-    await channel.send({
-        components: [{
-            type:         17,
-            accent_color: colors.special,
-            components:   [{ type: 10, content }],
-        }],
-    } as never);
+    // Channel announcement — @mentions everyone so they get notified
+    const announcementMsg = await channel.send({
+        components: buildCombatAnnouncementComponents(
+            activeCombatId, type, participants, entityNameMap, entityUserMap, removedNames,
+        ) as never,
+    });
+
+    // Create a thread off the announcement; fall back to posting in the channel if unsupported
+    const threadName = buildCombatThreadName(typeLabel, participants, entityNameMap);
+    const thread = await (async () => {
+        try {
+            if ((channel as { type: ChannelType }).type === ChannelType.GuildForum) {
+                return await (channel as unknown as ForumChannel).threads.create({
+                    name:                threadName,
+                    autoArchiveDuration: 1440,
+                    message:             { content: `⚔ ${typeLabel} — Combat #${activeCombatId}` },
+                });
+            }
+            return await (announcementMsg as any).startThread({ name: threadName, autoArchiveDuration: 1440 });
+        } catch {
+            return null;
+        }
+    })();
+
+    const postTarget = thread ?? channel;
+
+    // Post combat state (teams + initiative order) in the thread
+    await postTarget.send({
+        components: buildCombatStateComponents(activeCombatId, type, participants, entityNameMap) as never,
+    });
+
+    // Post first-turn prompt and seed turn state
+    const first = participants[0];
+    if (first) {
+        const firstEntityName = entityNameMap.get(first.entityId) ?? 'Unknown';
+        const firstUserId     = entityUserMap.get(first.entityId);
+        const turnMsg = await postTarget.send({
+            components: buildTurnPromptComponents(
+                activeCombatId, first.entityId, firstEntityName, firstUserId, 1, 0,
+            ) as never,
+        });
+        setTurnEntry(activeCombatId, turnMsg.id, postTarget.id, first.entityId, firstEntityName, firstUserId, 1);
+    }
+}
+
+function buildCombatThreadName(
+    typeLabel:    string,
+    participants: Array<{ entityId: number; allyFactionId: number }>,
+    nameMap:      Map<number, string>,
+): string {
+    const teamGroups = new Map<number, string[]>();
+    for (const p of participants) {
+        if (!teamGroups.has(p.allyFactionId)) teamGroups.set(p.allyFactionId, []);
+        teamGroups.get(p.allyFactionId)!.push(nameMap.get(p.entityId) ?? 'Unknown');
+    }
+    const teamStrings = [...teamGroups.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, names]) => names.join(' & '));
+    const name = `${typeLabel}: ${teamStrings.join(' vs ')}`;
+    return name.length <= 100 ? name : name.slice(0, 97) + '…';
 }
