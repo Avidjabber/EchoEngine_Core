@@ -6,7 +6,7 @@ interface InfoCache {
 }
 
 const cache  = new Map<string, InfoCache>();
-const TTL_MS = 30 * 60 * 1000;
+const TTL_MS = 20 * 60 * 1000;
 
 export function getCachedEnvConditionInfo(guildId: string): EnvConditionInfoData | null {
     const entry = cache.get(guildId);

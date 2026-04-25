@@ -1,7 +1,7 @@
 import { ButtonInteraction, MessageFlags } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
-import { getCachedProficiencyList } from './listCache';
+import { getCachedProficiencyList, invalidateProficiencyListCache } from './listCache';
 import { buildProficiencyListComponents, buildProficiencyListInfoComponents } from './listComponents';
 import { fetchProficiencyByCodeName } from '../../../../services/model/proficiencyPackService';
 
@@ -80,5 +80,6 @@ export async function handleProfListBack(interaction: ButtonInteraction): Promis
 // customId: prof_list_done
 export async function handleProfListDone(interaction: ButtonInteraction): Promise<void> {
     await interaction.deferUpdate();
+    invalidateProficiencyListCache(interaction.guildId!);
     await interaction.deleteReply();
 }

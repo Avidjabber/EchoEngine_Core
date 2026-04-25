@@ -2,7 +2,7 @@ import { ButtonInteraction, MessageFlags } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
 import { fetchEnvConditionInfoData } from '../../../../services/model/envConditionPackService';
-import { getCachedEnvConditionInfo, setCachedEnvConditionInfo } from './infoState';
+import { getCachedEnvConditionInfo, setCachedEnvConditionInfo, invalidateEnvConditionInfoCache } from './infoState';
 import { buildEnvConditionInfoListComponents, buildEnvConditionInfoDetailComponents } from './infoComponents';
 import type { EnvConditionInfoData } from '../../../../services/model/envConditionPackService';
 
@@ -79,5 +79,6 @@ export async function handleEcInfoPage(interaction: ButtonInteraction): Promise<
 // customId: ec_info_done
 export async function handleEcInfoDone(interaction: ButtonInteraction): Promise<void> {
     await interaction.deferUpdate();
+    invalidateEnvConditionInfoCache(interaction.guildId!);
     await interaction.deleteReply();
 }

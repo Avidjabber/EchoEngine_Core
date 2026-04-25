@@ -8,14 +8,27 @@ export interface ProficiencyUpdateState {
     statOptions:      string[];
 }
 
-const stateMap = new Map<string, ProficiencyUpdateState>();
+const TTL_MS = 20 * 60 * 1000;
+
+interface Entry {
+    data:      ProficiencyUpdateState;
+    expiresAt: number;
+}
+
+const stateMap = new Map<string, Entry>();
 
 export function getUpdateState(userId: string, guildId: string): ProficiencyUpdateState | undefined {
-    return stateMap.get(`${userId}_${guildId}`);
+    const entry = stateMap.get(`${userId}_${guildId}`);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+        stateMap.delete(`${userId}_${guildId}`);
+        return undefined;
+    }
+    return entry.data;
 }
 
 export function setUpdateState(userId: string, guildId: string, s: ProficiencyUpdateState): void {
-    stateMap.set(`${userId}_${guildId}`, s);
+    stateMap.set(`${userId}_${guildId}`, { data: s, expiresAt: Date.now() + TTL_MS });
 }
 
 export function clearUpdateState(userId: string, guildId: string): void {

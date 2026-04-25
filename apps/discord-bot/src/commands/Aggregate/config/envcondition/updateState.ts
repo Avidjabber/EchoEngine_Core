@@ -27,18 +27,31 @@ export interface EnvConditionUpdateState {
     pickerPage:      number;
 }
 
-const store = new Map<string, EnvConditionUpdateState>();
+const TTL_MS = 20 * 60 * 1000;
+
+interface Entry {
+    data:      EnvConditionUpdateState;
+    expiresAt: number;
+}
+
+const store = new Map<string, Entry>();
 
 function key(userId: string, guildId: string): string {
     return `${userId}_${guildId}`;
 }
 
 export function getUpdateState(userId: string, guildId: string): EnvConditionUpdateState | undefined {
-    return store.get(key(userId, guildId));
+    const entry = store.get(key(userId, guildId));
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+        store.delete(key(userId, guildId));
+        return undefined;
+    }
+    return entry.data;
 }
 
 export function setUpdateState(userId: string, guildId: string, state: EnvConditionUpdateState): void {
-    store.set(key(userId, guildId), state);
+    store.set(key(userId, guildId), { data: state, expiresAt: Date.now() + TTL_MS });
 }
 
 export function clearUpdateState(userId: string, guildId: string): void {
