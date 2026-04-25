@@ -8,7 +8,7 @@ import {
 import { buildTeamComponents, buildControlComponents } from './setupComponents';
 import { buildEntityPickerComponents } from './entityPickerComponents';
 import { setCachedPickerEntities, invalidatePickerCache } from './entityPickerCache';
-import { fetchInviteTargets, fetchSignupTargets } from '../../../../../services/play/combatService';
+import { fetchInviteTargets, fetchSignupTargets, startCombat } from '../../../../../services/play/combatService';
 
 function errReply(interaction: ButtonInteraction, content: string) {
     return interaction.editReply({
@@ -181,7 +181,6 @@ export async function handlePaCombatCancel(interaction: ButtonInteraction): Prom
 }
 
 // customId: pa_combat_start:{setupId}
-// Energy check and removal of ineligible entities happens here; actual combat record creation is a future step.
 export async function handlePaCombatStart(interaction: ButtonInteraction): Promise<void> {
     const setupId = interaction.customId.split(':')[1];
 
@@ -192,25 +191,88 @@ export async function handlePaCombatStart(interaction: ButtonInteraction): Promi
 
     const channel = interaction.channel as TextChannel;
 
-    // Delete all pending invites — they can no longer accept
+    // Delete pending invites — they can no longer accept
     for (const invite of setup.pendingInvites) {
         const msg = await channel.messages.fetch(invite.messageId).catch(() => null);
         if (msg) await msg.delete().catch(() => null);
     }
-    setup.pendingInvites = [];
 
-    // TODO: fetch current energy for all entities, remove those below the action's energyCost,
-    //       remove empty teams, abort if fewer than 2 teams remain with entities,
-    //       create the combat instance DB record, and update/delete setup messages.
-    //       For now, mark control message as "Starting..." pending full implementation.
-    const controlMsg = await channel.messages.fetch(setup.controlMessageId).catch(() => null);
-    if (controlMsg) {
-        await controlMsg.edit({
+    // Snapshot state before cleanup
+    const snapshotTeams = setup.teams.map(t => ({
+        messageId: t.messageId,
+        entities:  t.entities.map(e => ({ entityId: e.entityId, entityName: e.entityName })),
+    }));
+    const entityNameMap = new Map(snapshotTeams.flatMap(t => t.entities.map(e => [e.entityId, e.entityName])));
+    const { guildId, type, controlMessageId } = setup;
+
+    const result = await startCombat(
+        guildId,
+        type,
+        snapshotTeams.map(t => ({ entities: t.entities.map(e => ({ entityId: e.entityId })) })),
+    );
+
+    // Clean up all setup messages
+    for (const team of snapshotTeams) {
+        const msg = await channel.messages.fetch(team.messageId).catch(() => null);
+        if (msg) await msg.delete().catch(() => null);
+    }
+    const controlMsg = await channel.messages.fetch(controlMessageId).catch(() => null);
+    if (controlMsg) await controlMsg.delete().catch(() => null);
+
+    deleteSetup(setupId);
+    invalidatePickerCache(setupId);
+
+    if (!result.success || !result.value) {
+        await channel.send({
             components: [{
                 type:         17,
-                accent_color: colors.special,
-                components:   [{ type: 10, content: '-# Combat starting… (not yet fully implemented)' }],
+                accent_color: colors.error,
+                components:   [{ type: 10, content: 'Something went wrong starting the session. Please try again.' }],
             }],
         } as never);
+        return;
     }
+
+    const combatResult = result.value;
+    const { removedEntityIds } = combatResult;
+    const removedNames = removedEntityIds.map((id: number) => entityNameMap.get(id)).filter(Boolean) as string[];
+
+    if (!combatResult.success) {
+        let content = `The ${type} session could not start — not enough eligible teams.`;
+        if (removedNames.length > 0) {
+            content += `\n-# ${removedNames.join(', ')} did not have enough energy to participate.`;
+        }
+        await channel.send({
+            components: [{
+                type:         17,
+                accent_color: colors.error,
+                components:   [{ type: 10, content }],
+            }],
+        } as never);
+        return;
+    }
+
+    // Build team listing from remaining entities (removed ones filtered out)
+    const removedSet = new Set(removedEntityIds);
+    const remainingTeams = snapshotTeams
+        .map((t, i) => ({
+            label:    `Team ${i + 1}`,
+            entities: t.entities.filter(e => !removedSet.has(e.entityId)),
+        }))
+        .filter(t => t.entities.length > 0);
+
+    const typeLabel = type === 'spar' ? 'Spar' : 'Fight';
+    let content = `## ${typeLabel} has started!\n`;
+    content += remainingTeams.map(t => `**${t.label}:** ${t.entities.map(e => e.entityName).join(', ')}`).join('\n');
+    if (removedNames.length > 0) {
+        content += `\n-# ${removedNames.join(', ')} did not have enough energy and were removed before the session began.`;
+    }
+
+    await channel.send({
+        components: [{
+            type:         17,
+            accent_color: colors.special,
+            components:   [{ type: 10, content }],
+        }],
+    } as never);
 }

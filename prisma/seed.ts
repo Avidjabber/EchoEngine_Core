@@ -441,9 +441,10 @@ async function main() {
     await prisma.combatInitiationType.createMany({
       skipDuplicates: true,
       data: [
-        { name: 'spar',  canResultInDeath: false, isScripted: false, allowsFleeing: false, canSecondWind: true },
-        { name: 'event', canResultInDeath: true,  isScripted: false, allowsFleeing: true,  canSecondWind: true },
-        { name: 'boss',  canResultInDeath: true,  isScripted: true,  allowsFleeing: true,  canSecondWind: true },
+        { name: 'spar',  canResultInDeath: false, isScripted: false, allowsFleeing: false, canSecondWind: false },
+        { name: 'fight', canResultInDeath: true,  isScripted: false, allowsFleeing: false, canSecondWind: true  },
+        { name: 'event', canResultInDeath: true,  isScripted: false, allowsFleeing: true,  canSecondWind: true  },
+        { name: 'boss',  canResultInDeath: true,  isScripted: true,  allowsFleeing: true,  canSecondWind: true  },
       ],
     })
 

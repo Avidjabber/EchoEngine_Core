@@ -9,6 +9,10 @@ export interface CombatTargetEntity {
     userId:      string;
 }
 
+export type StartCombatResponse =
+    | { success: true;  activeCombatId: number; removedEntityIds: number[] }
+    | { success: false;                          removedEntityIds: number[] };
+
 export function fetchInviteTargets(guildId: string, initiatorEntityId: number, mode: 'spar' | 'fight') {
     return apiClient.get<CombatTargetEntity[]>('/play/combat/invite-targets', {
         guildId,
@@ -24,4 +28,12 @@ export function fetchSignupTargets(guildId: string, userId: string, initiatorFac
         initiatorFactionId: String(initiatorFactionId),
         mode,
     });
+}
+
+export function startCombat(
+    guildId: string,
+    type:    'spar' | 'fight',
+    teams:   Array<{ entities: Array<{ entityId: number }> }>,
+) {
+    return apiClient.post<StartCombatResponse>('/play/combat/start', { guildId, type, teams });
 }

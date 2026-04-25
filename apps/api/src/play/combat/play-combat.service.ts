@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PlayCombatRepository } from './play-combat.repository';
+import { PlayCombatRepository, StartCombatTeam } from './play-combat.repository';
 
 @Injectable()
 export class PlayCombatService {
@@ -11,5 +11,9 @@ export class PlayCombatService {
 
     getSignupTargets(guildId: string, userId: string, initiatorFactionId: number, mode: 'spar' | 'fight') {
         return this.repo.findSignupTargets(guildId, userId, initiatorFactionId, mode);
+    }
+
+    startCombat(guildId: string, type: 'spar' | 'fight', teams: StartCombatTeam[]) {
+        return this.repo.startCombat(guildId, type, teams);
     }
 }
