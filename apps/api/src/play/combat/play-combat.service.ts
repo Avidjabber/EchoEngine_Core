@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrimaryDatabaseService } from '../../database/primary.service';
 import { runCombatPipeline } from './engine/combat-pipeline';
+import { STAGE_2_INTERCEPTORS } from './engine/interceptors';
 import { defaultRoller, rollDice } from '../../utils/dice';
 import type { CombatActionContext } from './engine/combat-action-context';
 
@@ -641,6 +642,7 @@ export class PlayCombatService {
         const ctx = await runCombatPipeline(
             { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber },
             { db: this.db, roller: defaultRoller },
+            STAGE_2_INTERCEPTORS,
         );
 
         if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Action aborted');
@@ -664,8 +666,9 @@ export class PlayCombatService {
             actorName:        'Unknown',
             targetName:       'Unknown',
             actualTargetName: 'Unknown',
-            wasRedirected:    false,
-            outcome:          { kind: 'no_op' },
+            wasRedirected:  false,
+            outcome:        { kind: 'no_op' },
+            appliedEffects: [],
         };
     }
 
@@ -850,7 +853,7 @@ export class PlayCombatService {
         };
     }
 
-    private async _processTurnEnd(combatId: number, participantId: number, _canSecondWind: boolean): Promise<RoundEndEvent[]> {
+    private async _processTurnEnd(_combatId: number, participantId: number, _canSecondWind: boolean): Promise<RoundEndEvent[]> {
         // Collect active DoT/HoT effects before decrementing so effects at roundsRemaining=1 still fire.
         const activeEffects = await this.db.activeCombat_StatEffect.findMany({
             where: { affectedParticipantId: participantId },

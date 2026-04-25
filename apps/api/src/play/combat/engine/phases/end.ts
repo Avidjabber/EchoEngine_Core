@@ -47,7 +47,8 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
     ]);
 
     // ── Behavior effect ───────────────────────────────────────────────────────
-    if (profile.behaviorEffectTypeId && profile.durationRounds > 0 && ctx.actorParticipantId !== null) {
+    if (profile.behaviorEffectTypeId && profile.durationRounds > 0 && ctx.actorParticipantId !== null
+        && (!profile.dealsDamage || ctx.isHit)) {
         // guard:  actor is the guardian; target is the entity being protected
         // taunt:  target is the taunted entity; actor is the taunter
         // others: actor applies the effect to themselves
@@ -56,7 +57,9 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
 
         const affectedId = isTaunt
             ? (ctx.targetParticipant?.id ?? ctx.actorParticipantId)
-            : ctx.actorParticipantId;
+            : isGuard
+                ? ctx.actorParticipantId
+                : (ctx.targetParticipant?.id ?? ctx.actorParticipantId);
 
         const linkedId = isGuard
             ? (ctx.targetParticipant?.id ?? null)
@@ -93,7 +96,8 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
     }
 
     // ── Stat effects ──────────────────────────────────────────────────────────
-    if (ctx.targetParticipant && ctx.actorParticipantId !== null) {
+    if (ctx.targetParticipant && ctx.actorParticipantId !== null
+        && (!profile.dealsDamage || ctx.isHit)) {
         const profileStatEffects = await db.itemEquipmentProfile_StatEffect.findMany({
             where:  { equipmentProfileId: input.profileId },
             select: {

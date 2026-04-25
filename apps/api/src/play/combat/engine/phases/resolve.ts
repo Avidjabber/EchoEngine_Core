@@ -1,18 +1,34 @@
 import type { CombatActionContext } from '../combat-action-context';
 import type { PipelineServices } from '../combat-pipeline';
+import type { DiceRoller } from '../../../../utils/dice';
 import { rollDice } from '../../../../utils/dice';
 
+function rollWithAdvantage(sides: number, adv: 'advantage' | 'disadvantage' | null, roller: DiceRoller): number {
+    if (adv === null) return rollDice(1, sides, roller)[0]!;
+    const [a, b] = rollDice(2, sides, roller) as [number, number];
+    return adv === 'advantage' ? Math.max(a, b) : Math.min(a, b);
+}
+
+function rollDiceWithAdvantage(count: number, sides: number, adv: 'advantage' | 'disadvantage' | null, roller: DiceRoller): number[] {
+    if (adv === null) return rollDice(count, sides, roller);
+    const roll1 = rollDice(count, sides, roller);
+    const roll2 = rollDice(count, sides, roller);
+    const sum1  = roll1.reduce((a, b) => a + b, 0);
+    const sum2  = roll2.reduce((a, b) => a + b, 0);
+    return adv === 'advantage'
+        ? (sum1 >= sum2 ? roll1 : roll2)
+        : (sum1 <= sum2 ? roll1 : roll2);
+}
+
 // Pure computation — executes dice rolls.
-// Stage 1: hit-roll attacks only.
-// Stage 2+ will add healing rolls and saving throws here.
 export async function runResolve(ctx: CombatActionContext, { roller }: PipelineServices): Promise<void> {
     const { profile, target } = ctx;
     if (!profile || !target) return;
 
     if (profile.dealsDamage) {
-        const [raw] = rollDice(1, 20, roller);
-        ctx.hitRoll    = raw!;
-        ctx.hitTotal   = raw! + ctx.hitModifier;
+        const raw      = rollWithAdvantage(20, ctx.hitAdvantage, roller);
+        ctx.hitRoll    = raw;
+        ctx.hitTotal   = raw + ctx.hitModifier;
         ctx.isCritical = raw === 20;
         ctx.isFumble   = raw === 1;
         // Nat 20 always hits; nat 1 always misses; otherwise compare total to AC.
@@ -20,7 +36,7 @@ export async function runResolve(ctx: CombatActionContext, { roller }: PipelineS
 
         if (ctx.isHit && profile.damageDiceCount && profile.damageDiceSides) {
             const diceCount   = ctx.isCritical ? profile.damageDiceCount * 2 : profile.damageDiceCount;
-            ctx.diceRolls     = rollDice(diceCount, profile.damageDiceSides, roller);
+            ctx.diceRolls     = rollDiceWithAdvantage(diceCount, profile.damageDiceSides, ctx.damageAdvantage, roller);
             ctx.rawDamage     = ctx.diceRolls.reduce((a, b) => a + b, 0);
             ctx.finalDamage   = Math.max(0, ctx.rawDamage + ctx.damageModifier);
         }
@@ -29,12 +45,12 @@ export async function runResolve(ctx: CombatActionContext, { roller }: PipelineS
             const diceCount          = ctx.isCritical ? profile.elementalDiceCount * 2 : profile.elementalDiceCount;
             ctx.elementalDiceRolls   = rollDice(diceCount, profile.elementalDiceSides, roller);
             ctx.rawElementalDamage   = ctx.elementalDiceRolls.reduce((a, b) => a + b, 0);
-            // No modifier on elemental in stage 1. Stage 2 resistance interceptors scale finalElementalDamage.
+            // Resistance interceptors scale finalElementalDamage in APPLY.
             ctx.finalElementalDamage = ctx.rawElementalDamage;
         }
     } else if (profile.restoresHealth) {
         if (profile.healDiceCount && profile.healDiceSides) {
-            ctx.diceRolls = rollDice(profile.healDiceCount, profile.healDiceSides, roller);
+            ctx.diceRolls = rollDiceWithAdvantage(profile.healDiceCount, profile.healDiceSides, ctx.healAdvantage, roller);
             ctx.rawHeal   = ctx.diceRolls.reduce((a, b) => a + b, 0);
         }
         ctx.finalHeal = Math.max(0, ctx.rawHeal + ctx.healModifier);

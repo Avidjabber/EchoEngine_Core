@@ -59,9 +59,9 @@ Implementation order
     [x] Stat effects on action use
 
   Group 3 (consumers of Group 2):
-    [ ] Guard redirect
-    [ ] Stat effect modifiers
-    [ ] Damage resistance / vulnerability / immunity
+    [x] Guard redirect
+    [x] Stat effect modifiers
+    [x] Damage resistance / vulnerability / immunity
 
   Group 4 (heaviest — requires Groups 2 and 3):
     [ ] Reactions

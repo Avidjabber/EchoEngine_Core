@@ -11,7 +11,7 @@ export async function runPreResolve(ctx: CombatActionContext, _svc: PipelineServ
     const getStat = (name: string | null): number =>
         name ? (actor.stats[name] ?? 10) : 10;
 
-    ctx.hitModifier    = statMod(getStat(profile.hitStatName))    + profile.hitBonus;
-    ctx.damageModifier = statMod(getStat(profile.damageStatName)) + profile.damageBonus;
-    ctx.healModifier   = statMod(getStat(profile.healStatName))   + profile.healBonus;
+    ctx.hitModifier    += statMod(getStat(profile.hitStatName))    + profile.hitBonus;
+    ctx.damageModifier += statMod(getStat(profile.damageStatName)) + profile.damageBonus;
+    ctx.healModifier   += statMod(getStat(profile.healStatName))   + profile.healBonus;
 }

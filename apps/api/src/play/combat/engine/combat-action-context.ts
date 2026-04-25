@@ -30,9 +30,11 @@ export interface ProfileSnapshot {
     hitStatName:      string | null;
     damageStatName:   string | null;
     healStatName:     string | null;
+    damageTypeId:            number | null;
     damageTypeName:          string | null;
     elementalDiceCount:      number | null;
     elementalDiceSides:      number | null;
+    elementalDamageTypeId:   number | null;
     elementalDamageTypeName: string | null;
     // Behavior effect fields
     behaviorEffectTypeId:          number | null;
@@ -97,13 +99,16 @@ export interface CombatActionContext {
     wasRedirected:      boolean;
     originalTargetName: string | null;  // name of input target when redirected
     target:             TargetSnapshot | null;
-    targetParticipant:  TargetParticipantSnapshot | null;
-    targetAC:           number;
+    targetParticipant:     TargetParticipantSnapshot | null;
+    targetAC:              number;
 
     // PRE_RESOLVE
-    hitModifier:    number;
-    damageModifier: number;
-    healModifier:   number;
+    hitModifier:     number;
+    damageModifier:  number;
+    healModifier:    number;
+    hitAdvantage:    'advantage' | 'disadvantage' | null;
+    damageAdvantage: 'advantage' | 'disadvantage' | null;
+    healAdvantage:   'advantage' | 'disadvantage' | null;
 
     // RESOLVE
     hitRoll:     number | null;  // raw d20 result (stored in action log)
