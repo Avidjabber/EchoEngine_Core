@@ -1087,40 +1087,63 @@ export class PlayCombatService {
 
         const participantMap = new Map(dbParticipants.map(p => [p.entityId, p.id]));
 
+        // Group effects by participant so we can batch per-participant DB operations.
+        const effectsByParticipant = new Map<number, typeof preCombatEffects>();
         for (const effect of preCombatEffects) {
             const participantId = participantMap.get(effect.entityId);
             if (!participantId) continue;
+            if (!effectsByParticipant.has(participantId)) effectsByParticipant.set(participantId, []);
+            effectsByParticipant.get(participantId)!.push(effect);
+        }
 
-            const stack = effect.effectDef.stackBehavior.name;
+        for (const [participantId, effects] of effectsByParticipant) {
+            const effectDefIds = effects.map(e => e.effectDefId);
 
-            if (stack === 'ignore') {
-                const existing = await this.db.activeCombat_StatEffect.findFirst({
-                    where:  { activeCombatId: combatId, affectedParticipantId: participantId, effectDefId: effect.effectDefId },
-                    select: { id: true },
-                });
-                if (existing) continue;
-            } else if (stack === 'refresh') {
+            const existing = await this.db.activeCombat_StatEffect.findMany({
+                where:  { activeCombatId: combatId, affectedParticipantId: participantId, effectDefId: { in: effectDefIds } },
+                select: { effectDefId: true },
+            });
+            const existingDefIds = new Set(existing.map(e => e.effectDefId));
+
+            const refreshDefIds = effects
+                .filter(e => e.effectDef.stackBehavior.name === 'refresh' && existingDefIds.has(e.effectDefId))
+                .map(e => e.effectDefId);
+            if (refreshDefIds.length > 0) {
                 await this.db.activeCombat_StatEffect.deleteMany({
-                    where: { activeCombatId: combatId, affectedParticipantId: participantId, effectDefId: effect.effectDefId },
+                    where: { activeCombatId: combatId, affectedParticipantId: participantId, effectDefId: { in: refreshDefIds } },
                 });
             }
 
-            const rounds = effect.effectDef.durationRounds;
-            await this.db.activeCombat_StatEffect.create({
-                data: {
-                    activeCombatId:        combatId,
-                    effectDefId:           effect.effectDefId,
-                    affectedParticipantId: participantId,
-                    roundsRemaining:       rounds && rounds > 0 ? rounds : null,
-                },
-            });
+            const toCreate = effects.filter(e =>
+                !(e.effectDef.stackBehavior.name === 'ignore' && existingDefIds.has(e.effectDefId)),
+            );
 
-            if (effect.equipmentProfileId && (effect.equipmentProfile?.cooldownRounds ?? 0) > 0) {
-                await this.db.activeCombat_Participant_ActionCooldown.upsert({
-                    where:  { participantId_equipmentProfileId: { participantId, equipmentProfileId: effect.equipmentProfileId } },
-                    create: { participantId, equipmentProfileId: effect.equipmentProfileId, roundsRemaining: effect.equipmentProfile!.cooldownRounds },
-                    update: { roundsRemaining: effect.equipmentProfile!.cooldownRounds },
+            if (toCreate.length > 0) {
+                await this.db.activeCombat_StatEffect.createMany({
+                    data: toCreate.map(e => {
+                        const rounds = e.effectDef.durationRounds;
+                        return {
+                            activeCombatId:        combatId,
+                            effectDefId:           e.effectDefId,
+                            affectedParticipantId: participantId,
+                            roundsRemaining:       rounds && rounds > 0 ? rounds : null,
+                        };
+                    }),
                 });
+            }
+
+            // Prisma has no upsertMany — run cooldown upserts in parallel.
+            const cooldownEffects = toCreate.filter(e =>
+                e.equipmentProfileId && (e.equipmentProfile?.cooldownRounds ?? 0) > 0,
+            );
+            if (cooldownEffects.length > 0) {
+                await Promise.all(cooldownEffects.map(e =>
+                    this.db.activeCombat_Participant_ActionCooldown.upsert({
+                        where:  { participantId_equipmentProfileId: { participantId, equipmentProfileId: e.equipmentProfileId! } },
+                        create: { participantId, equipmentProfileId: e.equipmentProfileId!, roundsRemaining: e.equipmentProfile!.cooldownRounds },
+                        update: { roundsRemaining: e.equipmentProfile!.cooldownRounds },
+                    }),
+                ));
             }
         }
     }
