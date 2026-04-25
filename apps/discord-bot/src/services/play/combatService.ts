@@ -135,6 +135,7 @@ export interface ActionResult {
     actualTargetName: string;
     wasRedirected:    boolean;
     outcome:          ActionResultOutcome;
+    appliedEffects:   string[];
     pendingReaction?: PendingReaction;
 }
 

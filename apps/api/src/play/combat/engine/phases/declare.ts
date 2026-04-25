@@ -25,6 +25,10 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
                 elementalDiceCount:  true,
                 elementalDiceSides:  true,
                 elementalDamageType: { select: { name: true } },
+                durationRounds:      true,
+                flatModifier:        true,
+                percentModifier:     true,
+                behaviorEffectType:  { select: { id: true, name: true, redirectsDamage: true, forcesTargeting: true } },
             },
         }),
         db.activeCombat.findUnique({
@@ -52,7 +56,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
         }),
         db.activeCombat_Participant.findFirst({
             where:  { activeCombatId: ctx.input.combatId, entityId: ctx.input.actorEntityId },
-            select: { turnOrder: true },
+            select: { id: true, turnOrder: true },
         }),
     ]);
 
@@ -77,6 +81,13 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
             elementalDiceCount:      profileRow.elementalDiceCount        ?? null,
             elementalDiceSides:      profileRow.elementalDiceSides        ?? null,
             elementalDamageTypeName: profileRow.elementalDamageType?.name ?? null,
+            behaviorEffectTypeId:          profileRow.behaviorEffectType?.id           ?? null,
+            behaviorEffectName:            profileRow.behaviorEffectType?.name         ?? null,
+            behaviorEffectRedirectsDamage: profileRow.behaviorEffectType?.redirectsDamage ?? false,
+            behaviorEffectForcesTargeting: profileRow.behaviorEffectType?.forcesTargeting ?? false,
+            durationRounds:                profileRow.durationRounds,
+            flatModifier:                  profileRow.flatModifier   ?? null,
+            percentModifier:               profileRow.percentModifier ?? null,
         };
     }
 
@@ -88,7 +99,8 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
     }
 
     if (actorParticipantRow) {
-        ctx.actorTurnOrder = actorParticipantRow.turnOrder;
+        ctx.actorTurnOrder     = actorParticipantRow.turnOrder;
+        ctx.actorParticipantId = actorParticipantRow.id;
     }
 
     if (actorRow) {

@@ -39,6 +39,7 @@ function createContext(input: CombatActionInput): CombatActionContext {
         combatMeta:          null,
         existingActionCount: 0,
         actorTurnOrder:      null,
+        actorParticipantId:  null,
         aborted:             false,
         abortReason:         null,
         actualTargetId:      input.targetEntityId,
@@ -66,8 +67,10 @@ function createContext(input: CombatActionInput): CombatActionContext {
         hpAfter:             null,
         knockedDown:         false,
         defeated:            false,
-        pendingReaction:     null,
-        actionId:            null,
+        pendingReaction:        null,
+        actionId:               null,
+        appliedBehaviorEffect:  null,
+        appliedStatEffectNames: [],
     };
 }
 

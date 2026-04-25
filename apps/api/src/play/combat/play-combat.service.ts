@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrimaryDatabaseService } from '../../database/primary.service';
 import { runCombatPipeline } from './engine/combat-pipeline';
-import { defaultRoller } from '../../utils/dice';
+import { defaultRoller, rollDice } from '../../utils/dice';
 import type { CombatActionContext } from './engine/combat-action-context';
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -78,6 +78,7 @@ export interface ActionResult {
     actualTargetName: string;
     wasRedirected:    boolean;
     outcome:          ActionResultOutcome;
+    appliedEffects:   string[];
     pendingReaction?: PendingReaction;
 }
 
@@ -819,8 +820,17 @@ export class PlayCombatService {
                 totalHeal: ctx.finalHeal,
                 hpAfter:   ctx.hpAfter ?? 0,
             };
+        } else if (ctx.appliedBehaviorEffect) {
+            outcome = { kind: 'behavior', ...ctx.appliedBehaviorEffect };
         } else {
             outcome = { kind: 'no_op' };
+        }
+
+        // Secondary effects shown alongside a damage/heal outcome go in appliedEffects.
+        // If the primary outcome is already 'behavior', its name is in the outcome itself.
+        const appliedEffects: string[] = [...ctx.appliedStatEffectNames];
+        if (ctx.appliedBehaviorEffect && outcome.kind !== 'behavior') {
+            appliedEffects.push(ctx.appliedBehaviorEffect.effectName);
         }
 
         const targetName = ctx.wasRedirected
@@ -835,12 +845,25 @@ export class PlayCombatService {
             actualTargetName: ctx.target?.name ?? 'Unknown',
             wasRedirected:    ctx.wasRedirected,
             outcome,
+            appliedEffects,
             pendingReaction:  ctx.pendingReaction ?? undefined,
         };
     }
 
-    // Stage 1: only ticks down cooldowns. DoT/HoT and stat-effect decrement are stage 2+.
-    private async _processTurnEnd(combatId: number, participantId: number, _canSecondWind: boolean): Promise<RoundEndEvent[]> {
+    private async _processTurnEnd(combatId: number, participantId: number, canSecondWind: boolean): Promise<RoundEndEvent[]> {
+        // Collect active DoT/HoT effects before decrementing so effects at roundsRemaining=1 still fire.
+        const activeEffects = await this.db.activeCombat_StatEffect.findMany({
+            where: { affectedParticipantId: participantId },
+            select: {
+                effectDef: {
+                    select: {
+                        damageOverTime: { select: { diceCount: true, diceSides: true, flatDamage: true } },
+                        healOverTime:   { select: { diceCount: true, diceSides: true, flatHeal: true } },
+                    },
+                },
+            },
+        });
+
         await this.db.$transaction([
             this.db.activeCombat_Participant_ActionCooldown.deleteMany({
                 where: { participantId, roundsRemaining: 1 },
@@ -849,13 +872,93 @@ export class PlayCombatService {
                 where: { participantId, roundsRemaining: { gt: 1 } },
                 data:  { roundsRemaining: { decrement: 1 } },
             }),
+            this.db.activeCombat_StatEffect.deleteMany({
+                where: { affectedParticipantId: participantId, roundsRemaining: 1 },
+            }),
+            this.db.activeCombat_StatEffect.updateMany({
+                where: { affectedParticipantId: participantId, roundsRemaining: { gt: 1 } },
+                data:  { roundsRemaining: { decrement: 1 } },
+            }),
         ]);
-        return [];
+
+        const hasDotOrHot = activeEffects.some(
+            e => e.effectDef.damageOverTime.length > 0 || e.effectDef.healOverTime.length > 0,
+        );
+        if (!hasDotOrHot) return [];
+
+        const participant = await this.db.activeCombat_Participant.findUnique({
+            where:  { id: participantId },
+            select: {
+                entityId:      true,
+                isAiControlled: true,
+                inSecondWind:  true,
+                entity: { select: { name: true, stats: { select: { currentHp: true, maxHp: true } } } },
+            },
+        });
+        if (!participant) return [];
+
+        let currentHp = participant.entity.stats?.currentHp ?? 0;
+        const maxHp   = participant.entity.stats?.maxHp     ?? 0;
+        const events: RoundEndEvent[] = [];
+
+        for (const effect of activeEffects) {
+            for (const dot of effect.effectDef.damageOverTime) {
+                const rolls  = rollDice(dot.diceCount, dot.diceSides, defaultRoller);
+                const amount = Math.max(0, rolls.reduce((a, b) => a + b, 0) + dot.flatDamage);
+                currentHp   -= amount;
+
+                await this.db.entityStats.update({
+                    where: { entityId: participant.entityId },
+                    data:  { currentHp },
+                });
+
+                let defeated = false;
+                if (currentHp <= 0) {
+                    const canKnock = !participant.isAiControlled && canSecondWind && !participant.inSecondWind;
+                    if (!canKnock) {
+                        await this.db.activeCombat_Participant.update({
+                            where: { id: participantId },
+                            data:  { isDefeated: true },
+                        });
+                        defeated = true;
+                    }
+                }
+
+                events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: Math.max(0, currentHp), defeated });
+                if (defeated) return events;
+            }
+
+            for (const hot of effect.effectDef.healOverTime) {
+                const rolls      = rollDice(hot.diceCount, hot.diceSides, defaultRoller);
+                const raw        = rolls.reduce((a, b) => a + b, 0) + hot.flatHeal;
+                const actualHeal = Math.min(Math.max(0, raw), maxHp - currentHp);
+                currentHp       += actualHeal;
+
+                if (actualHeal > 0) {
+                    await this.db.entityStats.update({
+                        where: { entityId: participant.entityId },
+                        data:  { currentHp },
+                    });
+                }
+
+                events.push({ kind: 'hot', entityId: participant.entityId, entityName: participant.entity.name, amount: actualHeal, hpAfter: currentHp, defeated: false });
+            }
+        }
+
+        return events;
     }
 
-    // Stage 1: no-op. Behavior effect decrement is stage 2+.
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    private async _processTurnStart(_combatId: number, _participantId: number): Promise<void> {}
+    private async _processTurnStart(_combatId: number, participantId: number): Promise<void> {
+        await this.db.$transaction([
+            this.db.activeCombat_BehaviorEffect.deleteMany({
+                where: { sourceParticipantId: participantId, roundsRemaining: 1 },
+            }),
+            this.db.activeCombat_BehaviorEffect.updateMany({
+                where: { sourceParticipantId: participantId, roundsRemaining: { gt: 1 } },
+                data:  { roundsRemaining: { decrement: 1 } },
+            }),
+        ]);
+    }
 
     private async _distributeEventCombatXp(combat: {
         guildId:              string;

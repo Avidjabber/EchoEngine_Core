@@ -34,6 +34,14 @@ export interface ProfileSnapshot {
     elementalDiceCount:      number | null;
     elementalDiceSides:      number | null;
     elementalDamageTypeName: string | null;
+    // Behavior effect fields
+    behaviorEffectTypeId:          number | null;
+    behaviorEffectName:            string | null;
+    behaviorEffectRedirectsDamage: boolean;
+    behaviorEffectForcesTargeting: boolean;
+    durationRounds:                number;
+    flatModifier:                  number | null;
+    percentModifier:               number | null;
 }
 
 export interface CombatMetaSnapshot {
@@ -78,6 +86,7 @@ export interface CombatActionContext {
     combatMeta:          CombatMetaSnapshot | null;
     existingActionCount: number;
     actorTurnOrder:      number | null;
+    actorParticipantId:  number | null;
 
     // VALIDATE
     aborted:     boolean;
@@ -120,5 +129,7 @@ export interface CombatActionContext {
     pendingReaction: PendingReaction | null;
 
     // END
-    actionId: number | null;
+    actionId:              number | null;
+    appliedBehaviorEffect: { effectName: string; guardedName: string | null; rounds: number } | null;
+    appliedStatEffectNames: string[];
 }

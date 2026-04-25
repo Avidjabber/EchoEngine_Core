@@ -32,7 +32,7 @@ function actionSummary(action: AvailableAction): string {
 }
 
 export function buildActionResultComponents(result: ActionResult): object[] {
-    const { actorName, targetName, actualTargetName, wasRedirected, actionLabel, outcome } = result;
+    const { actorName, targetName, actualTargetName, wasRedirected, actionLabel, outcome, appliedEffects } = result;
 
     const redirectNote = wasRedirected ? ` → **${actualTargetName}** *(guard)*` : '';
     const header = `**${actorName}** used **${actionLabel}** on **${targetName}**${redirectNote}`;
@@ -79,6 +79,10 @@ export function buildActionResultComponents(result: ActionResult): object[] {
     } else {
         body = `${actorName} used ${actionLabel}.`;
         accentColor = colors.info;
+    }
+
+    if (appliedEffects.length > 0) {
+        body += `\n-# ✦ ${appliedEffects.join(', ')}`;
     }
 
     return [{

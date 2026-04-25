@@ -2399,6 +2399,8 @@ model ItemEquipmentProfile {
   cooldownRounds       Int     @default(0)
   durationRounds       Int     @default(0)   // 0 = instantaneous
   behaviorEffectTypeId Int?                  // set for stateful behaviors (guard, taunt, parry, etc.)
+  flatModifier         Int?                  // behavior effect flat magnitude (e.g. absorb buffer HP); copied to ActiveCombat_BehaviorEffect at application time
+  percentModifier      Float?                // behavior effect percent magnitude (e.g. guard absorption %); copied to ActiveCombat_BehaviorEffect at application time
   isReactionAction     Boolean @default(false)  // true = this profile can fire as a reaction (counterattack trigger); may also have actionCategoryId for normal turn use
   requiresVerbal       Boolean @default(false)  // action has a verbal component — blocked by conditions with blocksVerbal
   requiresSomatic      Boolean @default(false)  // action has a somatic component — blocked by conditions with blocksSomatic
