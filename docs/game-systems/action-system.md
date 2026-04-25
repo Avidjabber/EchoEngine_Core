@@ -88,7 +88,7 @@ The stat progression DisciplineDef row (isStatProgression = true) is referenced
 here exactly like any other discipline. Most actions will have a row for it.
 
 EXAMPLE — Border Patrol:
-  Scouting        → 50 XP  [all]
+  Combat          → 50 XP  [all]
   StatProgression → 30 XP  [all]
 
 EXAMPLE — Herb Gathering:
@@ -96,11 +96,10 @@ EXAMPLE — Herb Gathering:
   StatProgression → 25 XP  [all]
 
 EXAMPLE — Training Session:
-  Training        → 40 XP  [leader_only]   (mentor earns it for teaching)
+  Combat          → 40 XP  [leader_only]   (mentor earns it for teaching; discipline set per session)
   StatProgression → 20 XP  [all]
 
 EXAMPLE — Spar:
-  Training        → 20 XP  [leader_only]   (mentor earns it for teaching)
   Combat          → (flows from Species.combatXpReward × 0.5 via combat engine)
   StatProgression → 15 XP  [winners_only]
 

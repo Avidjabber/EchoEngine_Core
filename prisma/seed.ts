@@ -722,7 +722,6 @@ async function main() {
         { codeName: 'crafting',         name: 'Crafting',         description: 'Creating items via recipes',                            baseXp: 100,  isStatProgression: false, dailyXpCap: null },
         { codeName: 'farming',          name: 'Farming',          description: 'Growing, gathering, and tending plant-based resources',  baseXp: 100,  isStatProgression: false, dailyXpCap: null },
         { codeName: 'combat',           name: 'Combat',           description: 'Fighting effectiveness and battle experience',           baseXp: 100,  isStatProgression: false, dailyXpCap: null },
-        { codeName: 'scouting',         name: 'Scouting',         description: 'Patrol, territory awareness, and threat detection',      baseXp: 100,  isStatProgression: false, dailyXpCap: null },
         { codeName: 'stat_progression', name: 'StatProgression',  description: 'Tracks XP toward stat points; excluded from discipline listings', baseXp: 6000, isStatProgression: true, dailyXpCap: 100 },
       ],
     })

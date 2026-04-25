@@ -141,7 +141,6 @@ Quick reference:
   Crafting │ Creating items via recipes
   Farming  │ Growing and gathering plant-based resources
   Combat   │ Fighting effectiveness and battle experience
-  Scouting │ Patrol, territory awareness, threat detection
 
 XP formula: floor(baseXp × level^1.5)   where baseXp = 100 (default)
 Discipline XP has no daily cap. Only the stat progression row has a dailyXpCap.
