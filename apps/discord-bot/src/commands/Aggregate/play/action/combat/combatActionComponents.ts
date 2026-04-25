@@ -7,8 +7,17 @@ const CATEGORY_LABEL: Record<'main' | 'bonus' | 'item', string> = {
     item:  'Item Interaction',
 };
 
+function scopeLabel(scope: AvailableAction['targetScope']): string {
+    if (!scope) return '';
+    if (scope.targetsSelf) return 'Self';
+    if (scope.targetsSingle) return 'Single';
+    return 'Team';
+}
+
 function actionSummary(action: AvailableAction): string {
     const parts: string[] = [];
+    const scope = scopeLabel(action.targetScope);
+    if (scope) parts.push(`🎯 ${scope}`);
     if (action.damageDice) {
         const typeLabel = action.damageTypeName ? ` ${action.damageTypeName}` : '';
         parts.push(`⚔ ${action.damageDice}${typeLabel}`);
