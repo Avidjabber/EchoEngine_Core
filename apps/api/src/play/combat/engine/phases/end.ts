@@ -19,6 +19,7 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
             ...(ctx.isHit      !== null ? { hit: ctx.isHit, isCritical: ctx.isCritical }                                              : {}),
             ...(ctx.finalDamage        > 0 ? { damageRoll: ctx.rawDamage, damageModifier: ctx.damageModifier, damageDealt: ctx.finalDamage } : {}),
             ...(ctx.finalElementalDamage > 0 ? { elementalDamageDealt: ctx.finalElementalDamage }                                     : {}),
+            ...(ctx.finalHeal          > 0 ? { healDealt: ctx.finalHeal }                                                             : {}),
             ...(ctx.knockedDown        ? { secondWindTriggered: true }                                                                 : {}),
         },
         select: { id: true },

@@ -812,6 +812,13 @@ export class PlayCombatService {
             } else {
                 outcome = { kind: 'miss', hitRoll: ctx.hitTotal!, targetAC: ctx.targetAC };
             }
+        } else if (ctx.profile?.restoresHealth) {
+            outcome = {
+                kind:      'heal',
+                diceRolls: ctx.diceRolls,
+                totalHeal: ctx.finalHeal,
+                hpAfter:   ctx.hpAfter ?? 0,
+            };
         } else {
             outcome = { kind: 'no_op' };
         }

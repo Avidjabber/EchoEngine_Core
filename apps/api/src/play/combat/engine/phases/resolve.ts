@@ -32,5 +32,11 @@ export async function runResolve(ctx: CombatActionContext, { roller }: PipelineS
             // No modifier on elemental in stage 1. Stage 2 resistance interceptors scale finalElementalDamage.
             ctx.finalElementalDamage = ctx.rawElementalDamage;
         }
+    } else if (profile.restoresHealth) {
+        if (profile.healDiceCount && profile.healDiceSides) {
+            ctx.diceRolls = rollDice(profile.healDiceCount, profile.healDiceSides, roller);
+            ctx.rawHeal   = ctx.diceRolls.reduce((a, b) => a + b, 0);
+        }
+        ctx.finalHeal = Math.max(0, ctx.rawHeal + ctx.healModifier);
     }
 }

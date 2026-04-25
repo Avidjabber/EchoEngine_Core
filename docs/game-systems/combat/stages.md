@@ -45,52 +45,77 @@ What is explicitly deferred:
 
 
 ─────────────────────────────────────────────
-STAGE 2 — EFFECTS AND REACTIONS  (planned)
+STAGE 2 — EFFECTS AND REACTIONS  ← IN PROGRESS
 ─────────────────────────────────────────────
 
 Adds the full effect layer and the reaction system.
 
-Guard redirect (TARGET phase interceptor, priority 0)
+Implementation order
+  Group 1 (self-contained, no prerequisites):
+    [x] Healing actions
+
+  Group 2 (effect infrastructure — unlocks Groups 3 and 4):
+    [ ] Behavior effects
+    [ ] Stat effects on action use
+
+  Group 3 (consumers of Group 2):
+    [ ] Guard redirect
+    [ ] Stat effect modifiers
+    [ ] Damage resistance / vulnerability / immunity
+
+  Group 4 (heaviest — requires Groups 2 and 3):
+    [ ] Reactions
+    [ ] Pre-combat effects
+
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+Healing actions  [ ] GROUP 1
+  If profile.restoresHealth: roll heal dice, set ctx.diceRolls / ctx.rawHeal / ctx.finalHeal.
+  APPLY phase extended: if ctx.finalHeal > 0, update HP upward (capped at maxHp).
+  No hit roll — healing always lands.
+  Outcome kind: 'heal'.
+
+Behavior effects  [ ] GROUP 2
+  When a profile action's actionType has an associated CombatEffectType:
+  upsert ActiveCombat_BehaviorEffect for the target with roundsRemaining.
+  _processTurnStart: decrement roundsRemaining, delete rows at 0.
+
+Stat effects on action use  [ ] GROUP 2
+  ItemEquipmentProfile_StatEffect rows: roll applicationChance; if it fires,
+  create ActiveCombat_StatEffect for the target.
+  _processTurnEnd: decrement roundsRemaining on stat effects; delete at 0.
+  DoT / HoT: fire at round end, write HP, emit RoundEndEvent rows.
+
+Guard redirect  [ ] GROUP 3
+  TARGET phase interceptor, priority 0.
   Read ActiveCombat_BehaviorEffect for guard effects protecting input.targetEntityId.
   If found: set ctx.actualTargetId → guarding entity, ctx.wasRedirected = true,
   ctx.originalTargetName = name of original target.
   Guard partially absorbs damage → reduce ctx.finalDamage in APPLY interceptor
   by guard's percentModifier before HP is written.
 
-Stat effect modifiers (PRE_RESOLVE interceptor)
+Stat effect modifiers  [ ] GROUP 3
+  PRE_RESOLVE interceptor.
   Read ActiveCombat_StatEffect rows for the actor:
     RollMod rows → add to ctx.hitModifier / ctx.damageModifier / ctx.healModifier
     RollAdvantage rows → affect RESOLVE dice rolling (roll twice, keep high/low)
 
-Damage resistance / vulnerability / immunity (APPLY interceptor, priority 0)
+Damage resistance / vulnerability / immunity  [ ] GROUP 3
+  APPLY interceptor, priority 0.
   Read ActiveCombat_StatEffect rows for the target (type: damage_modifier).
   Scale ctx.finalDamage before APPLY writes HP:
     resistance: × 0.5
     vulnerability: × 2.0
     immunity: set to 0
 
-Healing actions (RESOLVE phase extension)
-  If profile.restoresHealth: roll heal dice, set ctx.diceRolls / ctx.rawHeal / ctx.finalHeal.
-  APPLY phase extended: if ctx.finalHeal > 0, update HP upward (capped at maxHp).
-
-Behavior effects (END phase extension or new phase)
-  When a profile action's actionType has an associated CombatEffectType:
-  upsert ActiveCombat_BehaviorEffect for the target with roundsRemaining.
-  _processTurnStart: decrement roundsRemaining, delete rows at 0.
-
-Stat effects on action use (END phase extension)
-  ItemEquipmentProfile_StatEffect rows: roll applicationChance; if it fires,
-  create ActiveCombat_StatEffect for the target.
-  _processTurnEnd: decrement roundsRemaining on stat effects; delete at 0.
-  DoT / HoT: fire at round end, write HP, emit RoundEndEvent rows.
-
-Reactions (POST_APPLY phase)
+Reactions  [ ] GROUP 4
+  POST_APPLY phase.
   After a hit resolves, check if the defender has equipped reaction-category actions.
   If so: populate ctx.pendingReaction; return to service layer.
   Service layer returns pendingReaction to controller; bot posts reaction prompt.
   processReaction is fully wired (currently a no-op stub).
 
-Pre-combat effects (combat start)
+Pre-combat effects  [ ] GROUP 4
   At startCombat: for each participant, query Entity_PreCombatEffect rows.
   Create ActiveCombat_StatEffect rows for active pre-combat buffs.
   Create cooldown rows if equipmentProfileId is set.
