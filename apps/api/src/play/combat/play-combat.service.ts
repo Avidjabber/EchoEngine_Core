@@ -1105,12 +1105,13 @@ export class PlayCombatService {
                 });
             }
 
+            const rounds = effect.effectDef.durationRounds;
             await this.db.activeCombat_StatEffect.create({
                 data: {
                     activeCombatId:        combatId,
                     effectDefId:           effect.effectDefId,
                     affectedParticipantId: participantId,
-                    roundsRemaining:       effect.effectDef.durationRounds ?? null,
+                    roundsRemaining:       rounds && rounds > 0 ? rounds : null,
                 },
             });
 

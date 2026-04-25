@@ -8,13 +8,14 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
     if (ctx.aborted || !ctx.profile || !ctx.target || ctx.actualTargetId === null) return;
 
     if (ctx.profile.dealsDamage && ctx.isHit) {
-        const newHp = ctx.target.currentHp - ctx.finalDamage - ctx.finalElementalDamage;
+        const newHp    = ctx.target.currentHp - ctx.finalDamage - ctx.finalElementalDamage;
+        const clampedHp = Math.max(0, newHp);
         await db.entityStats.update({
             where: { entityId: ctx.actualTargetId },
-            data:  { currentHp: newHp },
+            data:  { currentHp: clampedHp },
         });
 
-        ctx.hpAfter = Math.max(0, newHp);
+        ctx.hpAfter = clampedHp;
 
         if (newHp <= 0 && ctx.targetParticipant) {
             const canSecondWind    = ctx.combatMeta?.canSecondWind ?? false;

@@ -155,14 +155,12 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
     // Process the action (resolve dice, apply HP, set up behavior effects)
     const result = await processAction(activeCombatId, entityId, profileId, storedItemId, targetEntityId, entry.round);
 
-    // Mark this category as used
-    const flag = FLAG_BY_SLOT[catSlot];
-    markTurnFlagUsed(activeCombatId, flag);
-
     const channel = interaction.channel as TextChannel | ThreadChannel;
     const turnMsg = await channel.messages.fetch(entry.turnPromptMessageId).catch(() => null);
 
     if (result.success && result.value) {
+        // Mark the category only on success so a server-side abort doesn't consume the slot.
+        markTurnFlagUsed(activeCombatId, FLAG_BY_SLOT[catSlot]);
         // Post real result publicly
         await channel.send({
             components: buildActionResultComponents(result.value) as never,

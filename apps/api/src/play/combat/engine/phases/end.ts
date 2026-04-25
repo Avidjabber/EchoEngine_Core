@@ -140,7 +140,7 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
                     affectedParticipantId: targetPartId,
                     sourceParticipantId:   ctx.actorParticipantId,
                     appliedByActionId:     ctx.actionId,
-                    roundsRemaining,
+                    roundsRemaining:       roundsRemaining && roundsRemaining > 0 ? roundsRemaining : null,
                 },
             });
 

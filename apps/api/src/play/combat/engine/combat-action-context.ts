@@ -36,6 +36,7 @@ export interface ProfileSnapshot {
     elementalDiceSides:      number | null;
     elementalDamageTypeId:   number | null;
     elementalDamageTypeName: string | null;
+    isReactionAction: boolean;
     // Behavior effect fields
     behaviorEffectTypeId:          number | null;
     behaviorEffectName:            string | null;
