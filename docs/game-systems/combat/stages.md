@@ -55,8 +55,8 @@ Implementation order
     [x] Healing actions
 
   Group 2 (effect infrastructure — unlocks Groups 3 and 4):
-    [ ] Behavior effects
-    [ ] Stat effects on action use
+    [x] Behavior effects
+    [x] Stat effects on action use
 
   Group 3 (consumers of Group 2):
     [ ] Guard redirect

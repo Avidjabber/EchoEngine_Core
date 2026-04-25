@@ -850,7 +850,7 @@ export class PlayCombatService {
         };
     }
 
-    private async _processTurnEnd(combatId: number, participantId: number, canSecondWind: boolean): Promise<RoundEndEvent[]> {
+    private async _processTurnEnd(combatId: number, participantId: number, _canSecondWind: boolean): Promise<RoundEndEvent[]> {
         // Collect active DoT/HoT effects before decrementing so effects at roundsRemaining=1 still fire.
         const activeEffects = await this.db.activeCombat_StatEffect.findMany({
             where: { affectedParticipantId: participantId },
@@ -914,14 +914,11 @@ export class PlayCombatService {
 
                 let defeated = false;
                 if (currentHp <= 0) {
-                    const canKnock = !participant.isAiControlled && canSecondWind && !participant.inSecondWind;
-                    if (!canKnock) {
-                        await this.db.activeCombat_Participant.update({
-                            where: { id: participantId },
-                            data:  { isDefeated: true },
-                        });
-                        defeated = true;
-                    }
+                    await this.db.activeCombat_Participant.update({
+                        where: { id: participantId },
+                        data:  { isDefeated: true },
+                    });
+                    defeated = true;
                 }
 
                 events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: Math.max(0, currentHp), defeated });
@@ -941,7 +938,9 @@ export class PlayCombatService {
                     });
                 }
 
-                events.push({ kind: 'hot', entityId: participant.entityId, entityName: participant.entity.name, amount: actualHeal, hpAfter: currentHp, defeated: false });
+                if (actualHeal > 0) {
+                    events.push({ kind: 'hot', entityId: participant.entityId, entityName: participant.entity.name, amount: actualHeal, hpAfter: currentHp, defeated: false });
+                }
             }
         }
 
