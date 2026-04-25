@@ -17,7 +17,7 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
             targetEntityId:     ctx.actualTargetId ?? null,
             ...(ctx.hitRoll    !== null ? { hitRoll:     ctx.hitRoll,    hitModifier: ctx.hitModifier }                                               : {}),
             ...(ctx.isHit      !== null ? { hit:         ctx.isHit }                                                                                  : {}),
-            ...(ctx.finalDamage > 0    ? { damageRoll:   ctx.rawDamage,  damageModifier: ctx.damageModifier, damageDealt: ctx.finalDamage }           : {}),
+            ...(ctx.finalDamage + ctx.finalElementalDamage > 0 ? { damageRoll: ctx.rawDamage, damageModifier: ctx.damageModifier, damageDealt: ctx.finalDamage + ctx.finalElementalDamage } : {}),
             ...(ctx.knockedDown        ? { secondWindTriggered: true }                                                                                 : {}),
         },
         select: { id: true },

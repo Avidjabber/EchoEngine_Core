@@ -30,6 +30,10 @@ export interface ProfileSnapshot {
     hitStatName:      string | null;
     damageStatName:   string | null;
     healStatName:     string | null;
+    damageTypeName:          string | null;
+    elementalDiceCount:      number | null;
+    elementalDiceSides:      number | null;
+    elementalDamageTypeName: string | null;
 }
 
 export interface CombatMetaSnapshot {
@@ -101,6 +105,9 @@ export interface CombatActionContext {
     finalDamage: number;         // max(0, rawDamage + damageModifier)
     rawHeal:     number;
     finalHeal:   number;
+    elementalDiceRolls:   number[];
+    rawElementalDamage:   number;
+    finalElementalDamage: number; // no modifier in stage 1; resistance interceptors scale this in stage 2
 
     // APPLY
     hpAfter:     number | null;

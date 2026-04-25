@@ -9,8 +9,15 @@ const CATEGORY_LABEL: Record<'main' | 'bonus' | 'item', string> = {
 
 function actionSummary(action: AvailableAction): string {
     const parts: string[] = [];
-    if (action.damageDice)    parts.push(`⚔ ${action.damageDice}`);
-    if (action.healDice)      parts.push(`💚 ${action.healDice}`);
+    if (action.damageDice) {
+        const typeLabel = action.damageTypeName ? ` ${action.damageTypeName}` : '';
+        parts.push(`⚔ ${action.damageDice}${typeLabel}`);
+    }
+    if (action.elementalDamageDice) {
+        const typeLabel = action.elementalDamageTypeName ? ` ${action.elementalDamageTypeName}` : '';
+        parts.push(`+${action.elementalDamageDice}${typeLabel}`);
+    }
+    if (action.healDice) parts.push(`💚 ${action.healDice}`);
     if (action.cooldownRounds > 0) parts.push(`⏳ ${action.cooldownRounds}r cooldown`);
     return parts.length ? ` — ${parts.join(', ')}` : '';
 }
@@ -25,9 +32,21 @@ export function buildActionResultComponents(result: ActionResult): object[] {
     let accentColor: number;
 
     if (outcome.kind === 'hit') {
-        const diceStr = outcome.diceRolls.join('+');
-        const diceExpr = outcome.diceRolls.length > 0 ? ` (${diceStr} = ${outcome.totalDamage})` : '';
-        body = `⚔ Rolled **${outcome.hitRoll}** vs AC ${outcome.targetAC} — **Hit!**\n💥 **${outcome.totalDamage} damage**${diceExpr}\n${actualTargetName} now at **${outcome.hpAfter} HP**`;
+        const hitLine = `⚔ Rolled **${outcome.hitRoll}** vs AC ${outcome.targetAC} — **Hit!**`;
+
+        const primaryType  = outcome.damageTypeName ?? 'damage';
+        const primaryDice  = outcome.diceRolls.length > 0 ? ` (${outcome.diceRolls.join('+')})` : '';
+        const primaryLine  = `💥 **${outcome.totalDamage} ${primaryType}**${primaryDice}`;
+
+        const hasElemental = outcome.elementalDiceRolls.length > 0 && outcome.totalElementalDamage > 0;
+        const elementalLine = hasElemental
+            ? `\n🔥 **+${outcome.totalElementalDamage} ${outcome.elementalDamageTypeName ?? 'elemental'}** (${outcome.elementalDiceRolls.join('+')})`
+            : '';
+
+        const totalDamage    = outcome.totalDamage + outcome.totalElementalDamage;
+        const totalLine      = hasElemental ? `\n**${totalDamage} total damage**` : '';
+
+        body = `${hitLine}\n${primaryLine}${elementalLine}${totalLine}\n${actualTargetName} now at **${outcome.hpAfter} HP**`;
         if (outcome.defeated) {
             body += `\n-# 💀 ${actualTargetName} has been eliminated.`;
         } else if (outcome.knockedDown) {

@@ -23,10 +23,13 @@ export interface AvailableAction {
         targetsAllies:  boolean;
         targetsEnemies: boolean;
     } | null;
-    damageDice:    string | null;
-    healDice:      string | null;
-    cooldownRounds: number;
-    isOnCooldown:  boolean;
+    damageDice:              string | null;
+    damageTypeName:          string | null;
+    elementalDamageDice:     string | null;
+    elementalDamageTypeName: string | null;
+    healDice:                string | null;
+    cooldownRounds:          number;
+    isOnCooldown:            boolean;
 }
 
 export interface RoundEndEvent {
@@ -110,7 +113,7 @@ export function advanceTurn(combatId: number, currentEntityId: number) {
 }
 
 export type ActionResultOutcome =
-    | { kind: 'hit';      hitRoll: number; targetAC: number; diceRolls: number[]; totalDamage: number; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
     | { kind: 'miss';     hitRoll: number; targetAC: number }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }

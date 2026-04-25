@@ -46,7 +46,10 @@ export interface AvailableAction {
         targetsAllies:  boolean;
         targetsEnemies: boolean;
     } | null;
-    damageDice:     string | null;
+    damageDice:              string | null;
+    damageTypeName:          string | null;
+    elementalDamageDice:     string | null;
+    elementalDamageTypeName: string | null;
     healDice:       string | null;
     cooldownRounds: number;
     isOnCooldown:   boolean;
@@ -61,7 +64,7 @@ export interface PendingReaction {
 }
 
 export type ActionResultOutcome =
-    | { kind: 'hit';      hitRoll: number; targetAC: number; diceRolls: number[]; totalDamage: number; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
     | { kind: 'miss';     hitRoll: number; targetAC: number }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
@@ -375,8 +378,12 @@ export class PlayCombatService {
             label:           true,
             cooldownRounds:  true,
             targetScope:     { select: { targetsSelf: true, targetsSingle: true, targetsAllies: true, targetsEnemies: true } },
-            damageDiceCount: true,
-            damageDiceSides: true,
+            damageDiceCount:     true,
+            damageDiceSides:     true,
+            damageType:          { select: { name: true } },
+            elementalDiceCount:  true,
+            elementalDiceSides:  true,
+            elementalDamageType: { select: { name: true } },
             healDiceCount:   true,
             healDiceSides:   true,
         } as const;
@@ -412,15 +419,18 @@ export class PlayCombatService {
                 if (stored.dailyUsesRemaining !== null && stored.dailyUsesRemaining <= 0) continue;
                 for (const profile of stored.item.equipmentProfiles) {
                     actions.push({
-                        profileId:      profile.id,
-                        storedItemId:   stored.id,
-                        itemName:       stored.item.name,
-                        actionLabel:    profile.label,
-                        targetScope:    profile.targetScope,
-                        damageDice:     profile.damageDiceCount ? `${profile.damageDiceCount}d${profile.damageDiceSides}` : null,
-                        healDice:       profile.healDiceCount   ? `${profile.healDiceCount}d${profile.healDiceSides}`     : null,
-                        cooldownRounds: profile.cooldownRounds,
-                        isOnCooldown:   cooldownProfileIds.has(profile.id),
+                        profileId:               profile.id,
+                        storedItemId:            stored.id,
+                        itemName:                stored.item.name,
+                        actionLabel:             profile.label,
+                        targetScope:             profile.targetScope,
+                        damageDice:              profile.damageDiceCount   ? `${profile.damageDiceCount}d${profile.damageDiceSides}`     : null,
+                        damageTypeName:          profile.damageType?.name  ?? null,
+                        elementalDamageDice:     profile.elementalDiceCount ? `${profile.elementalDiceCount}d${profile.elementalDiceSides}` : null,
+                        elementalDamageTypeName: profile.elementalDamageType?.name ?? null,
+                        healDice:                profile.healDiceCount     ? `${profile.healDiceCount}d${profile.healDiceSides}`           : null,
+                        cooldownRounds:          profile.cooldownRounds,
+                        isOnCooldown:            cooldownProfileIds.has(profile.id),
                     });
                 }
             }
@@ -443,19 +453,24 @@ export class PlayCombatService {
         return equipped
             .filter(s => s.chosenProfile !== null)
             .map(s => ({
-                profileId:      s.chosenProfile!.id,
-                storedItemId:   s.id,
-                itemName:       s.item.name,
-                actionLabel:    s.chosenProfile!.label,
-                targetScope:    s.chosenProfile!.targetScope,
-                damageDice:     s.chosenProfile!.damageDiceCount
+                profileId:               s.chosenProfile!.id,
+                storedItemId:            s.id,
+                itemName:                s.item.name,
+                actionLabel:             s.chosenProfile!.label,
+                targetScope:             s.chosenProfile!.targetScope,
+                damageDice:              s.chosenProfile!.damageDiceCount
                     ? `${s.chosenProfile!.damageDiceCount}d${s.chosenProfile!.damageDiceSides}`
                     : null,
-                healDice:       s.chosenProfile!.healDiceCount
+                damageTypeName:          s.chosenProfile!.damageType?.name  ?? null,
+                elementalDamageDice:     s.chosenProfile!.elementalDiceCount
+                    ? `${s.chosenProfile!.elementalDiceCount}d${s.chosenProfile!.elementalDiceSides}`
+                    : null,
+                elementalDamageTypeName: s.chosenProfile!.elementalDamageType?.name ?? null,
+                healDice:                s.chosenProfile!.healDiceCount
                     ? `${s.chosenProfile!.healDiceCount}d${s.chosenProfile!.healDiceSides}`
                     : null,
-                cooldownRounds: s.chosenProfile!.cooldownRounds,
-                isOnCooldown:   cooldownProfileIds.has(s.chosenProfile!.id),
+                cooldownRounds:          s.chosenProfile!.cooldownRounds,
+                isOnCooldown:            cooldownProfileIds.has(s.chosenProfile!.id),
             }));
     }
 
@@ -780,14 +795,18 @@ export class PlayCombatService {
         if (ctx.profile?.dealsDamage) {
             if (ctx.isHit === true) {
                 outcome = {
-                    kind:        'hit',
-                    hitRoll:     ctx.hitTotal!,
-                    targetAC:    ctx.targetAC,
-                    diceRolls:   ctx.diceRolls,
-                    totalDamage: ctx.finalDamage,
-                    hpAfter:     ctx.hpAfter ?? 0,
-                    knockedDown: ctx.knockedDown,
-                    defeated:    ctx.defeated,
+                    kind:                    'hit',
+                    hitRoll:                 ctx.hitTotal!,
+                    targetAC:                ctx.targetAC,
+                    diceRolls:               ctx.diceRolls,
+                    totalDamage:             ctx.finalDamage,
+                    damageTypeName:          ctx.profile?.damageTypeName          ?? null,
+                    elementalDiceRolls:      ctx.elementalDiceRolls,
+                    totalElementalDamage:    ctx.finalElementalDamage,
+                    elementalDamageTypeName: ctx.profile?.elementalDamageTypeName ?? null,
+                    hpAfter:                 ctx.hpAfter ?? 0,
+                    knockedDown:             ctx.knockedDown,
+                    defeated:                ctx.defeated,
                 };
             } else {
                 outcome = { kind: 'miss', hitRoll: ctx.hitTotal!, targetAC: ctx.targetAC };

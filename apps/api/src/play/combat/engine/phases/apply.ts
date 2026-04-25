@@ -8,7 +8,7 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
     if (ctx.aborted || !ctx.isHit || !ctx.target || ctx.actualTargetId === null) return;
     if (!ctx.profile?.dealsDamage) return;
 
-    const newHp = ctx.target.currentHp - ctx.finalDamage;
+    const newHp = ctx.target.currentHp - ctx.finalDamage - ctx.finalElementalDamage;
     await db.entityStats.update({
         where: { entityId: ctx.actualTargetId },
         data:  { currentHp: newHp },

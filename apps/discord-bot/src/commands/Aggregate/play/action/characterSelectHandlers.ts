@@ -7,8 +7,8 @@ import type { ActionCategory } from './defs';
 
 const EXPIRED_MSG = 'Session expired — please run the command again.';
 
-function expiredReply(interaction: ButtonInteraction): Promise<void> {
-    return interaction.editReply({
+async function expiredReply(interaction: ButtonInteraction): Promise<void> {
+    await interaction.editReply({
         flags:      MessageFlags.IsComponentsV2,
         components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: EXPIRED_MSG }] }],
     } as never);
