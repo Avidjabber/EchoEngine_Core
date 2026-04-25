@@ -1,5 +1,5 @@
 import { colors } from '../../../../../core/colors';
-import type { CombatParticipantOrder } from '../../../../../services/play/combatService';
+import type { CombatParticipantOrder, XpGrant } from '../../../../../services/play/combatService';
 
 export function buildCombatAnnouncementComponents(
     activeCombatId: number,
@@ -113,4 +113,69 @@ export function buildTurnEndedComponents(entityName: string): object[] {
         accent_color: colors.info,
         components:   [{ type: 10, content: `-# ${entityName}'s turn has ended.` }],
     }];
+}
+
+export function buildSecondWindComponents(
+    activeCombatId: number,
+    entityId:       number,
+    entityName:     string,
+    userId:         string | undefined,
+    round:          number,
+): object[] {
+    const ping = userId ? `<@${userId}>` : `**${entityName}**`;
+    return [{
+        type:         17,
+        accent_color: colors.warning,
+        components: [
+            { type: 10, content: `${ping} — **${entityName}** has been knocked down!\nAccept **Second Wind** to recover full HP and continue — but if you fall again, you will be eliminated.` },
+            { type: 14 },
+            {
+                type: 1,
+                components: [
+                    { type: 2, style: 1, label: 'Accept Second Wind', custom_id: `pa_sw_accept:${activeCombatId}:${entityId}` },
+                    { type: 2, style: 4, label: 'Decline',            custom_id: `pa_sw_decline:${activeCombatId}:${entityId}` },
+                ],
+            },
+            { type: 10, content: `-# Round ${round}` },
+        ],
+    }];
+}
+
+export function buildCombatOutcomeComponents(
+    winningAllyFactionId: number | null,
+    xpGrants:             XpGrant[],
+): object[] {
+    const outcomeText = winningAllyFactionId !== null
+        ? `Team ${winningAllyFactionId} wins!`
+        : 'The combat has ended in a draw.';
+
+    const inner: object[] = [
+        { type: 10, content: `## ⚔ Combat Over` },
+        { type: 14 },
+        { type: 10, content: outcomeText },
+    ];
+
+    if (xpGrants.length > 0) {
+        // Group grants by entityId so each entity gets one block
+        const byEntity = new Map<number, XpGrant[]>();
+        for (const g of xpGrants) {
+            if (!byEntity.has(g.entityId)) byEntity.set(g.entityId, []);
+            byEntity.get(g.entityId)!.push(g);
+        }
+
+        const lines: string[] = [];
+        for (const [, grants] of byEntity) {
+            const name       = grants[0].entityName;
+            const grantLines = grants.map(g => {
+                const levelUp = g.levelsGained > 0 ? ` ⬆ Lv ${g.newLevel}` : '';
+                return `  ${g.disciplineName} +${g.xpGained} XP${levelUp}`;
+            });
+            lines.push(`**${name}**\n${grantLines.join('\n')}`);
+        }
+
+        inner.push({ type: 14 });
+        inner.push({ type: 10, content: lines.join('\n\n') });
+    }
+
+    return [{ type: 17, accent_color: colors.special, components: inner }];
 }

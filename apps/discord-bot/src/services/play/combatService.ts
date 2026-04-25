@@ -6,6 +6,7 @@ export interface CombatParticipantInfo {
     userId:         string | null;
     allyFactionId:  number;
     turnOrder:      number;
+    currentHp:      number | null;
     isDefeated:     boolean;
     hasFled:        boolean;
     isAiControlled: boolean;
@@ -22,19 +23,21 @@ export interface AvailableAction {
         targetsAllies:  boolean;
         targetsEnemies: boolean;
     } | null;
-    damageDice:   string | null;
-    healDice:     string | null;
-    isOnCooldown: boolean;
+    damageDice:    string | null;
+    healDice:      string | null;
+    cooldownRounds: number;
+    isOnCooldown:  boolean;
 }
 
 export interface AdvanceTurnResult {
-    combatEnded:          boolean;
-    nextEntityId:         number | null;
-    nextEntityName:       string | null;
-    nextUserId:           string | null;
-    isAiControlled:       boolean;
-    round:                number;
-    winningAllyFactionId: number | null;
+    combatEnded:            boolean;
+    nextEntityId:           number | null;
+    nextEntityName:         string | null;
+    nextUserId:             string | null;
+    isAiControlled:         boolean;
+    isAwaitingSecondWind:   boolean;
+    round:                  number;
+    winningAllyFactionId:   number | null;
 }
 
 export interface CombatTargetEntity {
@@ -93,4 +96,56 @@ export function fetchAvailableActions(combatId: number, entityId: number, catego
 
 export function advanceTurn(combatId: number, currentEntityId: number) {
     return apiClient.post<AdvanceTurnResult>(`/play/combat/${combatId}/advance-turn`, { currentEntityId });
+}
+
+export type ActionResultOutcome =
+    | { kind: 'hit';      hitRoll: number; targetAC: number; diceRolls: number[]; totalDamage: number; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'miss';     hitRoll: number; targetAC: number }
+    | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
+    | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
+    | { kind: 'no_op' };
+
+export interface ActionResult {
+    actionId:         number;
+    actionLabel:      string;
+    actorName:        string;
+    targetName:       string;
+    actualTargetName: string;
+    wasRedirected:    boolean;
+    outcome:          ActionResultOutcome;
+}
+
+export function processAction(
+    combatId:       number,
+    actorEntityId:  number,
+    profileId:      number,
+    storedItemId:   number,
+    targetEntityId: number | null,
+    roundNumber:    number,
+) {
+    return apiClient.post<ActionResult>(`/play/combat/${combatId}/process-action`, {
+        actorEntityId, profileId, storedItemId, targetEntityId, roundNumber,
+    });
+}
+
+export interface XpGrant {
+    entityId:       number;
+    entityName:     string;
+    disciplineId:   number;
+    disciplineName: string;
+    xpGained:       number;
+    levelsGained:   number;
+    newLevel:       number;
+}
+
+export function distributeCombatXp(combatId: number) {
+    return apiClient.post<XpGrant[]>(`/play/combat/${combatId}/distribute-xp`, {});
+}
+
+export function acceptSecondWind(combatId: number, entityId: number) {
+    return apiClient.post<void>(`/play/combat/${combatId}/second-wind`, { entityId });
+}
+
+export function declineSecondWind(combatId: number, entityId: number) {
+    return apiClient.post<void>(`/play/combat/${combatId}/decline-second-wind`, { entityId });
 }

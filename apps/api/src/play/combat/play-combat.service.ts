@@ -29,4 +29,27 @@ export class PlayCombatService {
     advanceTurn(combatId: number, currentEntityId: number) {
         return this.repo.advanceTurn(combatId, currentEntityId);
     }
+
+    processAction(
+        combatId:       number,
+        actorEntityId:  number,
+        profileId:      number,
+        storedItemId:   number,
+        targetEntityId: number | null,
+        roundNumber:    number,
+    ) {
+        return this.repo.processAction(combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber);
+    }
+
+    distributeCombatXp(combatId: number) {
+        return this.repo.distributeCombatXp(combatId);
+    }
+
+    acceptSecondWind(combatId: number, entityId: number) {
+        return this.repo.acceptSecondWind(combatId, entityId);
+    }
+
+    declineSecondWind(combatId: number, entityId: number) {
+        return this.repo.declineSecondWind(combatId, entityId);
+    }
 }

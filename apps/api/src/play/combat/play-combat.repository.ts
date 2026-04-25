@@ -24,6 +24,7 @@ export interface CombatParticipantInfo {
     userId:         string | null;
     allyFactionId:  number;
     turnOrder:      number;
+    currentHp:      number | null;
     isDefeated:     boolean;
     hasFled:        boolean;
     isAiControlled: boolean;
@@ -40,19 +41,46 @@ export interface AvailableAction {
         targetsAllies:  boolean;
         targetsEnemies: boolean;
     } | null;
-    damageDice:   string | null;
-    healDice:     string | null;
-    isOnCooldown: boolean;
+    damageDice:    string | null;
+    healDice:      string | null;
+    cooldownRounds: number;
+    isOnCooldown:  boolean;
+}
+
+export interface ActionResult {
+    actionId:         number;
+    actionLabel:      string;
+    actorName:        string;
+    targetName:       string;
+    actualTargetName: string;
+    wasRedirected:    boolean;
+    outcome:
+        | { kind: 'hit';      hitRoll: number; targetAC: number; diceRolls: number[]; totalDamage: number; hpAfter: number; knockedDown: boolean; defeated: boolean }
+        | { kind: 'miss';     hitRoll: number; targetAC: number }
+        | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
+        | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
+        | { kind: 'no_op' };
+}
+
+export interface XpGrant {
+    entityId:      number;
+    entityName:    string;
+    disciplineId:  number;
+    disciplineName: string;
+    xpGained:      number;
+    levelsGained:  number;
+    newLevel:      number;
 }
 
 export interface AdvanceTurnResult {
-    combatEnded:          boolean;
-    nextEntityId:         number | null;
-    nextEntityName:       string | null;
-    nextUserId:           string | null;
-    isAiControlled:       boolean;
-    round:                number;
-    winningAllyFactionId: number | null;
+    combatEnded:            boolean;
+    nextEntityId:           number | null;
+    nextEntityName:         string | null;
+    nextUserId:             string | null;
+    isAiControlled:         boolean;
+    isAwaitingSecondWind:   boolean;
+    round:                  number;
+    winningAllyFactionId:   number | null;
 }
 
 export interface CombatTargetEntity {
@@ -239,24 +267,32 @@ export class PlayCombatRepository {
         const rows = await this.db.activeCombat_Participant.findMany({
             where:   { activeCombatId: combatId },
             select: {
-                entityId:      true,
-                allyFactionId: true,
-                turnOrder:     true,
-                isDefeated:    true,
-                hasFled:       true,
-                isAiControlled: true,
-                entity: { select: { name: true, userId: true } },
+                entityId:         true,
+                allyFactionId:    true,
+                turnOrder:        true,
+                isDefeated:       true,
+                hasFled:          true,
+                isAiControlled:   true,
+                controllerUserId: true,
+                entity: {
+                    select: {
+                        name:   true,
+                        userId: true,
+                        stats:  { select: { currentHp: true } },
+                    },
+                },
             },
             orderBy: { turnOrder: 'asc' },
         });
         return rows.map(r => ({
-            entityId:      r.entityId,
-            name:          r.entity.name,
-            userId:        r.entity.userId ?? null,
-            allyFactionId: r.allyFactionId,
-            turnOrder:     r.turnOrder,
-            isDefeated:    r.isDefeated,
-            hasFled:       r.hasFled,
+            entityId:       r.entityId,
+            name:           r.entity.name,
+            userId:         r.controllerUserId ?? r.entity.userId ?? null,
+            allyFactionId:  r.allyFactionId,
+            turnOrder:      r.turnOrder,
+            currentHp:      r.entity.stats?.currentHp ?? null,
+            isDefeated:     r.isDefeated,
+            hasFled:        r.hasFled,
             isAiControlled: r.isAiControlled,
         }));
     }
@@ -304,42 +340,38 @@ export class PlayCombatRepository {
         });
         if (!entityStorage) return [];
 
+        const profileSelect = {
+            id:              true,
+            label:           true,
+            cooldownRounds:  true,
+            targetScope:     { select: { targetsSelf: true, targetsSingle: true, targetsAllies: true, targetsEnemies: true } },
+            damageDiceCount: true,
+            damageDiceSides: true,
+            healDiceCount:   true,
+            healDiceSides:   true,
+        } as const;
+
+        const profileWhere = {
+            actionCategory: { name: categoryName },
+            usageContext:   { not: 'out_of_combat_only' },
+            ...(isSpar ? { allowedInSpar: true } : {}),
+        } as const;
+
         if (category === 'item') {
             // Items in inventory with any profile in the "Item Interaction" category (not required to be equipped)
             const items = await this.db.storedItem.findMany({
                 where: {
                     storageId: entityStorage.storageId,
-                    item: {
-                        equipmentProfiles: {
-                            some: {
-                                actionCategory: { name: categoryName },
-                                ...(isSpar ? { allowedInSpar: true } : {}),
-                            },
-                        },
-                    },
+                    item: { equipmentProfiles: { some: profileWhere } },
                 },
                 select: {
-                    id:               true,
-                    usesRemaining:    true,
+                    id:                 true,
+                    usesRemaining:      true,
                     dailyUsesRemaining: true,
                     item: {
                         select: {
                             name:              true,
-                            equipmentProfiles: {
-                                where: {
-                                    actionCategory: { name: categoryName },
-                                    ...(isSpar ? { allowedInSpar: true } : {}),
-                                },
-                                select: {
-                                    id:          true,
-                                    label:       true,
-                                    targetScope: { select: { targetsSelf: true, targetsSingle: true, targetsAllies: true, targetsEnemies: true } },
-                                    damageDiceCount: true,
-                                    damageDiceSides: true,
-                                    healDiceCount:   true,
-                                    healDiceSides:   true,
-                                },
-                            },
+                            equipmentProfiles: { where: profileWhere, select: profileSelect },
                         },
                     },
                 },
@@ -351,14 +383,15 @@ export class PlayCombatRepository {
                 if (stored.dailyUsesRemaining !== null && stored.dailyUsesRemaining <= 0) continue;
                 for (const profile of stored.item.equipmentProfiles) {
                     actions.push({
-                        profileId:    profile.id,
-                        storedItemId: stored.id,
-                        itemName:     stored.item.name,
-                        actionLabel:  profile.label,
-                        targetScope:  profile.targetScope,
-                        damageDice:   profile.damageDiceCount ? `${profile.damageDiceCount}d${profile.damageDiceSides}` : null,
-                        healDice:     profile.healDiceCount   ? `${profile.healDiceCount}d${profile.healDiceSides}`     : null,
-                        isOnCooldown: cooldownProfileIds.has(profile.id),
+                        profileId:      profile.id,
+                        storedItemId:   stored.id,
+                        itemName:       stored.item.name,
+                        actionLabel:    profile.label,
+                        targetScope:    profile.targetScope,
+                        damageDice:     profile.damageDiceCount ? `${profile.damageDiceCount}d${profile.damageDiceSides}` : null,
+                        healDice:       profile.healDiceCount   ? `${profile.healDiceCount}d${profile.healDiceSides}`     : null,
+                        cooldownRounds: profile.cooldownRounds,
+                        isOnCooldown:   cooldownProfileIds.has(profile.id),
                     });
                 }
             }
@@ -368,45 +401,33 @@ export class PlayCombatRepository {
         // Main / Bonus: equipped items whose chosen profile is in the right category
         const equipped = await this.db.storedItem.findMany({
             where: {
-                storageId:       entityStorage.storageId,
-                isEquipped:      true,
-                chosenProfile: {
-                    actionCategory: { name: categoryName },
-                    ...(isSpar ? { allowedInSpar: true } : {}),
-                },
+                storageId:     entityStorage.storageId,
+                isEquipped:    true,
+                chosenProfile: profileWhere,
             },
             select: {
                 id:   true,
                 item: { select: { name: true } },
-                chosenProfile: {
-                    select: {
-                        id:          true,
-                        label:       true,
-                        targetScope: { select: { targetsSelf: true, targetsSingle: true, targetsAllies: true, targetsEnemies: true } },
-                        damageDiceCount: true,
-                        damageDiceSides: true,
-                        healDiceCount:   true,
-                        healDiceSides:   true,
-                    },
-                },
+                chosenProfile: { select: profileSelect },
             },
         });
 
         return equipped
             .filter(s => s.chosenProfile !== null)
             .map(s => ({
-                profileId:    s.chosenProfile!.id,
-                storedItemId: s.id,
-                itemName:     s.item.name,
-                actionLabel:  s.chosenProfile!.label,
-                targetScope:  s.chosenProfile!.targetScope,
-                damageDice:   s.chosenProfile!.damageDiceCount
+                profileId:      s.chosenProfile!.id,
+                storedItemId:   s.id,
+                itemName:       s.item.name,
+                actionLabel:    s.chosenProfile!.label,
+                targetScope:    s.chosenProfile!.targetScope,
+                damageDice:     s.chosenProfile!.damageDiceCount
                     ? `${s.chosenProfile!.damageDiceCount}d${s.chosenProfile!.damageDiceSides}`
                     : null,
-                healDice:     s.chosenProfile!.healDiceCount
+                healDice:       s.chosenProfile!.healDiceCount
                     ? `${s.chosenProfile!.healDiceCount}d${s.chosenProfile!.healDiceSides}`
                     : null,
-                isOnCooldown: cooldownProfileIds.has(s.chosenProfile!.id),
+                cooldownRounds: s.chosenProfile!.cooldownRounds,
+                isOnCooldown:   cooldownProfileIds.has(s.chosenProfile!.id),
             }));
     }
 
@@ -414,16 +435,25 @@ export class PlayCombatRepository {
         const combat = await this.db.activeCombat.findUnique({
             where:  { id: combatId },
             select: {
-                currentTurnOrder: true,
-                currentRound:     true,
+                currentTurnOrder:  true,
+                currentRound:      true,
+                initiationType:    { select: { canSecondWind: true } },
                 participants: {
                     where:   { hasFled: false, isDefeated: false },
                     select: {
-                        entityId:      true,
-                        allyFactionId: true,
-                        turnOrder:     true,
-                        isAiControlled: true,
-                        entity: { select: { name: true, userId: true } },
+                        entityId:         true,
+                        allyFactionId:    true,
+                        turnOrder:        true,
+                        isAiControlled:   true,
+                        inSecondWind:     true,
+                        controllerUserId: true,
+                        entity: {
+                            select: {
+                                name:   true,
+                                userId: true,
+                                stats:  { select: { currentHp: true } },
+                            },
+                        },
                     },
                     orderBy: { turnOrder: 'asc' },
                 },
@@ -431,17 +461,20 @@ export class PlayCombatRepository {
         });
         if (!combat) throw new Error(`Combat ${combatId} not found`);
 
-        const active = combat.participants;
+        const active       = combat.participants;
+        const canSecondWind = combat.initiationType.canSecondWind;
 
         // Check if combat is over: fewer than 2 distinct ally factions remain
         const factions = new Set(active.map(p => p.allyFactionId));
         if (factions.size < 2) {
             const winningAllyFactionId = factions.size === 1 ? [...factions][0] : null;
+            const outcomeName = winningAllyFactionId !== null ? 'win' : 'draw';
+            const outcome = await this.db.combatOutcome.findFirst({ where: { name: outcomeName }, select: { id: true } });
             await this.db.activeCombat.update({
                 where: { id: combatId },
-                data:  { isActive: false },
+                data:  { isActive: false, winningAllyFactionId: winningAllyFactionId ?? null, ...(outcome ? { outcomeId: outcome.id } : {}), completedAt: new Date() },
             });
-            return { combatEnded: true, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, round: combat.currentRound, winningAllyFactionId };
+            return { combatEnded: true, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, isAwaitingSecondWind: false, round: combat.currentRound, winningAllyFactionId };
         }
 
         const currentIdx = active.findIndex(p => p.entityId === currentEntityId);
@@ -456,15 +489,543 @@ export class PlayCombatRepository {
             data:  { currentTurnOrder: next.turnOrder, currentRound: newRound },
         });
 
+        const isAwaitingSecondWind =
+            canSecondWind &&
+            !next.isAiControlled &&
+            !next.inSecondWind &&
+            (next.entity.stats?.currentHp ?? 1) <= 0;
+
         return {
-            combatEnded:          false,
-            nextEntityId:         next.entityId,
-            nextEntityName:       next.entity.name,
-            nextUserId:           next.entity.userId ?? null,
-            isAiControlled:       next.isAiControlled,
-            round:                newRound,
-            winningAllyFactionId: null,
+            combatEnded:           false,
+            nextEntityId:          next.entityId,
+            nextEntityName:        next.entity.name,
+            nextUserId:            next.controllerUserId ?? next.entity.userId ?? null,
+            isAiControlled:        next.isAiControlled,
+            isAwaitingSecondWind,
+            round:                 newRound,
+            winningAllyFactionId:  null,
         };
+    }
+
+    async acceptSecondWind(combatId: number, entityId: number): Promise<void> {
+        const stats = await this.db.entityStats.findUnique({
+            where:  { entityId },
+            select: { maxHp: true },
+        });
+        await this.db.$transaction([
+            this.db.entityStats.update({
+                where: { entityId },
+                data:  { currentHp: stats?.maxHp ?? 1 },
+            }),
+            this.db.activeCombat_Participant.update({
+                where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
+                data:  { inSecondWind: true },
+            }),
+        ]);
+    }
+
+    async declineSecondWind(combatId: number, entityId: number): Promise<void> {
+        await this.db.activeCombat_Participant.update({
+            where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
+            data:  { isDefeated: true },
+        });
+    }
+
+    async processAction(
+        combatId:       number,
+        actorEntityId:  number,
+        profileId:      number,
+        storedItemId:   number,
+        targetEntityId: number | null,
+        roundNumber:    number,
+    ): Promise<ActionResult> {
+        // ── Load profile, combat, and actor in parallel ───────────────────────
+        const [profile, combat, actor, existingCount] = await Promise.all([
+            this.db.itemEquipmentProfile.findUnique({
+                where:  { id: profileId },
+                select: {
+                    label:               true,
+                    actionCategoryId:    true,
+                    cooldownRounds:      true,
+                    durationRounds:      true,
+                    hitBonus:            true,
+                    damageBonus:         true,
+                    healBonus:           true,
+                    damageDiceCount:     true,
+                    damageDiceSides:     true,
+                    healDiceCount:       true,
+                    healDiceSides:       true,
+                    behaviorEffectTypeId: true,
+                    hitStat:            { select: { name: true } },
+                    damageStat:         { select: { name: true } },
+                    healStat:           { select: { name: true } },
+                    behaviorEffectType: { select: { name: true, redirectsDamage: true } },
+                    actionType:         { select: { dealsDamage: true, restoresHealth: true } },
+                },
+            }),
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: { initiationType: { select: { canSecondWind: true } } },
+            }),
+            this.db.entity.findUnique({
+                where:  { id: actorEntityId },
+                select: {
+                    name:  true,
+                    stats: { select: { strength: true, dexterity: true, constitution: true, intelligence: true, wisdom: true, charisma: true } },
+                },
+            }),
+            this.db.activeCombat_Action.count({ where: { activeCombatId: combatId, roundNumber } }),
+        ]);
+
+        if (!profile?.actionCategoryId) throw new Error(`Profile ${profileId} has no action category`);
+        const canSecondWind = combat?.initiationType.canSecondWind ?? false;
+
+        // ── Resolve redirect (guard) for harmful actions ──────────────────────
+        const dealsDamage    = profile.actionType?.dealsDamage    ?? false;
+        const restoresHealth = profile.actionType?.restoresHealth ?? false;
+
+        let actualTargetId = targetEntityId;
+        let wasRedirected  = false;
+
+        if (targetEntityId !== null && dealsDamage) {
+            const targetParticipant = await this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: targetEntityId },
+                select: { id: true },
+            });
+            if (targetParticipant) {
+                const guard = await this.db.activeCombat_BehaviorEffect.findFirst({
+                    where: {
+                        activeCombatId:       combatId,
+                        linkedParticipantId:  targetParticipant.id,
+                        effectType: { redirectsDamage: true },
+                    },
+                    select: { affectedParticipant: { select: { entityId: true } } },
+                });
+                if (guard) {
+                    actualTargetId = guard.affectedParticipant.entityId;
+                    wasRedirected  = true;
+                }
+            }
+        }
+
+        // ── Load original target name if redirected ───────────────────────────
+        const originalTargetName = wasRedirected && targetEntityId !== null
+            ? (await this.db.entity.findUnique({ where: { id: targetEntityId }, select: { name: true } }))?.name ?? 'Unknown'
+            : null;
+
+        // ── Load actual target data ───────────────────────────────────────────
+        let targetEntity: {
+            name:    string;
+            species: { baseAc: number } | null;
+            stats:   { dexterity: number; currentHp: number | null; maxHp: number | null } | null;
+            storage: { storageId: number } | null;
+        } | null = null;
+
+        let targetAC        = 10;
+        let targetPartInfo: { id: number; inSecondWind: boolean; isAiControlled: boolean } | null = null;
+
+        if (actualTargetId !== null) {
+            [targetEntity, targetPartInfo] = await Promise.all([
+                this.db.entity.findUnique({
+                    where:  { id: actualTargetId },
+                    select: {
+                        name:    true,
+                        species: { select: { baseAc: true } },
+                        stats:   { select: { dexterity: true, currentHp: true, maxHp: true } },
+                        storage: { select: { storageId: true } },
+                    },
+                }),
+                this.db.activeCombat_Participant.findFirst({
+                    where:  { activeCombatId: combatId, entityId: actualTargetId },
+                    select: { id: true, inSecondWind: true, isAiControlled: true },
+                }),
+            ]);
+
+            if (targetEntity?.storage && (dealsDamage || restoresHealth)) {
+                const equipped = await this.db.storedItem.findMany({
+                    where:  { storageId: targetEntity.storage.storageId, isEquipped: true },
+                    select: { chosenProfile: { select: { acModifier: true } } },
+                });
+                const equippedAcBonus = equipped.reduce((s, i) => s + (i.chosenProfile?.acModifier ?? 0), 0);
+                const dexMod = Math.floor(((targetEntity.stats?.dexterity ?? 10) - 10) / 2);
+                targetAC = (targetEntity.species?.baseAc ?? 10) + dexMod + equippedAcBonus;
+            }
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+        const rollDice = (count: number, sides: number): number[] =>
+            Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
+        const statMod = (v: number) => Math.floor((v - 10) / 2);
+        const getStat = (name: string | undefined): number =>
+            name && actor?.stats ? ((actor.stats as Record<string, number>)[name] ?? 10) : 10;
+
+        // ── Action data for the log record ────────────────────────────────────
+        const logData: {
+            hitRoll?: number; hitModifier?: number; hit?: boolean;
+            damageRoll?: number; damageModifier?: number; damageDealt?: number;
+            healDealt?: number; secondWindTriggered?: boolean;
+        } = {};
+
+        // ── Resolve outcome ───────────────────────────────────────────────────
+        let outcome: ActionResult['outcome'] = { kind: 'no_op' };
+
+        if (dealsDamage && actualTargetId !== null && targetEntity?.stats) {
+            const hitMod  = statMod(getStat(profile.hitStat?.name)) + profile.hitBonus;
+            const hitRoll = rollDice(1, 20)[0]!;
+            const hitTotal = hitRoll + hitMod;
+            const isHit   = hitTotal >= targetAC;
+
+            logData.hitRoll = hitRoll; logData.hitModifier = hitMod; logData.hit = isHit;
+
+            if (isHit && profile.damageDiceCount && profile.damageDiceSides) {
+                const damageMod  = statMod(getStat(profile.damageStat?.name)) + profile.damageBonus;
+                const diceRolls  = rollDice(profile.damageDiceCount, profile.damageDiceSides);
+                const diceSum    = diceRolls.reduce((a, b) => a + b, 0);
+                const totalDamage = Math.max(0, diceSum + damageMod);
+                const newHp      = (targetEntity.stats.currentHp ?? 0) - totalDamage;
+
+                logData.damageRoll = diceSum; logData.damageModifier = damageMod; logData.damageDealt = totalDamage;
+
+                await this.db.entityStats.update({ where: { entityId: actualTargetId }, data: { currentHp: newHp } });
+
+                let knockedDown = false;
+                let defeated    = false;
+                if (newHp <= 0 && targetPartInfo) {
+                    if (targetPartInfo.isAiControlled || !canSecondWind || targetPartInfo.inSecondWind) {
+                        await this.db.activeCombat_Participant.update({
+                            where: { id: targetPartInfo.id },
+                            data:  { isDefeated: true },
+                        });
+                        defeated = true;
+                    } else {
+                        knockedDown = true;
+                        logData.secondWindTriggered = true;
+                    }
+                }
+                outcome = { kind: 'hit', hitRoll: hitTotal, targetAC, diceRolls, totalDamage, hpAfter: Math.max(0, newHp), knockedDown, defeated };
+            } else {
+                outcome = { kind: 'miss', hitRoll: hitTotal, targetAC };
+            }
+
+        } else if (restoresHealth && actualTargetId !== null && targetEntity?.stats && profile.healDiceCount && profile.healDiceSides) {
+            const healMod   = statMod(getStat(profile.healStat?.name)) + profile.healBonus;
+            const diceRolls = rollDice(profile.healDiceCount, profile.healDiceSides);
+            const diceSum   = diceRolls.reduce((a, b) => a + b, 0);
+            const totalHeal = Math.max(0, diceSum + healMod);
+            const newHp     = Math.min(
+                targetEntity.stats.maxHp ?? (targetEntity.stats.currentHp ?? 0),
+                (targetEntity.stats.currentHp ?? 0) + totalHeal,
+            );
+            logData.healDealt = totalHeal;
+            await this.db.entityStats.update({ where: { entityId: actualTargetId }, data: { currentHp: newHp } });
+            outcome = { kind: 'heal', diceRolls, totalHeal, hpAfter: newHp };
+
+        } else if (profile.behaviorEffectTypeId) {
+            const rounds = Math.max(1, profile.durationRounds);
+            const [actorPart, linkedPart] = await Promise.all([
+                this.db.activeCombat_Participant.findFirst({ where: { activeCombatId: combatId, entityId: actorEntityId }, select: { id: true } }),
+                targetEntityId !== null
+                    ? this.db.activeCombat_Participant.findFirst({ where: { activeCombatId: combatId, entityId: targetEntityId }, select: { id: true } })
+                    : null,
+            ]);
+            if (actorPart) {
+                await this.db.activeCombat_BehaviorEffect.upsert({
+                    where:  { affectedParticipantId_effectTypeId: { affectedParticipantId: actorPart.id, effectTypeId: profile.behaviorEffectTypeId } },
+                    create: { activeCombatId: combatId, affectedParticipantId: actorPart.id, linkedParticipantId: linkedPart?.id ?? null, effectTypeId: profile.behaviorEffectTypeId, roundsRemaining: rounds },
+                    update: { roundsRemaining: rounds, linkedParticipantId: linkedPart?.id ?? null },
+                });
+            }
+            const guardedName = targetEntityId !== null && targetEntityId !== actorEntityId
+                ? await this.db.entity.findUnique({ where: { id: targetEntityId }, select: { name: true } }).then(e => e?.name ?? null)
+                : null;
+            outcome = { kind: 'behavior', effectName: profile.behaviorEffectType?.name ?? 'effect', guardedName, rounds };
+        }
+
+        // ── Create action log record ──────────────────────────────────────────
+        const action = await this.db.activeCombat_Action.create({
+            data: {
+                activeCombatId:     combatId,
+                roundNumber,
+                turnIndex:          existingCount + 1,
+                actorEntityId,
+                actionCategoryId:   profile.actionCategoryId,
+                equipmentProfileId: profileId,
+                targetEntityId:     actualTargetId ?? null,
+                ...logData,
+            },
+            select: { id: true },
+        });
+
+        // ── Cooldown ──────────────────────────────────────────────────────────
+        if (profile.cooldownRounds > 0) {
+            const actorPart = await this.db.activeCombat_Participant.findUnique({
+                where:  { activeCombatId_entityId: { activeCombatId: combatId, entityId: actorEntityId } },
+                select: { id: true },
+            });
+            if (actorPart) {
+                await this.db.activeCombat_Participant_ActionCooldown.upsert({
+                    where:  { participantId_equipmentProfileId: { participantId: actorPart.id, equipmentProfileId: profileId } },
+                    create: { participantId: actorPart.id, equipmentProfileId: profileId, roundsRemaining: profile.cooldownRounds },
+                    update: { roundsRemaining: profile.cooldownRounds },
+                });
+            }
+        }
+
+        // ── Decrement item uses ───────────────────────────────────────────────
+        await this.db.storedItem.updateMany({
+            where: {
+                id:                    storedItemId,
+                usesRemaining:         { not: null },
+            },
+            data: { usesRemaining: { decrement: 1 } },
+        });
+        await this.db.storedItem.updateMany({
+            where: {
+                id:                    storedItemId,
+                dailyUsesRemaining:    { not: null },
+            },
+            data: { dailyUsesRemaining: { decrement: 1 } },
+        });
+
+        return {
+            actionId:         action.id,
+            actionLabel:      profile.label ?? 'Unknown',
+            actorName:        actor?.name ?? 'Unknown',
+            targetName:       originalTargetName ?? targetEntity?.name ?? 'Unknown',
+            actualTargetName: targetEntity?.name ?? 'Unknown',
+            wasRedirected,
+            outcome,
+        };
+    }
+
+    async distributeCombatXp(combatId: number): Promise<XpGrant[]> {
+        const combat = await this.db.activeCombat.findUnique({
+            where:  { id: combatId },
+            select: {
+                guildId:              true,
+                winningAllyFactionId: true,
+                isActive:             true,
+                activeEventId:        true,
+                initiationType:       { select: { name: true } },
+                participants: {
+                    select: {
+                        entityId:      true,
+                        allyFactionId: true,
+                        isDefeated:    true,
+                        entity: {
+                            select: {
+                                name:    true,
+                                type:    { select: { name: true } },
+                                species: { select: { combatXpReward: true } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!combat || combat.isActive) return [];
+
+        // Event-triggered combat: XP comes from defeated enemies' species reward
+        if (combat.activeEventId !== null) {
+            return this._distributeEventCombatXp(combat);
+        }
+
+        // Activity-triggered combat: XP comes from guild-configured ActionType_DisciplineReward rows
+        const combatType = combat.initiationType.name;
+        if (combatType !== 'spar' && combatType !== 'fight') return [];
+
+        const eligible = combat.participants.filter(p => p.entity.type.name === 'Main Character');
+        if (eligible.length === 0) return [];
+
+        const rewards = await this.db.actionType_DisciplineReward.findMany({
+            where: {
+                guildId:        combat.guildId,
+                actionType:     { name: combatType },
+                recipientScope: { in: ['all', 'winners_only', 'losers_only'] },
+            },
+            select: {
+                disciplineId:   true,
+                xpAmount:       true,
+                recipientScope: true,
+                discipline:     { select: { id: true, baseXp: true, name: true, isStatProgression: true } },
+            },
+        });
+        if (rewards.length === 0) return [];
+
+        const [guildSettings, capRows] = await Promise.all([
+            this.db.guildSettings.findFirst({
+                where:  { guildId: combat.guildId },
+                select: { disciplineLevelCap: true },
+            }),
+            this.db.guild_DisciplineLevelCap.findMany({
+                where:  { guildId: combat.guildId, disciplineDefId: { in: rewards.map(r => r.disciplineId) } },
+                select: { disciplineDefId: true, levelCap: true },
+            }),
+        ]);
+        const capMap     = new Map(capRows.map(r => [r.disciplineDefId, r.levelCap]));
+        const defaultCap = guildSettings?.disciplineLevelCap ?? null;
+
+        const entityNames    = new Map(eligible.map(p => [p.entityId, p.entity.name]));
+        const disciplineMeta = new Map(rewards.map(r => [r.disciplineId, r.discipline]));
+
+        const entityXpMap = new Map<number, Map<number, number>>();
+        for (const reward of rewards) {
+            let targets: number[];
+            if (reward.recipientScope === 'winners_only') {
+                if (combat.winningAllyFactionId === null) continue;
+                targets = eligible.filter(p => p.allyFactionId === combat.winningAllyFactionId).map(p => p.entityId);
+            } else if (reward.recipientScope === 'losers_only') {
+                if (combat.winningAllyFactionId === null) continue;
+                targets = eligible.filter(p => p.allyFactionId !== combat.winningAllyFactionId).map(p => p.entityId);
+            } else {
+                targets = eligible.map(p => p.entityId);
+            }
+            for (const entityId of targets) {
+                if (!entityXpMap.has(entityId)) entityXpMap.set(entityId, new Map());
+                const disc = entityXpMap.get(entityId)!;
+                disc.set(reward.disciplineId, (disc.get(reward.disciplineId) ?? 0) + reward.xpAmount);
+            }
+        }
+        if (entityXpMap.size === 0) return [];
+
+        const entityIds     = [...entityXpMap.keys()];
+        const disciplineIds = [...new Set(rewards.map(r => r.disciplineId))];
+        const stateRows     = await this.db.entity_Discipline.findMany({
+            where:  { entityId: { in: entityIds }, disciplineId: { in: disciplineIds } },
+            select: { entityId: true, disciplineId: true, level: true, currentXp: true },
+        });
+        const stateMap = new Map(stateRows.map(s => [`${s.entityId}:${s.disciplineId}`, s]));
+
+        const results: XpGrant[] = [];
+        const updates: Array<{ entityId: number; disciplineId: number; level: number; currentXp: number }> = [];
+
+        for (const [entityId, discGrants] of entityXpMap) {
+            for (const [disciplineId, xpGained] of discGrants) {
+                const state = stateMap.get(`${entityId}:${disciplineId}`);
+                if (!state) continue;
+                const cap = capMap.get(disciplineId) ?? defaultCap;
+                if (cap !== null && state.level >= cap) continue;
+                const meta = disciplineMeta.get(disciplineId)!;
+                const computed = this._applyXp(state.level, state.currentXp, xpGained, meta, cap);
+                results.push({ entityId, entityName: entityNames.get(entityId) ?? 'Unknown', disciplineId, disciplineName: meta.name, xpGained, levelsGained: computed.levelsGained, newLevel: computed.level });
+                updates.push({ entityId, disciplineId, level: computed.level, currentXp: computed.currentXp });
+            }
+        }
+
+        await this._flushXpUpdates(updates);
+        return results;
+    }
+
+    private async _distributeEventCombatXp(combat: {
+        guildId:              string;
+        winningAllyFactionId: number | null;
+        participants: Array<{
+            entityId:      number;
+            allyFactionId: number;
+            isDefeated:    boolean;
+            entity: {
+                name:    string;
+                type:    { name: string };
+                species: { combatXpReward: number } | null;
+            };
+        }>;
+    }): Promise<XpGrant[]> {
+        // Draws award no XP from defeated enemies
+        if (combat.winningAllyFactionId === null) return [];
+
+        const totalXp = combat.participants
+            .filter(p => p.isDefeated)
+            .reduce((sum, p) => sum + (p.entity.species?.combatXpReward ?? 0), 0);
+        if (totalXp === 0) return [];
+
+        // Only winning-team Main Characters receive XP
+        const winners = combat.participants.filter(
+            p => p.allyFactionId === combat.winningAllyFactionId && p.entity.type.name === 'Main Character',
+        );
+        if (winners.length === 0) return [];
+
+        const combatDisc = await this.db.disciplineDef.findFirst({
+            where:  { codeName: 'combat' },
+            select: { id: true, name: true, baseXp: true, isStatProgression: true },
+        });
+        if (!combatDisc) return [];
+
+        const [guildSettings, capRow] = await Promise.all([
+            this.db.guildSettings.findFirst({
+                where:  { guildId: combat.guildId },
+                select: { disciplineLevelCap: true },
+            }),
+            this.db.guild_DisciplineLevelCap.findFirst({
+                where:  { guildId: combat.guildId, disciplineDefId: combatDisc.id },
+                select: { levelCap: true },
+            }),
+        ]);
+        const cap = capRow?.levelCap ?? guildSettings?.disciplineLevelCap ?? null;
+
+        const stateRows = await this.db.entity_Discipline.findMany({
+            where:  { entityId: { in: winners.map(w => w.entityId) }, disciplineId: combatDisc.id },
+            select: { entityId: true, level: true, currentXp: true },
+        });
+        const stateMap = new Map(stateRows.map(s => [s.entityId, s]));
+
+        const results: XpGrant[] = [];
+        const updates: Array<{ entityId: number; disciplineId: number; level: number; currentXp: number }> = [];
+
+        for (const winner of winners) {
+            const state = stateMap.get(winner.entityId);
+            if (!state) continue;
+            if (cap !== null && state.level >= cap) continue;
+            const computed = this._applyXp(state.level, state.currentXp, totalXp, combatDisc, cap);
+            results.push({
+                entityId:       winner.entityId,
+                entityName:     winner.entity.name,
+                disciplineId:   combatDisc.id,
+                disciplineName: combatDisc.name,
+                xpGained:       totalXp,
+                levelsGained:   computed.levelsGained,
+                newLevel:       computed.level,
+            });
+            updates.push({ entityId: winner.entityId, disciplineId: combatDisc.id, level: computed.level, currentXp: computed.currentXp });
+        }
+
+        await this._flushXpUpdates(updates);
+        return results;
+    }
+
+    private _applyXp(
+        level:     number,
+        currentXp: number,
+        xpGained:  number,
+        meta:      { baseXp: number; isStatProgression: boolean },
+        cap:       number | null,
+    ): { level: number; currentXp: number; levelsGained: number } {
+        currentXp += xpGained;
+        let levelsGained = 0;
+        while (true) {
+            const nextLevel = level + 1;
+            if (cap !== null && nextLevel > cap) break;
+            const threshold = meta.isStatProgression
+                ? meta.baseXp
+                : Math.floor(meta.baseXp * Math.pow(nextLevel, 1.5));
+            if (currentXp < threshold) break;
+            currentXp -= threshold;
+            level++;
+            levelsGained++;
+        }
+        return { level, currentXp, levelsGained };
+    }
+
+    private async _flushXpUpdates(
+        updates: Array<{ entityId: number; disciplineId: number; level: number; currentXp: number }>,
+    ): Promise<void> {
+        if (updates.length === 0) return;
+        await this.db.$transaction(
+            updates.map(u => this.db.entity_Discipline.update({
+                where: { entityId_disciplineId: { entityId: u.entityId, disciplineId: u.disciplineId } },
+                data:  { level: u.level, currentXp: u.currentXp },
+            }))
+        );
     }
 
     private async _getActionEnergyCost(guildId: string, mode: 'spar' | 'fight'): Promise<number> {

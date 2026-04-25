@@ -1,5 +1,5 @@
 import { colors } from '../../../../../core/colors';
-import type { AvailableAction, CombatParticipantInfo } from '../../../../../services/play/combatService';
+import type { AvailableAction, CombatParticipantInfo, ActionResult } from '../../../../../services/play/combatService';
 
 const CATEGORY_LABEL: Record<'main' | 'bonus' | 'item', string> = {
     main:  'Main Action',
@@ -9,9 +9,53 @@ const CATEGORY_LABEL: Record<'main' | 'bonus' | 'item', string> = {
 
 function actionSummary(action: AvailableAction): string {
     const parts: string[] = [];
-    if (action.damageDice) parts.push(`⚔ ${action.damageDice}`);
-    if (action.healDice)   parts.push(`💚 ${action.healDice}`);
+    if (action.damageDice)    parts.push(`⚔ ${action.damageDice}`);
+    if (action.healDice)      parts.push(`💚 ${action.healDice}`);
+    if (action.cooldownRounds > 0) parts.push(`⏳ ${action.cooldownRounds}r cooldown`);
     return parts.length ? ` — ${parts.join(', ')}` : '';
+}
+
+export function buildActionResultComponents(result: ActionResult): object[] {
+    const { actorName, targetName, actualTargetName, wasRedirected, actionLabel, outcome } = result;
+
+    const redirectNote = wasRedirected ? ` → **${actualTargetName}** *(guard)*` : '';
+    const header = `**${actorName}** used **${actionLabel}** on **${targetName}**${redirectNote}`;
+
+    let body: string;
+    let accentColor: number;
+
+    if (outcome.kind === 'hit') {
+        const diceStr = outcome.diceRolls.join('+');
+        const diceExpr = outcome.diceRolls.length > 0 ? ` (${diceStr} = ${outcome.totalDamage})` : '';
+        body = `⚔ Rolled **${outcome.hitRoll}** vs AC ${outcome.targetAC} — **Hit!**\n💥 **${outcome.totalDamage} damage**${diceExpr}\n${actualTargetName} now at **${outcome.hpAfter} HP**`;
+        if (outcome.defeated) {
+            body += `\n-# 💀 ${actualTargetName} has been eliminated.`;
+        } else if (outcome.knockedDown) {
+            body += `\n-# 🟡 ${actualTargetName} is knocked down — awaiting second wind decision.`;
+        }
+        accentColor = colors.error;
+    } else if (outcome.kind === 'miss') {
+        body = `⚔ Rolled **${outcome.hitRoll}** vs AC ${outcome.targetAC} — **Miss!**`;
+        accentColor = colors.info;
+    } else if (outcome.kind === 'heal') {
+        const diceStr = outcome.diceRolls.join('+');
+        const diceExpr = outcome.diceRolls.length > 0 ? ` (${diceStr} = ${outcome.totalHeal})` : '';
+        body = `💚 **${outcome.totalHeal} HP restored**${diceExpr}\n${actualTargetName} now at **${outcome.hpAfter} HP**`;
+        accentColor = colors.success;
+    } else if (outcome.kind === 'behavior') {
+        const guardLine = outcome.guardedName ? ` — guarding **${outcome.guardedName}**` : '';
+        body = `🛡 **${outcome.effectName}** active for **${outcome.rounds}** round${outcome.rounds !== 1 ? 's' : ''}${guardLine}`;
+        accentColor = colors.info;
+    } else {
+        body = `${actorName} used ${actionLabel}.`;
+        accentColor = colors.info;
+    }
+
+    return [{
+        type:         17,
+        accent_color: accentColor,
+        components:   [{ type: 10, content: `${header}\n${body}` }],
+    }];
 }
 
 export function buildActionPickerComponents(

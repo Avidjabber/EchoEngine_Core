@@ -2,13 +2,14 @@ import { ButtonInteraction, MessageFlags, TextChannel, ThreadChannel } from 'dis
 import { colors } from '../../../../../core/colors';
 import { messages } from '@echoengine/shared';
 import {
-    fetchAvailableActions, fetchParticipants,
+    fetchAvailableActions, fetchParticipants, processAction,
     type AvailableAction, type CombatParticipantInfo,
 } from '../../../../../services/play/combatService';
 import {
     buildActionPickerComponents,
     buildTargetPickerComponents,
     buildActionConfirmComponents,
+    buildActionResultComponents,
 } from './combatActionComponents';
 import { getTurnEntry, markTurnFlagUsed, TURN_FLAG_MAIN, TURN_FLAG_BONUS, TURN_FLAG_ITEM } from './combatTurnState';
 import { buildTurnPromptComponents } from './combatTurnComponents';
@@ -71,6 +72,7 @@ export async function handlePaCbtPick(interaction: ButtonInteraction): Promise<v
 
     const eligible = allParts.filter(p => {
         if (p.isDefeated || p.hasFled) return false;
+        if (p.currentHp !== null && p.currentHp <= 0) return false;
         const isSelf  = p.entityId === entityId;
         const isAlly  = p.allyFactionId === actor.allyFactionId;
         if (!scope) return true;
@@ -148,18 +150,8 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
     const entry = getTurnEntry(activeCombatId);
     if (!entry || entry.userId !== interaction.user.id) return;
 
-    const [actionsResult, participantsResult] = await Promise.all([
-        fetchAvailableActions(activeCombatId, entityId, CATEGORY_BY_SLOT[catSlot]),
-        fetchParticipants(activeCombatId),
-    ]);
-
-    const actions  = (actionsResult.value ?? []) as AvailableAction[];
-    const allParts = (participantsResult.value ?? []) as CombatParticipantInfo[];
-    const action   = actions.find(a => a.profileId === profileId && a.storedItemId === storedItemId);
-    const target   = allParts.find(p => p.entityId === targetEntityId);
-
-    const actionLabel = action?.actionLabel ?? action?.itemName ?? 'Action';
-    const targetName  = target?.name ?? 'target';
+    // Process the action (resolve dice, apply HP, set up behavior effects)
+    const result = await processAction(activeCombatId, entityId, profileId, storedItemId, targetEntityId, entry.round);
 
     // Mark this category as used
     const flag = FLAG_BY_SLOT[catSlot];
@@ -176,20 +168,25 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
         }).catch(() => null);
     }
 
-    // Post stub result publicly in thread
-    await channel.send({
-        components: [{
-            type:         17,
-            accent_color: colors.special,
-            components:   [{ type: 10, content: `-# **${entry.entityName}** used **${actionLabel}** on **${targetName}** *(result coming soon)*` }],
-        }],
-    } as never).catch(() => null);
+    if (result.success && result.value) {
+        // Post real result publicly
+        await channel.send({
+            components: buildActionResultComponents(result.value) as never,
+        } as never).catch(() => null);
 
-    // Acknowledge ephemeral with confirmation
-    await interaction.editReply({
-        flags:      MessageFlags.IsComponentsV2,
-        components: [{ type: 17, accent_color: colors.success, components: [{ type: 10, content: `**${actionLabel}** → **${targetName}** — done!` }] }],
-    } as never);
+        // Acknowledge ephemeral
+        const actionLabel = result.value.actionLabel;
+        const targetName  = result.value.wasRedirected ? result.value.actualTargetName : result.value.targetName;
+        await interaction.editReply({
+            flags:      MessageFlags.IsComponentsV2,
+            components: [{ type: 17, accent_color: colors.success, components: [{ type: 10, content: `**${actionLabel}** → **${targetName}** — done!` }] }],
+        } as never);
+    } else {
+        await interaction.editReply({
+            flags:      MessageFlags.IsComponentsV2,
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: messages.errorGeneric }] }],
+        } as never);
+    }
 }
 
 // customId: pa_cbt_back:{activeCombatId}:{entityId}:{catSlot}
