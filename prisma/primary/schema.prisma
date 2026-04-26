@@ -975,7 +975,8 @@ model Entity {
   proficiencies Entity_Proficiency[]
   disciplines   Entity_Discipline[]
   abilities     Entity_Ability[]
-  skillTreeNodes Entity_SkillTreeNode[]
+  skillTreeNodes   Entity_SkillTreeNode[]
+  profileOverrides Entity_ProfileOverride[]
   conditions        EntityCondition[] @relation("EntityConditions")
   appliedConditions EntityCondition[] @relation("AppliedConditions")
   behaviorCounters EntityBehaviorCounter[]
@@ -1472,6 +1473,8 @@ model SkillTreeNode {
   entityProgress             Entity_SkillTreeNode[]
   craftingInteractionRules   Guild_CraftingInteractionRule[]
   recipeCraftingRequirements Recipe_CraftingRequirement[]
+  profileOverride            SkillTreeNode_ProfileOverride?
+  grantedProfileOverrides    Entity_ProfileOverride[]
 
   @@unique([guildId, name])
   @@index([guildId])
@@ -1526,6 +1529,40 @@ model Entity_SkillTreeNode {
 
   @@unique([entityId, nodeId])
   @@index([entityId])
+}
+
+// Config: which profile a skill tree node replaces and with what. One node can have at most one override.
+// Admins author this when building the tree; the engine reads it when a node is granted.
+model SkillTreeNode_ProfileOverride {
+  nodeId               Int @id
+  originalProfileId    Int  // profile being superseded
+  replacementProfileId Int  // profile to show/use instead
+
+  node               SkillTreeNode        @relation(fields: [nodeId],               references: [id], onDelete: Cascade)
+  originalProfile    ItemEquipmentProfile @relation("NodeOverrideOriginal",    fields: [originalProfileId],    references: [id], onDelete: Restrict)
+  replacementProfile ItemEquipmentProfile @relation("NodeOverrideReplacement", fields: [replacementProfileId], references: [id], onDelete: Restrict)
+
+  @@index([originalProfileId])
+  @@index([replacementProfileId])
+}
+
+// State: profiles actively overridden for a specific entity, written when the source node is granted.
+// @@unique ensures at most one active replacement per original profile per entity.
+model Entity_ProfileOverride {
+  id                   Int @id @default(autoincrement())
+  entityId             Int
+  originalProfileId    Int
+  replacementProfileId Int
+  sourceNodeId         Int  // which skill tree node granted this override
+
+  entity             Entity               @relation(fields: [entityId],             references: [id], onDelete: Cascade)
+  originalProfile    ItemEquipmentProfile @relation("EntityOverrideOriginal",    fields: [originalProfileId],    references: [id], onDelete: Restrict)
+  replacementProfile ItemEquipmentProfile @relation("EntityOverrideReplacement", fields: [replacementProfileId], references: [id], onDelete: Restrict)
+  sourceNode         SkillTreeNode        @relation(fields: [sourceNodeId],       references: [id], onDelete: Cascade)
+
+  @@unique([entityId, originalProfileId])
+  @@index([entityId])
+  @@index([sourceNodeId])
 }
 
 // ============================================================
@@ -2470,6 +2507,10 @@ model ItemEquipmentProfile {
   combatActionRecords  ActiveCombat_Action[]
   statEffects          ItemEquipmentProfile_StatEffect[]
   preCombatEffects     Entity_PreCombatEffect[]
+  nodeOverridesAsOriginal     SkillTreeNode_ProfileOverride[] @relation("NodeOverrideOriginal")
+  nodeOverridesAsReplacement  SkillTreeNode_ProfileOverride[] @relation("NodeOverrideReplacement")
+  entityOverridesAsOriginal   Entity_ProfileOverride[]        @relation("EntityOverrideOriginal")
+  entityOverridesAsReplacement Entity_ProfileOverride[]       @relation("EntityOverrideReplacement")
 
   item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
 

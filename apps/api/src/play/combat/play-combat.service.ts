@@ -379,26 +379,7 @@ export class PlayCombatService {
         };
         const categoryName = categoryNameMap[category];
 
-        const [combat, cooldowns, entityStorage] = await Promise.all([
-            this.db.activeCombat.findUnique({
-                where:  { id: combatId },
-                select: { initiationType: { select: { name: true } } },
-            }),
-            this.db.activeCombat_Participant_ActionCooldown.findMany({
-                where:  { participant: { activeCombatId: combatId, entityId } },
-                select: { equipmentProfileId: true },
-            }),
-            this.db.entity_Storage.findUnique({
-                where:  { entityId },
-                select: { storageId: true },
-            }),
-        ]);
-        if (!combat) return [];
-        if (!entityStorage) return [];
-
-        const isSpar             = combat.initiationType.name === 'spar';
-        const cooldownProfileIds = new Set(cooldowns.map(c => c.equipmentProfileId));
-
+        // profileSelect defined early so it can be reused in the override replacement fetch below.
         const profileSelect = {
             id:              true,
             label:           true,
@@ -413,6 +394,35 @@ export class PlayCombatService {
             healDiceCount:   true,
             healDiceSides:   true,
         } as const;
+
+        const [combat, cooldowns, entityStorage, rawOverrides] = await Promise.all([
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: { initiationType: { select: { name: true } } },
+            }),
+            this.db.activeCombat_Participant_ActionCooldown.findMany({
+                where:  { participant: { activeCombatId: combatId, entityId } },
+                select: { equipmentProfileId: true },
+            }),
+            this.db.entity_Storage.findUnique({
+                where:  { entityId },
+                select: { storageId: true },
+            }),
+            this.db.entity_ProfileOverride.findMany({
+                where:  { entityId },
+                select: { originalProfileId: true, replacementProfileId: true },
+            }),
+        ]);
+        if (!combat) return [];
+        if (!entityStorage) return [];
+
+        const isSpar             = combat.initiationType.name === 'spar';
+        const cooldownProfileIds = new Set(cooldowns.map(c => c.equipmentProfileId));
+
+        // Build override lookup: originalProfileId → replacementProfileId.
+        // Used in both the equipped path and the item-category path below.
+        const overriddenIds     = new Set(rawOverrides.map(o => o.originalProfileId));
+        const replacementIdList = rawOverrides.map(o => o.replacementProfileId);
 
         const profileWhere = {
             actionCategory: { name: categoryName },
@@ -444,6 +454,8 @@ export class PlayCombatService {
                 if (stored.usesRemaining !== null && stored.usesRemaining <= 0) continue;
                 if (stored.dailyUsesRemaining !== null && stored.dailyUsesRemaining <= 0) continue;
                 for (const profile of stored.item.equipmentProfiles) {
+                    // Hide profiles that have been superseded by an active override.
+                    if (overriddenIds.has(profile.id)) continue;
                     actions.push({
                         profileId:               profile.id,
                         storedItemId:            stored.id,
@@ -464,18 +476,42 @@ export class PlayCombatService {
             return actions;
         }
 
+        // Fetch equipped items whose chosenProfile matches the category, OR whose chosenProfileId
+        // is overridden (replacement may satisfy the category even if original does not).
+        const overriddenIdsArray = [...overriddenIds];
         const equipped = await this.db.storedItem.findMany({
             where: {
-                storageId:     entityStorage.storageId,
-                isEquipped:    true,
-                chosenProfile: profileWhere,
+                storageId:  entityStorage.storageId,
+                isEquipped: true,
+                OR: [
+                    { chosenProfile: profileWhere },
+                    ...(overriddenIdsArray.length > 0 ? [{ chosenProfileId: { in: overriddenIdsArray } }] : []),
+                ],
             },
             select: {
-                id:   true,
-                item: { select: { name: true } },
-                chosenProfile: { select: profileSelect },
+                id:              true,
+                chosenProfileId: true,
+                item:            { select: { name: true } },
+                chosenProfile:   { select: profileSelect },
             },
         });
+
+        // Fetch replacement profiles filtered to the current category so cross-category overrides
+        // are silently excluded (replacement not shown if it doesn't match the active category).
+        const replacementProfiles = replacementIdList.length > 0
+            ? await this.db.itemEquipmentProfile.findMany({
+                where:  { id: { in: replacementIdList }, ...profileWhere },
+                select: profileSelect,
+            })
+            : [];
+        const replacementById = new Map(replacementProfiles.map(p => [p.id, p]));
+
+        // Override map: originalProfileId → replacement profile (only those matching current category).
+        const overrideProfileMap = new Map(
+            rawOverrides
+                .filter(o => replacementById.has(o.replacementProfileId))
+                .map(o => [o.originalProfileId, replacementById.get(o.replacementProfileId)!]),
+        );
 
         const builtins: AvailableAction[] = [
             {
@@ -495,28 +531,35 @@ export class PlayCombatService {
         ];
 
         const itemActions = equipped
-            .filter(s => s.chosenProfile !== null)
-            .map(s => ({
-                profileId:               s.chosenProfile!.id,
-                storedItemId:            s.id,
-                builtinAction:           null as null,
-                itemName:                s.item.name,
-                actionLabel:             s.chosenProfile!.label,
-                targetScope:             s.chosenProfile!.targetScope,
-                damageDice:              s.chosenProfile!.damageDiceCount
-                    ? `${s.chosenProfile!.damageDiceCount}d${s.chosenProfile!.damageDiceSides}`
-                    : null,
-                damageTypeName:          s.chosenProfile!.damageType?.name  ?? null,
-                elementalDamageDice:     s.chosenProfile!.elementalDiceCount
-                    ? `${s.chosenProfile!.elementalDiceCount}d${s.chosenProfile!.elementalDiceSides}`
-                    : null,
-                elementalDamageTypeName: s.chosenProfile!.elementalDamageType?.name ?? null,
-                healDice:                s.chosenProfile!.healDiceCount
-                    ? `${s.chosenProfile!.healDiceCount}d${s.chosenProfile!.healDiceSides}`
-                    : null,
-                cooldownRounds:          s.chosenProfile!.cooldownRounds,
-                isOnCooldown:            cooldownProfileIds.has(s.chosenProfile!.id),
-            }));
+            .filter(s => s.chosenProfileId !== null)
+            .flatMap(s => {
+                // Use the replacement profile if an override is active; fall back to the equipped profile.
+                const effectiveProfile = overrideProfileMap.get(s.chosenProfileId!) ?? s.chosenProfile;
+                // If neither matches the current category (e.g. item fetched via the OR but replacement
+                // is a different category), skip it.
+                if (effectiveProfile === null) return [];
+                return [{
+                    profileId:               effectiveProfile.id,
+                    storedItemId:            s.id,
+                    builtinAction:           null as null,
+                    itemName:                s.item.name,
+                    actionLabel:             effectiveProfile.label,
+                    targetScope:             effectiveProfile.targetScope,
+                    damageDice:              effectiveProfile.damageDiceCount
+                        ? `${effectiveProfile.damageDiceCount}d${effectiveProfile.damageDiceSides}`
+                        : null,
+                    damageTypeName:          effectiveProfile.damageType?.name  ?? null,
+                    elementalDamageDice:     effectiveProfile.elementalDiceCount
+                        ? `${effectiveProfile.elementalDiceCount}d${effectiveProfile.elementalDiceSides}`
+                        : null,
+                    elementalDamageTypeName: effectiveProfile.elementalDamageType?.name ?? null,
+                    healDice:                effectiveProfile.healDiceCount
+                        ? `${effectiveProfile.healDiceCount}d${effectiveProfile.healDiceSides}`
+                        : null,
+                    cooldownRounds:          effectiveProfile.cooldownRounds,
+                    isOnCooldown:            cooldownProfileIds.has(effectiveProfile.id),
+                }];
+            });
 
         return [...builtins, ...itemActions];
     }
