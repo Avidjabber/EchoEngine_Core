@@ -134,48 +134,18 @@ export function buildTurnEndedComponents(entityName: string): object[] {
     }];
 }
 
-export function buildSecondWindComponents(
-    activeCombatId: number,
-    entityId:       number,
-    entityName:     string,
-    userId:         string | undefined,
-    round:          number,
-): object[] {
-    const ping = userId ? `<@${userId}>` : `**${entityName}**`;
-    return [{
-        type:         17,
-        accent_color: colors.warning,
-        components: [
-            { type: 10, content: `${ping} — **${entityName}** has been knocked down!\nAccept **Second Wind** to recover full HP and continue — but if you fall again, you will be eliminated.` },
-            { type: 14 },
-            {
-                type: 1,
-                components: [
-                    { type: 2, style: 1, label: 'Accept Second Wind', custom_id: `pa_sw_accept:${activeCombatId}:${entityId}` },
-                    { type: 2, style: 4, label: 'Decline',            custom_id: `pa_sw_decline:${activeCombatId}:${entityId}` },
-                ],
-            },
-            { type: 10, content: `-# Round ${round}` },
-        ],
-    }];
-}
-
 export function buildDeceasedPromptComponents(
     activeCombatId: number,
     entityId:       number,
     entityName:     string,
     userId:         string | null,
-    wasDefeated:    boolean,
 ): object[] {
-    const status = wasDefeated
-        ? 'died from their wounds'
-        : 'was left unconscious at the end of combat';
     const ping = userId ? ` (<@${userId}>)` : '';
     return [{
         type:         17,
         accent_color: colors.error,
         components: [
-            { type: 10, content: `**${entityName}**${ping} ${status}. Should they be marked as permanently deceased?\n-# Only server administrators can respond.` },
+            { type: 10, content: `**${entityName}**${ping} died from their wounds. Should they be marked as permanently deceased?\n-# Only server administrators can respond.` },
             { type: 14 },
             {
                 type: 1,

@@ -579,12 +579,11 @@ export class PlayCombatService {
                             activeCombatId: combatId,
                             isAiControlled: false,
                             hasFled:        false,
-                            OR: [{ isDefeated: true }, { isUnconscious: true }],
+                            isDefeated:     true,
                         },
                         select: {
-                            entityId:     true,
-                            isDefeated:   true,
-                            entity: { select: { name: true, userId: true } },
+                            entityId: true,
+                            entity:   { select: { name: true, userId: true } },
                         },
                     })
                     : Promise.resolve([]),
@@ -604,7 +603,7 @@ export class PlayCombatService {
                 entityId:    r.entityId,
                 name:        r.entity.name,
                 userId:      r.entity.userId ?? null,
-                wasDefeated: r.isDefeated,
+                wasDefeated: true,
             }));
 
             return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, deathSaveEvent: null, allowsFleeing, round: newRound, winningAllyFactionId, mortallyWounded };

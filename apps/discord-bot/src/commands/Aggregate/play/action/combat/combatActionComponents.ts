@@ -70,7 +70,7 @@ export function buildActionResultComponents(result: ActionResult): object[] {
         if (outcome.defeated) {
             body += `\n-# 💀 ${actualTargetName} has been eliminated.`;
         } else if (outcome.knockedDown) {
-            body += `\n-# 🟡 ${actualTargetName} is knocked down — awaiting second wind decision.`;
+            body += `\n-# 🟡 ${actualTargetName} falls unconscious — death saves begin on their next turn.`;
         }
         accentColor = colors.error;
     } else if (outcome.kind === 'miss') {

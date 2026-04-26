@@ -217,7 +217,7 @@ async function postDeceasedPrompts(
 ): Promise<void> {
     for (const char of mortallyWounded) {
         await channel.send({
-            components: buildDeceasedPromptComponents(activeCombatId, char.entityId, char.name, char.userId, char.wasDefeated) as never,
+            components: buildDeceasedPromptComponents(activeCombatId, char.entityId, char.name, char.userId) as never,
         }).catch(() => null);
     }
 }
