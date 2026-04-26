@@ -2,6 +2,7 @@ import {
     ActionRowBuilder,
     ButtonInteraction,
     ContainerBuilder,
+    GuildTextBasedChannel,
     MessageFlags,
     ModalBuilder,
     ModalSubmitInteraction,
@@ -14,7 +15,7 @@ import { colors } from '../../../../core/colors';
 import { replyError } from '../../../../core/reply';
 import { updateGuildSettings, SettingsNumberKey } from '../../../../services/server/settingsService';
 import { getState, setState, clearState } from './settingsState';
-import { invalidateInfoCache } from './infoState';
+import { setCachedInfo } from './infoState';
 import { buildGuildSettingsComponents, SETTINGS_NUMBER_FIELDS } from './updateComponents';
 import { buildFarmingSettingsComponents, FARMING_FIELDS, FarmingFieldKey } from './farmingComponents';
 import { buildFlagsSettingsComponents, FLAG_FIELDS, FlagKey } from './flagsComponents';
@@ -320,7 +321,6 @@ export async function handleGsFinalize(interaction: ButtonInteraction): Promise<
     const result = await updateGuildSettings(guildId, fields);
 
     clearState(interaction.user.id, guildId);
-    invalidateInfoCache(guildId);
 
     if (!result.success) {
         await interaction.editReply({
@@ -336,6 +336,8 @@ export async function handleGsFinalize(interaction: ButtonInteraction): Promise<
         return;
     }
 
+    setCachedInfo(guildId, state);
+
     const announcement = new ContainerBuilder()
         .setAccentColor(colors.success)
         .addTextDisplayComponents(
@@ -344,7 +346,7 @@ export async function handleGsFinalize(interaction: ButtonInteraction): Promise<
             ),
         );
 
-    await interaction.channel?.send({
+    await (interaction.channel as GuildTextBasedChannel | null)?.send({
         flags:      MessageFlags.IsComponentsV2,
         components: [announcement],
     });

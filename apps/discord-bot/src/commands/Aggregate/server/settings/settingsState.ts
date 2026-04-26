@@ -19,18 +19,31 @@ export interface GuildSettingsState {
     socialEnabled:      boolean;
 }
 
-const store = new Map<string, GuildSettingsState>();
+const TTL_MS = 20 * 60 * 1000;
+
+interface Entry {
+    data:      GuildSettingsState;
+    expiresAt: number;
+}
+
+const store = new Map<string, Entry>();
 
 function stateKey(userId: string, guildId: string): string {
     return `${userId}_${guildId}`;
 }
 
 export function setState(userId: string, guildId: string, state: GuildSettingsState): void {
-    store.set(stateKey(userId, guildId), state);
+    store.set(stateKey(userId, guildId), { data: state, expiresAt: Date.now() + TTL_MS });
 }
 
 export function getState(userId: string, guildId: string): GuildSettingsState | undefined {
-    return store.get(stateKey(userId, guildId));
+    const entry = store.get(stateKey(userId, guildId));
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+        store.delete(stateKey(userId, guildId));
+        return undefined;
+    }
+    return entry.data;
 }
 
 export function clearState(userId: string, guildId: string): void {

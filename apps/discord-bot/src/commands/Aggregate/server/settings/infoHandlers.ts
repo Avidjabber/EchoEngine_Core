@@ -6,7 +6,7 @@ import {
 } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
-import { getCachedInfo } from './infoState';
+import { getCachedInfo, invalidateInfoCache } from './infoState';
 import { buildInfoMainComponents, buildInfoFarmingComponents, buildInfoFlagsComponents } from './infoComponents';
 
 // customId format: gsi_section:<section>
@@ -52,5 +52,6 @@ export async function handleGsiSection(interaction: ButtonInteraction): Promise<
 
 export async function handleGsiDone(interaction: ButtonInteraction): Promise<void> {
     await interaction.deferUpdate();
+    invalidateInfoCache(interaction.guildId!);
     await interaction.deleteReply();
 }

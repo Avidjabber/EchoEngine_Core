@@ -13,6 +13,7 @@ import { messages, errorCodes } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
 import { replyError } from '../../../../core/reply';
 import { createDen } from '../../../../services/server/denService';
+import { addCachedDen } from '../../../../services/server/denCache';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const guildId   = interaction.guildId!;
@@ -30,6 +31,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         await replyError(interaction, errorText);
         return;
     }
+
+    addCachedDen(guildId, result.value!.den);
 
     // Public announcement in the channel
     const announcement = new ContainerBuilder()

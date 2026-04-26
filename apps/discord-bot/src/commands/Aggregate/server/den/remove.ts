@@ -9,6 +9,7 @@ import { messages, errorCodes } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
 import { replyError } from '../../../../core/reply';
 import { removeDen } from '../../../../services/server/denService';
+import { removeCachedDen } from '../../../../services/server/denCache';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const guildId   = interaction.guildId!;
@@ -25,6 +26,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         await replyError(interaction, text);
         return;
     }
+
+    removeCachedDen(guildId, channelId);
 
     const announcement = new ContainerBuilder()
         .setAccentColor(colors.info)

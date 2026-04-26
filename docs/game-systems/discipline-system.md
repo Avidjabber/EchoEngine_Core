@@ -23,7 +23,7 @@ abilities are the rewards that progress unlocks.
 
 
 ─────────────────────────────────────────────
-2. THE SIX DISCIPLINES
+2. THE FIVE DISCIPLINES
 ─────────────────────────────────────────────
 
   Name     | Description
@@ -32,8 +32,6 @@ abilities are the rewards that progress unlocks.
   Crafting | Creating items via recipes
   Farming  | Growing and gathering plant-based resources
   Combat   | Fighting effectiveness and battle experience
-  Scouting | Patrol, territory awareness, and threat detection
-  Social   | Leadership, diplomacy, and faction influence
 
 NOTE: DisciplineDef also contains one stat progression row (isStatProgression = true).
 That row is not a discipline — it tracks EXP toward stat points using a flat threshold
