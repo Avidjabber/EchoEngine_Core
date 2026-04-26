@@ -10,7 +10,7 @@ export async function runValidate(ctx: CombatActionContext, _svc: PipelineServic
     }
 
     // Reactions fire out-of-turn and may have no action category — skip both checks.
-    if (!ctx.profile.isReactionAction) {
+    if (!ctx.profile.isReactionAction || !ctx.input.isReaction) {
         if (ctx.profile.actionCategoryId === null) {
             ctx.aborted     = true;
             ctx.abortReason = 'Combat data could not be loaded.';
@@ -27,6 +27,13 @@ export async function runValidate(ctx: CombatActionContext, _svc: PipelineServic
     if (ctx.profile.dealsDamage && ctx.actualTargetId === null) {
         ctx.aborted     = true;
         ctx.abortReason = 'A target is required for damaging actions.';
+        return;
+    }
+
+    // Non-guard behavior effects (stun, suppress, taunt) must target an enemy, not the actor.
+    if (ctx.profile.behaviorEffectTypeId !== null && !ctx.profile.behaviorEffectRedirectsDamage && ctx.actualTargetId === null) {
+        ctx.aborted     = true;
+        ctx.abortReason = 'A target is required for this action.';
         return;
     }
 }

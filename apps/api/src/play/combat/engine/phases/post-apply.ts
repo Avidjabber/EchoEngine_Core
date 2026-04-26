@@ -6,6 +6,7 @@ import type { PipelineServices } from '../combat-pipeline';
 // Skipped for AI-controlled defenders and when the defender is under a suppress effect.
 export async function runPostApply(ctx: CombatActionContext, { db }: PipelineServices): Promise<void> {
     if (!ctx.isHit || !ctx.profile?.dealsDamage || !ctx.targetParticipant || ctx.actualTargetId === null) return;
+    if (ctx.defeated || ctx.knockedDown) return;
     if (ctx.targetParticipant.isAiControlled) return;
 
     const suppressed = await db.activeCombat_BehaviorEffect.findFirst({

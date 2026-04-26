@@ -5,6 +5,7 @@ export interface CombatActionInput {
     storedItemId:   number;
     targetEntityId: number | null;
     roundNumber:    number;
+    isReaction:     boolean;
 }
 
 // ── Snapshots loaded by DECLARE ───────────────────────────────────────────────

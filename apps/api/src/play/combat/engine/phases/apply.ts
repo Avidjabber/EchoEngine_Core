@@ -8,29 +8,34 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
     if (ctx.aborted || !ctx.profile || !ctx.target || ctx.actualTargetId === null) return;
 
     if (ctx.profile.dealsDamage && ctx.isHit) {
-        const newHp    = ctx.target.currentHp - ctx.finalDamage - ctx.finalElementalDamage;
+        const newHp     = ctx.target.currentHp - ctx.finalDamage - ctx.finalElementalDamage;
         const clampedHp = Math.max(0, newHp);
-        await db.entityStats.update({
-            where: { entityId: ctx.actualTargetId },
-            data:  { currentHp: clampedHp },
-        });
 
-        ctx.hpAfter = clampedHp;
+        const canSecondWind   = ctx.combatMeta?.canSecondWind ?? false;
+        const participant     = ctx.targetParticipant;
+        const shouldDefeat    = newHp <= 0 && participant !== null
+            && (participant.isAiControlled || !canSecondWind || participant.inSecondWind);
+        const shouldKnockDown = newHp <= 0 && participant !== null && !shouldDefeat;
 
-        if (newHp <= 0 && ctx.targetParticipant) {
-            const canSecondWind    = ctx.combatMeta?.canSecondWind ?? false;
-            const { isAiControlled, inSecondWind } = ctx.targetParticipant;
-
-            if (isAiControlled || !canSecondWind || inSecondWind) {
-                await db.activeCombat_Participant.update({
-                    where: { id: ctx.targetParticipant.id },
+        await db.$transaction(async tx => {
+            await tx.entityStats.update({
+                where: { entityId: ctx.actualTargetId! },
+                data:  { currentHp: clampedHp },
+            });
+            if (shouldDefeat) {
+                await tx.activeCombat_Participant.update({
+                    where: { id: participant!.id },
                     data:  { isDefeated: true },
                 });
-                ctx.defeated = true;
-            } else {
-                ctx.knockedDown = true;
+                await tx.activeCombat_BehaviorEffect.deleteMany({
+                    where: { sourceParticipantId: participant!.id },
+                });
             }
-        }
+        });
+
+        ctx.hpAfter     = clampedHp;
+        ctx.defeated    = shouldDefeat;
+        ctx.knockedDown = shouldKnockDown;
     } else if (ctx.profile.restoresHealth && ctx.finalHeal > 0) {
         const actualHeal = Math.min(ctx.finalHeal, ctx.target.maxHp - ctx.target.currentHp);
         ctx.finalHeal = actualHeal;

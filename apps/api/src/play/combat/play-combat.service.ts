@@ -611,10 +611,20 @@ export class PlayCombatService {
     }
 
     async declineSecondWind(combatId: number, entityId: number): Promise<void> {
-        await this.db.activeCombat_Participant.update({
-            where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
-            data:  { isDefeated: true },
+        const participant = await this.db.activeCombat_Participant.findUnique({
+            where:  { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
+            select: { id: true },
         });
+        if (!participant) return;
+        await this.db.$transaction([
+            this.db.activeCombat_Participant.update({
+                where: { id: participant.id },
+                data:  { isDefeated: true },
+            }),
+            this.db.activeCombat_BehaviorEffect.deleteMany({
+                where: { sourceParticipantId: participant.id },
+            }),
+        ]);
     }
 
     async flee(combatId: number, entityId: number): Promise<{ allowed: boolean }> {
@@ -623,10 +633,20 @@ export class PlayCombatService {
             select: { initiationType: { select: { allowsFleeing: true } } },
         });
         if (!combat?.initiationType.allowsFleeing) return { allowed: false };
-        await this.db.activeCombat_Participant.update({
-            where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
-            data:  { hasFled: true },
+        const participant = await this.db.activeCombat_Participant.findUnique({
+            where:  { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
+            select: { id: true },
         });
+        if (!participant) return { allowed: false };
+        await this.db.$transaction([
+            this.db.activeCombat_Participant.update({
+                where: { id: participant.id },
+                data:  { hasFled: true },
+            }),
+            this.db.activeCombat_BehaviorEffect.deleteMany({
+                where: { sourceParticipantId: participant.id },
+            }),
+        ]);
         return { allowed: true };
     }
 
@@ -641,7 +661,7 @@ export class PlayCombatService {
         roundNumber:    number,
     ): Promise<ActionResult> {
         const ctx = await runCombatPipeline(
-            { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber },
+            { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber, isReaction: false },
             { db: this.db, roller: defaultRoller },
             STAGE_2_INTERCEPTORS,
         );
@@ -660,7 +680,7 @@ export class PlayCombatService {
         roundNumber:      number,
     ): Promise<ActionResult> {
         const ctx = await runCombatPipeline(
-            { combatId, actorEntityId: defenderEntityId, profileId, storedItemId, targetEntityId: attackerEntityId, roundNumber },
+            { combatId, actorEntityId: defenderEntityId, profileId, storedItemId, targetEntityId: attackerEntityId, roundNumber, isReaction: true },
             { db: this.db, roller: defaultRoller },
             STAGE_2_INTERCEPTORS,
         );
@@ -852,7 +872,8 @@ export class PlayCombatService {
     private async _processTurnEnd(_combatId: number, participantId: number, canSecondWind: boolean): Promise<RoundEndEvent[]> {
         // Collect active DoT/HoT effects before decrementing so effects at roundsRemaining=1 still fire.
         const activeEffects = await this.db.activeCombat_StatEffect.findMany({
-            where: { affectedParticipantId: participantId },
+            where:   { affectedParticipantId: participantId },
+            orderBy: { id: 'asc' },
             select: {
                 effectDef: {
                     select: {
@@ -906,25 +927,37 @@ export class PlayCombatService {
                 const amount = Math.max(0, rolls.reduce((a, b) => a + b, 0) + dot.flatDamage);
                 currentHp   -= amount;
 
-                await this.db.entityStats.update({
-                    where: { entityId: participant.entityId },
-                    data:  { currentHp: Math.max(0, currentHp) },
-                });
-
                 if (currentHp <= 0) {
                     const canUseSecondWind = !participant.isAiControlled && canSecondWind && !participant.inSecondWind;
                     if (canUseSecondWind) {
+                        await this.db.entityStats.update({
+                            where: { entityId: participant.entityId },
+                            data:  { currentHp: 0 },
+                        });
                         events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: false, knockedDown: true });
                     } else {
-                        await this.db.activeCombat_Participant.update({
-                            where: { id: participantId },
-                            data:  { isDefeated: true },
-                        });
+                        await this.db.$transaction([
+                            this.db.entityStats.update({
+                                where: { entityId: participant.entityId },
+                                data:  { currentHp: 0 },
+                            }),
+                            this.db.activeCombat_Participant.update({
+                                where: { id: participantId },
+                                data:  { isDefeated: true },
+                            }),
+                            this.db.activeCombat_BehaviorEffect.deleteMany({
+                                where: { sourceParticipantId: participantId },
+                            }),
+                        ]);
                         events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: true, knockedDown: false });
                     }
                     return events;
                 }
 
+                await this.db.entityStats.update({
+                    where: { entityId: participant.entityId },
+                    data:  { currentHp },
+                });
                 events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: currentHp, defeated: false, knockedDown: false });
             }
 

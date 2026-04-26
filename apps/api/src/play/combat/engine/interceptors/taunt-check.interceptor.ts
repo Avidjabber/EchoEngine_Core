@@ -12,12 +12,13 @@ export const tauntCheckInterceptor: CombatInterceptor = {
     async apply(ctx: CombatActionContext, db: PrimaryDatabaseService): Promise<void> {
         if (ctx.actorParticipantId === null) return;
         if (!ctx.profile?.dealsDamage) return;
-        if (ctx.profile.isReactionAction) return;
+        if (ctx.input.isReaction) return;
 
         const taunt = await db.activeCombat_BehaviorEffect.findFirst({
             where: {
                 affectedParticipantId: ctx.actorParticipantId,
                 effectType:            { forcesTargeting: true },
+                linkedParticipant:     { isDefeated: false, hasFled: false },
             },
             select: {
                 linkedParticipant: { select: { entityId: true } },
