@@ -37,11 +37,11 @@ What is explicitly deferred:
   - Behavior effects — guard, taunt, parry, absorb, reflect, stun (stage 2)
   - Stat effects — hit mods, damage mods, AC mods, DoT, HoT, advantage (stage 2)
   - Reactions (stage 2)
-  - Saving throws (stage 3+)
-  - AoE / multi-target (stage 3+)
-  - NPC AI action selection (stage 3+; NPC_AI phase stub exists but is a no-op)
-  - Mid-combat joins and summons (stage 3+)
+  - Saving throws (stage 3)
+  - AoE / multi-target (stage 3)
+  - Mid-combat joins and summons (stage 3)
   - Pre-combat effects (Entity_PreCombatEffect → ActiveCombat_StatEffect, stage 2+)
+  - NPC AI action selection (stage 4; NPC_AI phase stub exists but is a no-op)
 
 
 ─────────────────────────────────────────────
@@ -122,21 +122,8 @@ Pre-combat effects  [ ] GROUP 4
 
 
 ─────────────────────────────────────────────
-STAGE 3 — NPC AI, SAVING THROWS, AOE  (future)
+STAGE 3 — SAVING THROWS, AOE, JOINS  (future)
 ─────────────────────────────────────────────
-
-NPC AI (NPC_AI phase — final phase in the pipeline)
-  NPC_AI is a dedicated pipeline phase, always the last to run. In stage 1 it is
-  a no-op stub (npc-ai.ts). In stage 3 it reads the next participant's
-  isAiControlled flag and, if true:
-    1. Reads SpeciesCombatBehavior weights (attackWeight, buffWeight, debuffWeight,
-       healWeight) and normalises them into a probability distribution.
-    2. Selects an action category based on what the entity has available.
-    3. Selects a target using offensiveTargetStrategyId or supportTargetStrategyId
-       weighted against strategyWeight (vs. random fallback).
-    4. Executes the chosen action via a recursive runCombatPipeline call.
-  advanceTurn no longer skips AI turns in the bot loop — the NPC_AI phase handles
-  them inline as part of the same pipeline run.
 
 Saving throws
   RESOLVE phase extended: profiles with savingThrowStat trigger a defender roll
@@ -153,3 +140,21 @@ Mid-combat joins and summons
   increment all higher turnOrder values.
   Summon: triggered from an action's summonSpeciesId, spawns entity + loadout,
   calls join logic.
+
+
+─────────────────────────────────────────────
+STAGE 4 — NPC AI  (future)
+─────────────────────────────────────────────
+
+NPC AI (NPC_AI phase — final phase in the pipeline)
+  NPC_AI is a dedicated pipeline phase, always the last to run. In stages 1–3 it
+  is a no-op stub (npc-ai.ts). In stage 4 it reads the next participant's
+  isAiControlled flag and, if true:
+    1. Reads SpeciesCombatBehavior weights (attackWeight, buffWeight, debuffWeight,
+       healWeight) and normalises them into a probability distribution.
+    2. Selects an action category based on what the entity has available.
+    3. Selects a target using offensiveTargetStrategyId or supportTargetStrategyId
+       weighted against strategyWeight (vs. random fallback).
+    4. Executes the chosen action via a recursive runCombatPipeline call.
+  advanceTurn no longer skips AI turns in the bot loop — the NPC_AI phase handles
+  them inline as part of the same pipeline run.
