@@ -61,13 +61,23 @@ export async function runResolve(ctx: CombatActionContext, { roller }: PipelineS
     if (profile.savingThrowStatName && profile.saveDC > 0 && (ctx.isHit === true || !profile.dealsDamage)) {
         const statValue = target.stats[profile.savingThrowStatName] ?? 10;
         const statMod   = Math.floor((statValue - 10) / 2);
-        const saveD20   = rollDice(1, 20, roller)[0]!;
+        const saveD20   = rollWithAdvantage(20, ctx.saveAdvantage, roller);
         ctx.saveRoll          = saveD20;
         ctx.saveTotal         = saveD20 + statMod;
         ctx.savedSuccessfully = ctx.saveTotal >= profile.saveDC;
         if (ctx.savedSuccessfully && profile.dealsDamage) {
             ctx.finalDamage          = Math.floor(ctx.finalDamage / 2);
             ctx.finalElementalDamage = Math.floor(ctx.finalElementalDamage / 2);
+        }
+
+        // Legendary resistance: AI-controlled bosses auto-spend a charge to flip a failed save.
+        if (!ctx.savedSuccessfully && (ctx.targetParticipant?.legendaryResistancesRemaining ?? 0) > 0) {
+            ctx.savedSuccessfully       = true;
+            ctx.legendaryResistanceUsed = true;
+            if (profile.dealsDamage) {
+                ctx.finalDamage          = Math.floor(ctx.finalDamage / 2);
+                ctx.finalElementalDamage = Math.floor(ctx.finalElementalDamage / 2);
+            }
         }
     }
 }

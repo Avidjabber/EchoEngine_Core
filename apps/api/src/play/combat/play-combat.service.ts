@@ -37,8 +37,9 @@ export interface CombatParticipantInfo {
 }
 
 export interface AvailableAction {
-    profileId:      number;
-    storedItemId:   number;
+    profileId:      number | null;  // null for builtin universal actions
+    storedItemId:   number | null;  // null for builtin universal actions
+    builtinAction:  'dodge' | 'help' | null;
     itemName:       string;
     actionLabel:    string | null;
     targetScope: {
@@ -59,7 +60,7 @@ export interface AvailableAction {
 export type { PendingReaction } from './engine/combat-action-context';
 
 export type ActionResultOutcome =
-    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; tempHpDrained: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
     | { kind: 'miss';     hitRoll: number; targetAC: number; isFumble: boolean }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
@@ -73,16 +74,17 @@ export interface SummonedEntity {
 }
 
 export interface ActionResult {
-    actionId:         number;
-    actionLabel:      string;
-    actorName:        string;
-    targetName:       string;
-    actualTargetName: string;
-    wasRedirected:    boolean;
-    outcome:          ActionResultOutcome;
-    appliedEffects:   string[];
-    pendingReaction?: PendingReaction;
-    summonedEntities: SummonedEntity[];
+    actionId:               number;
+    actionLabel:            string;
+    actorName:              string;
+    targetName:             string;
+    actualTargetName:       string;
+    wasRedirected:          boolean;
+    legendaryResistanceUsed: boolean;
+    outcome:                ActionResultOutcome;
+    appliedEffects:         string[];
+    pendingReaction?:       PendingReaction;
+    summonedEntities:       SummonedEntity[];
 }
 
 export interface XpGrant {
@@ -420,6 +422,7 @@ export class PlayCombatService {
                     actions.push({
                         profileId:               profile.id,
                         storedItemId:            stored.id,
+                        builtinAction:           null,
                         itemName:                stored.item.name,
                         actionLabel:             profile.label,
                         targetScope:             profile.targetScope,
@@ -449,11 +452,29 @@ export class PlayCombatService {
             },
         });
 
-        return equipped
+        const builtins: AvailableAction[] = [
+            {
+                profileId: null, storedItemId: null, builtinAction: 'dodge',
+                itemName: 'Dodge', actionLabel: 'Dodge',
+                targetScope: { targetsSelf: true, targetsSingle: false, targetsAllies: false, targetsEnemies: false },
+                damageDice: null, damageTypeName: null, elementalDamageDice: null, elementalDamageTypeName: null,
+                healDice: null, cooldownRounds: 0, isOnCooldown: false,
+            },
+            {
+                profileId: null, storedItemId: null, builtinAction: 'help',
+                itemName: 'Help', actionLabel: 'Help',
+                targetScope: { targetsSelf: false, targetsSingle: true, targetsAllies: true, targetsEnemies: true },
+                damageDice: null, damageTypeName: null, elementalDamageDice: null, elementalDamageTypeName: null,
+                healDice: null, cooldownRounds: 0, isOnCooldown: false,
+            },
+        ];
+
+        const itemActions = equipped
             .filter(s => s.chosenProfile !== null)
             .map(s => ({
                 profileId:               s.chosenProfile!.id,
                 storedItemId:            s.id,
+                builtinAction:           null as null,
                 itemName:                s.item.name,
                 actionLabel:             s.chosenProfile!.label,
                 targetScope:             s.chosenProfile!.targetScope,
@@ -471,6 +492,8 @@ export class PlayCombatService {
                 cooldownRounds:          s.chosenProfile!.cooldownRounds,
                 isOnCooldown:            cooldownProfileIds.has(s.chosenProfile!.id),
             }));
+
+        return [...builtins, ...itemActions];
     }
 
     async advanceTurn(combatId: number, currentEntityId: number): Promise<AdvanceTurnResult> {
@@ -543,6 +566,11 @@ export class PlayCombatService {
         const next = freshActive.find(p => p.turnOrder > combat.currentTurnOrder) ?? freshActive[0]!;
 
         await this.db.$transaction([
+            // Clear unconsumed Help roll mod on the participant whose turn just ended.
+            ...(endingParticipant ? [this.db.activeCombat_Participant.updateMany({
+                where: { id: endingParticipant.id, helpRollMod: { not: null } },
+                data:  { helpRollMod: null },
+            })] : []),
             this.db.activeCombat_BehaviorEffect.deleteMany({
                 where: { sourceParticipantId: next.id, roundsRemaining: 1 },
             }),
@@ -743,6 +771,155 @@ export class PlayCombatService {
         );
         if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Reaction aborted');
         return this._toActionResult(ctx);
+    }
+
+    // ── Universal builtin actions (Dodge, Help) ───────────────────────────────
+
+    async processBuiltinAction(
+        combatId:       number,
+        actorEntityId:  number,
+        action:         'dodge' | 'help',
+        targetEntityId: number | null,
+        roundNumber:    number,
+    ): Promise<ActionResult> {
+        const [actorPart, combat, existingCount, actorEntity] = await Promise.all([
+            this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: actorEntityId },
+                select: { id: true, turnOrder: true, isDefeated: true, hasFled: true, allyFactionId: true },
+            }),
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: { currentTurnOrder: true, initiationType: { select: { name: true } } },
+            }),
+            this.db.activeCombat_Action.count({
+                where: { activeCombatId: combatId, roundNumber },
+            }),
+            this.db.entity.findUnique({
+                where:  { id: actorEntityId },
+                select: { name: true },
+            }),
+        ]);
+
+        if (!actorPart || !combat || !actorEntity) throw new Error('Combat data could not be loaded.');
+        if (actorPart.isDefeated || actorPart.hasFled)     throw new Error('You cannot act.');
+        if (actorPart.turnOrder !== combat.currentTurnOrder) throw new Error('It is not this entity\'s turn.');
+
+        const stun = await this.db.activeCombat_BehaviorEffect.findFirst({
+            where:  { affectedParticipantId: actorPart.id, effectType: { deniesActions: true } },
+            select: { id: true },
+        });
+        if (stun) throw new Error('You are stunned and cannot act.');
+
+        const mainCategory = await this.db.combatActionCategory.findFirst({
+            where:  { name: 'Main Action' },
+            select: { id: true },
+        });
+
+        if (action === 'dodge') {
+            const dodgeType = await this.db.combatEffectType.findFirst({
+                where:  { grantsHitDisadvantage: true },
+                select: { id: true },
+            });
+            if (!dodgeType) throw new Error('Dodge effect type not found.');
+
+            const logged = await this.db.$transaction(async tx => {
+                const log = await tx.activeCombat_Action.create({
+                    data: {
+                        activeCombatId:  combatId,
+                        roundNumber,
+                        turnIndex:       existingCount + 1,
+                        actorEntityId,
+                        actionCategoryId: mainCategory?.id ?? null,
+                    },
+                    select: { id: true },
+                });
+
+                await tx.activeCombat_BehaviorEffect.upsert({
+                    where:  { affectedParticipantId_effectTypeId: { affectedParticipantId: actorPart.id, effectTypeId: dodgeType.id } },
+                    create: {
+                        activeCombatId:        combatId,
+                        effectTypeId:          dodgeType.id,
+                        affectedParticipantId: actorPart.id,
+                        sourceParticipantId:   actorPart.id,
+                        roundsRemaining:       1,
+                    },
+                    update: {
+                        sourceParticipantId: actorPart.id,
+                        roundsRemaining:     1,
+                    },
+                });
+
+                return log;
+            });
+
+            return {
+                actionId:                logged.id,
+                actionLabel:             'Dodge',
+                actorName:               actorEntity.name,
+                targetName:              actorEntity.name,
+                actualTargetName:        actorEntity.name,
+                wasRedirected:           false,
+                legendaryResistanceUsed: false,
+                outcome:                 { kind: 'behavior', effectName: 'Dodge', guardedName: null, rounds: 1 },
+                appliedEffects:          [],
+                summonedEntities:        [],
+            };
+        }
+
+        // Help action
+        if (targetEntityId === null) throw new Error('Help requires a target.');
+
+        const [targetPart, targetEntity] = await Promise.all([
+            this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: targetEntityId, isDefeated: false, hasFled: false },
+                select: { id: true, allyFactionId: true },
+            }),
+            this.db.entity.findUnique({
+                where:  { id: targetEntityId },
+                select: { name: true },
+            }),
+        ]);
+
+        if (!targetPart || !targetEntity) throw new Error('Target is not an active participant.');
+        if (targetEntityId === actorEntityId) throw new Error('You cannot Help yourself.');
+
+        const isAlly    = targetPart.allyFactionId === actorPart.allyFactionId;
+        const helpMod   = isAlly ? 'advantage' : 'disadvantage';
+
+        const logged = await this.db.$transaction(async tx => {
+            const log = await tx.activeCombat_Action.create({
+                data: {
+                    activeCombatId:   combatId,
+                    roundNumber,
+                    turnIndex:        existingCount + 1,
+                    actorEntityId,
+                    actionCategoryId: mainCategory?.id ?? null,
+                    targetEntityId,
+                },
+                select: { id: true },
+            });
+
+            await tx.activeCombat_Participant.update({
+                where: { id: targetPart.id },
+                data:  { helpRollMod: helpMod },
+            });
+
+            return log;
+        });
+
+        const effectLabel = isAlly ? 'Help (Advantage)' : 'Help (Disadvantage)';
+        return {
+            actionId:                logged.id,
+            actionLabel:             'Help',
+            actorName:               actorEntity.name,
+            targetName:              targetEntity.name,
+            actualTargetName:        targetEntity.name,
+            wasRedirected:           false,
+            legendaryResistanceUsed: false,
+            outcome:                 { kind: 'behavior', effectName: effectLabel, guardedName: null, rounds: 1 },
+            appliedEffects:          [],
+            summonedEntities:        [],
+        };
     }
 
     // ── XP distribution ───────────────────────────────────────────────────────
@@ -1075,6 +1252,7 @@ export class PlayCombatService {
                     totalElementalDamage:    ctx.finalElementalDamage,
                     elementalDamageTypeName: ctx.profile?.elementalDamageTypeName ?? null,
                     absorbedDamage:          ctx.absorbedDamage,
+                    tempHpDrained:           ctx.tempHpDrained,
                     saveRoll:                ctx.saveRoll,
                     saveTotal:               ctx.saveTotal,
                     savedSuccessfully:       ctx.savedSuccessfully,
@@ -1110,16 +1288,17 @@ export class PlayCombatService {
             : (ctx.target?.name ?? 'Unknown');
 
         return {
-            actionId:         ctx.actionId ?? 0,
-            actionLabel:      ctx.profile?.label ?? 'Unknown',
-            actorName:        ctx.actor?.name ?? 'Unknown',
+            actionId:               ctx.actionId ?? 0,
+            actionLabel:            ctx.profile?.label ?? 'Unknown',
+            actorName:              ctx.actor?.name ?? 'Unknown',
             targetName,
-            actualTargetName: ctx.target?.name ?? 'Unknown',
-            wasRedirected:    ctx.wasRedirected,
+            actualTargetName:       ctx.target?.name ?? 'Unknown',
+            wasRedirected:          ctx.wasRedirected,
+            legendaryResistanceUsed: ctx.legendaryResistanceUsed,
             outcome,
             appliedEffects,
-            pendingReaction:  ctx.pendingReaction ?? undefined,
-            summonedEntities: [],
+            pendingReaction:        ctx.pendingReaction ?? undefined,
+            summonedEntities:       [],
         };
     }
 

@@ -29,31 +29,40 @@ ACTION ECONOMY ADDITIONS
 
 DODGE ACTION
   Complexity: Low
+  Status: IMPLEMENTED (engine complete, 2026-04-26)
   What: Spending the Main Action to adopt a defensive stance until the start
   of your next turn. While dodging: all attacks against you have disadvantage,
   and you have advantage on DEX saving throws. Cancelled if you are incapacitated.
-  Currently: No player action sets a defensive stance; the action category exists
-  but only offensive/effect actions are available.
-  Implementation path:
-    - Add a seeded ItemEquipmentProfile (dodgeProfile) with actionType = "dodge".
-    - END phase: detect dodge actionType and upsert a 1-round BehaviorEffect with
-      suppressesReactive = false and a new flag — e.g. isEvading = true.
-    - TARGET phase: if the intended target has isEvading, set disadvantage on
-      ctx.hitAdvantage.
-    - RESOLVE phase: if actor isEvading, set advantage on DEX saves.
+  Implemented:
+    - CombatEffectType "dodge" seeded with grantsHitDisadvantage = true.
+    - dodge-check.interceptor.ts (TARGET/1): applies hit disadvantage to incoming
+      attacks; also sets ctx.saveAdvantage = 'advantage' when the incoming action
+      has a DEX saving throw (stat name matched case-insensitively).
+    - ctx.saveAdvantage wired into RESOLVE — save roll uses rollWithAdvantage.
+    - Schema: grantsHitDisadvantage Bool column on CombatEffectType.
+  Remaining content work:
+    - Seed a Dodge action item/profile with actionType applying the "dodge"
+      behavior effect for 1 round. Engine handles everything else automatically.
 
 HELP ACTION
   Complexity: Low-Medium
+  Status: IMPLEMENTED (engine complete, 2026-04-26)
   What: Spending the Main Action to give one ally advantage on their next attack
-  roll, or to give an adjacent enemy disadvantage on their next attack roll against
-  an ally. Effect is consumed on the first applicable roll.
-  Currently: No mechanism to grant single-use roll advantage to another participant.
-  Implementation path:
-    - Add a helpTargetParticipantId + helpConsumed flag to ActiveCombat_Participant,
-      OR model as a special 1-roll StatEffect with a "consumed on use" hook.
-    - PRE_RESOLVE: if actor's helpTargetParticipantId == current attacker, apply
-      advantage and clear the flag.
-    - Discord: turn prompt needs a "Help" action slot in the action picker.
+  roll, or to give an enemy disadvantage on their next attack roll.
+  Effect is consumed on the first applicable attack roll, or expires at turn end.
+  Implemented:
+    - helpRollMod String? on ActiveCombat_Participant — "advantage" (ally target)
+      or "disadvantage" (enemy target); faction comparison determines which.
+    - processBuiltinAction('help'): validates turn ownership and stun, resolves
+      ally vs enemy from allyFactionId, writes helpRollMod to target participant.
+    - help-check.interceptor.ts (PRE_RESOLVE/-1): applies helpRollMod to actor's
+      hitAdvantage when they make an attack; sets ctx.helpConsumed = true.
+    - end.ts: clears helpRollMod in transaction when consumed.
+    - advanceTurn: clears unconsumed helpRollMod at end of beneficiary's turn.
+    - getAvailableActions: always injects Help as a builtin Main Action entry
+      with single+ally+enemy targeting scope.
+  Note: "adjacent" restriction from tabletop is dropped — EchoEngine has no
+  positioning, so Help can target any active participant.
 
 READY ACTION
   Complexity: High
@@ -81,16 +90,18 @@ HIT POINTS AND RECOVERY
 
 TEMPORARY HIT POINTS
   Complexity: Low-Medium
+  Status: IMPLEMENTED (2026-04-26)
   What: A separate HP buffer granted by certain abilities (e.g. False Life, Aura
   of Protection). Temporary HP absorbs incoming damage before real HP. Does not
   stack — highest pool wins. Not restored by healing; cleared at long rest.
-  Currently: No temp HP layer; all damage applies directly to currentHp.
-  Implementation path:
-    - Add tempHp Int (default 0) to ActiveCombat_Participant.
-    - APPLY interceptor (priority -1, before guard absorption and resistances):
-      drain tempHp first, carry remainder into finalDamage.
-    - Action result display: include tempHpDrained in ActionResult outcome.
-    - Grant path: a new action type "grant_temp_hp" that writes tempHp = max(current, granted).
+  Implemented:
+    - tempHp Int @default(0) on ActiveCombat_Participant (pre-existing).
+    - temp-hp.interceptor.ts (APPLY/-1): drains tempHp proportionally from primary
+      and elemental damage before guard absorption and resistance runs.
+    - ctx.tempHpDrained surfaced in ActionResult hit outcome.
+  Note: Grant path (action type "grant_temp_hp") is content-level work, not engine
+  work. The engine reads tempHp from the participant snapshot; any action that
+  writes tempHp = max(current, granted) to the DB will be respected.
 
 DEATH SAVING THROWS
   Complexity: Medium
@@ -161,18 +172,20 @@ BOSS / ELITE MECHANICS
 
 LEGENDARY RESISTANCE
   Complexity: Low-Medium
+  Status: PARTIALLY IMPLEMENTED (2026-04-26)
   What: Boss-tier creatures can choose to succeed on a failed saving throw,
   consuming one of a limited daily pool (typically 3 per long rest). Declared
   after the roll result is known.
-  Currently: All saving throw failures are final; no exception mechanism exists.
-  Implementation path:
-    - Add legendaryResistancesRemaining Int (nullable) to ActiveCombat_Participant.
-      Null = not a legendary creature. Populated from Species at combat start.
-    - RESOLVE: if savedSuccessfully == false and actor.legendaryResistancesRemaining > 0:
-      - For AI: auto-consume (decrement counter, flip savedSuccessfully = true).
-      - For player-controlled boss: return a pendingLegendaryResistance flag and
-        let the controller choose via a Discord prompt (same pattern as reactions).
-    - Reset: legendaryResistancesRemaining restores to default on long rest (out-of-combat).
+  Implemented:
+    - legendaryResistancesRemaining Int? on ActiveCombat_Participant (null = not legendary).
+    - RESOLVE phase: AI-controlled targets auto-consume a charge when they fail a save.
+      savedSuccessfully flips to true, damage is halved (standard success result).
+    - END phase: decrements legendaryResistancesRemaining in the action transaction.
+    - ctx.legendaryResistanceUsed surfaced in ActionResult.
+  Deferred:
+    - Player-controlled boss prompt (same Discord reaction-prompt pattern).
+    - Population of legendaryResistancesRemaining from Species at combat start.
+    - Long-rest reset (out-of-combat endpoint).
 
 LEGENDARY ACTIONS
   Complexity: High
@@ -192,22 +205,6 @@ LEGENDARY ACTIONS
       creature's own turn.
     - Discord: requires a secondary ephemeral prompt sent to the boss controller
       at the end of each other participant's turn, cancellable.
-
-LAIR ACTIONS
-  Complexity: High
-  What: In certain scripted encounters, the environment itself acts at initiative
-  count 20 (before any participant's turn on that count). The lair selects from a
-  predefined set of effects (environmental hazards, terrain changes, summons, etc.).
-  Currently: No encounter-level event hooks; turn order only covers participant turns.
-  Implementation path:
-    - New table: CombatEncounterDef_LairAction (encounterId, profileId or effectDefId,
-      description). Linked to CombatEncounterDef.
-    - advanceTurn: after processing initiative count 20 threshold each round, check
-      if the combat has a CombatEncounterDef with lair actions and the boss (if any)
-      is still alive. If so, execute a randomly selected (or weighted) lair action.
-    - Lair actions bypass the normal participant pipeline — they fire effects directly
-      without an actor entity.
-    - Discord: post a lair action result message the same way AoE results are posted.
 
 
 ─────────────────────────────────────────────
@@ -235,6 +232,8 @@ MULTIATTACK
 
 TWO-WEAPON FIGHTING
   Complexity: Medium
+  Status: DEFERRED — requires equipment slot tracking (main_hand / off_hand) which
+  is not yet part of the item system. Revisit once item slots are defined.
   What: When wielding a Light weapon in the main hand and a Light weapon in the
   off-hand, you may use your Bonus Action to make one extra attack with the off-hand
   weapon. The off-hand attack does not add the ability modifier to damage (only to hit).

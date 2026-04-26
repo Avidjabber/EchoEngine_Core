@@ -60,10 +60,26 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
         });
         ctx.actionId = action.id;
 
+        // ── Legendary resistance charge ───────────────────────────────────────
+        if (ctx.legendaryResistanceUsed && ctx.targetParticipant !== null) {
+            await tx.activeCombat_Participant.update({
+                where: { id: ctx.targetParticipant.id },
+                data:  { legendaryResistancesRemaining: { decrement: 1 } },
+            });
+        }
+
         // ── Cooldown + item uses ──────────────────────────────────────────────
         // Skipped for AoE follow-up targets (aoeIndex > 0) — these are tracked
         // once on the first pipeline run (aoeIndex = 0 or null) only.
         const sideWrites: Promise<unknown>[] = [];
+        if (ctx.helpConsumed && ctx.actorParticipantId !== null) {
+            sideWrites.push(
+                tx.activeCombat_Participant.update({
+                    where: { id: ctx.actorParticipantId },
+                    data:  { helpRollMod: null },
+                }),
+            );
+        }
         if (input.aoeIndex === null || input.aoeIndex === 0) {
             sideWrites.push(
                 tx.storedItem.updateMany({

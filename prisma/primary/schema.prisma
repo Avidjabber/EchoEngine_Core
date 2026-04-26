@@ -2403,7 +2403,7 @@ model ItemEquipmentProfile {
   behaviorEffectTypeId Int?                  // set for stateful behaviors (guard, taunt, parry, etc.)
   flatModifier         Int?                  // behavior effect flat magnitude (e.g. absorb buffer HP); copied to ActiveCombat_BehaviorEffect at application time
   percentModifier      Float?                // behavior effect percent magnitude (e.g. guard absorption %); copied to ActiveCombat_BehaviorEffect at application time
-  isReactionAction     Boolean @default(false)  // true = this profile can fire as a reaction (counterattack trigger); may also have actionCategoryId for normal turn use
+  isReactionAction     Boolean @default(false)  // true = this profile can fire as a reaction; may also have actionCategoryId for normal turn use
   requiresVerbal       Boolean @default(false)  // action has a verbal component — blocked by conditions with blocksVerbal
   requiresSomatic      Boolean @default(false)  // action has a somatic component — blocked by conditions with blocksSomatic
   allowedInSpar        Boolean @default(true)
@@ -5438,7 +5438,7 @@ model CombatOutcome {
 //
 // Seeded values:
 //   Behavioral (route to ActiveCombat_BehaviorEffect):
-//     "guard" | "taunt" | "parry" | "absorb" | "dodge_stance" | "counterattack" | "suppress" | "dispel" | "untargetable" | "action_denial" | "reflect"
+//     "guard" | "taunt" | "dispel" | "dodge" | "action_denial"
 //   Skill-derived magnitude (route to ConditionDef_CombatEffect with flatModifier = null):
 //     "hit_mod" | "damage_mod" | "stat_mod" | "ac_mod"
 //
@@ -5451,34 +5451,20 @@ model CombatOutcome {
 // modifiesAC:           applies a skill-derived modifier to AC (ac_mod)
 // redirectsDamage:      incoming damage to a protected ally is rerouted to the effect-holder (guard)
 // forcesTargeting:      enemies must select the effect-holder as their target (taunt)
-// isReactive:           effect triggers on an incoming attack rather than on action use (parry, counterattack)
-// absorbsDamage:        creates a damage buffer that absorbs hits before HP is reduced (absorb)
-// grantsEvasion:        chance-based complete avoidance of an incoming attack (dodge_stance)
-// enablesCounterattack: triggers an automatic attack when the effect-holder is hit (counterattack)
-// suppressesReactive:   prevents the target's reactive effects (parry, counterattack) from firing (suppress)
 // removesEffects:       strips existing active effects from the target (dispel)
-// preventedAsTarget:    effect-holder cannot be selected as a target (untargetable)
-// reflectsDamage:       a portion of incoming damage is dealt back to the attacker (reflect)
-// hasReactAction:       when this effect triggers reactively, fire the entity's equipped isReactionAction profile against the attacker
+// grantsHitDisadvantage: attackers roll with disadvantage against the effect-holder (dodge)
 model CombatEffectType {
   id   Int    @id @default(autoincrement())
   name String @unique @db.VarChar(50)
 
-  modifiesRoll         Boolean @default(false)
-  modifiesStat         Boolean @default(false)
-  deniesActions        Boolean @default(false)
-  modifiesAC           Boolean @default(false)
-  redirectsDamage      Boolean @default(false)
-  forcesTargeting      Boolean @default(false)
-  isReactive           Boolean @default(false)
-  absorbsDamage        Boolean @default(false)
-  grantsEvasion        Boolean @default(false)
-  enablesCounterattack Boolean @default(false)
-  suppressesReactive   Boolean @default(false)
-  removesEffects       Boolean @default(false)
-  preventedAsTarget    Boolean @default(false)
-  reflectsDamage       Boolean @default(false)
-  hasReactAction       Boolean @default(false)
+  modifiesRoll          Boolean @default(false)
+  modifiesStat          Boolean @default(false)
+  deniesActions         Boolean @default(false)
+  modifiesAC            Boolean @default(false)
+  redirectsDamage       Boolean @default(false)
+  forcesTargeting       Boolean @default(false)
+  removesEffects        Boolean @default(false)
+  grantsHitDisadvantage Boolean @default(false)
 
   combatEffects        ConditionDef_CombatEffect[]
   profileBehaviors      ItemEquipmentProfile[]        @relation("ProfileBehaviorEffect")
@@ -5712,8 +5698,10 @@ model ActiveCombat_Participant {
   hasFled        Boolean @default(false)
   isDefeated     Boolean @default(false)
 
-  hasUsedReaction Boolean @default(false)  // reset at start of each participant's turn; prevents multiple reactions per round
-  tempHp          Int     @default(0)       // temporary HP buffer; absorbs damage before real HP; not restored by healing
+  hasUsedReaction               Boolean @default(false)  // reset at start of each participant's turn; prevents multiple reactions per round
+  tempHp                        Int     @default(0)       // temporary HP buffer; absorbs damage before real HP; not restored by healing
+  legendaryResistancesRemaining Int?                      // null = not a legendary creature; >0 = can spend to auto-succeed a failed save
+  helpRollMod                   String? @db.VarChar(20)   // "advantage" | "disadvantage" — set by the Help action; consumed on next attack roll; cleared at turn end
 
   activeCombat    ActiveCombat              @relation(fields: [activeCombatId], references: [id], onDelete: Cascade)
   entity          Entity                    @relation(fields: [entityId],       references: [id], onDelete: Cascade)
@@ -5806,8 +5794,8 @@ model ActiveCombat_Action {
   turnIndex      Int  // position within the round (for ordering)
 
   actorEntityId      Int
-  actionCategoryId   Int?  // null for reaction actions (counterattack); set for all normal turn actions
-  equipmentProfileId Int
+  actionCategoryId   Int?  // null for reaction actions; set for all normal turn actions
+  equipmentProfileId Int?  // null for universal builtin actions (dodge, help) that have no item profile
 
   targetEntityId Int?  // null for self-targeted or area actions resolved entirely app-side
 
@@ -5837,7 +5825,7 @@ model ActiveCombat_Action {
 
   activeCombat          ActiveCombat          @relation(fields: [activeCombatId],           references: [id], onDelete: Cascade)
   actionCategory        CombatActionCategory? @relation(fields: [actionCategoryId],         references: [id], onDelete: Restrict)
-  equipmentProfile      ItemEquipmentProfile  @relation(fields: [equipmentProfileId],       references: [id], onDelete: Restrict)
+  equipmentProfile      ItemEquipmentProfile? @relation(fields: [equipmentProfileId],       references: [id], onDelete: Restrict)
   actorEntity           Entity                @relation("CombatActionActor",                fields: [actorEntityId],           references: [id], onDelete: Cascade)
   targetEntity          Entity?               @relation("CombatActionTarget",               fields: [targetEntityId],          references: [id], onDelete: SetNull)
   originalTargetEntity  Entity?               @relation("CombatActionOriginalTarget",       fields: [originalTargetEntityId],  references: [id], onDelete: SetNull)

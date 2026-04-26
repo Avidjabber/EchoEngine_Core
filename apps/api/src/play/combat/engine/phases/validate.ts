@@ -37,7 +37,7 @@ export async function runValidate(ctx: CombatActionContext, _svc: PipelineServic
         return;
     }
 
-    // Non-guard behavior effects (stun, suppress, taunt) must target an enemy, not the actor.
+    // Non-guard behavior effects (stun, taunt, dispel) must target an enemy, not the actor.
     if (ctx.profile.behaviorEffectTypeId !== null && !ctx.profile.behaviorEffectRedirectsDamage && ctx.actualTargetId === null) {
         ctx.aborted     = true;
         ctx.abortReason = 'A target is required for this action.';

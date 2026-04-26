@@ -57,6 +57,7 @@ export interface ProfileSnapshot {
     behaviorEffectName:            string | null;
     behaviorEffectRedirectsDamage: boolean;
     behaviorEffectForcesTargeting: boolean;
+    behaviorEffectRemovesEffects:  boolean;
     durationRounds:                number;
     flatModifier:                  number | null;
     percentModifier:               number | null;
@@ -79,11 +80,17 @@ export interface TargetSnapshot {
     stats:     Record<string, number>;
 }
 
+export interface ActorParticipantSnapshot {
+    helpRollMod: 'advantage' | 'disadvantage' | null;
+}
+
 export interface TargetParticipantSnapshot {
     id:             number;
     inSecondWind:   boolean;
     isAiControlled: boolean;
     hasUsedReaction: boolean;
+    tempHp:                       number;
+    legendaryResistancesRemaining: number | null;
 }
 
 // ── Reaction data set by POST_APPLY ──────────────────────────────────────────
@@ -103,6 +110,7 @@ export interface CombatActionContext {
 
     // DECLARE
     actor:               ActorSnapshot | null;
+    actorParticipant:    ActorParticipantSnapshot | null;
     profile:             ProfileSnapshot | null;
     combatMeta:          CombatMetaSnapshot | null;
     existingActionCount: number;
@@ -129,6 +137,7 @@ export interface CombatActionContext {
     hitAdvantage:    'advantage' | 'disadvantage' | null;
     damageAdvantage: 'advantage' | 'disadvantage' | null;
     healAdvantage:   'advantage' | 'disadvantage' | null;
+    saveAdvantage:   'advantage' | 'disadvantage' | null;
     primaryDamageMultiplier:   number;  // precomputed from target stat effects; applied to finalDamage in APPLY
     elementalDamageMultiplier: number;  // precomputed from target stat effects; applied to finalElementalDamage in APPLY
 
@@ -155,6 +164,10 @@ export interface CombatActionContext {
     knockedDown:     boolean;
     defeated:        boolean;
     absorbedDamage:  number;  // damage intercepted by guard absorption (guard entity took this instead)
+    tempHpDrained:   number;  // temp HP consumed before real HP was touched
+    helpConsumed:    boolean;  // actor had a Help advantage/disadvantage that was applied this action
+
+    legendaryResistanceUsed: boolean;  // AI boss auto-spent a legendary resistance charge this action
 
     // POST_APPLY
     pendingReaction: PendingReaction | null;

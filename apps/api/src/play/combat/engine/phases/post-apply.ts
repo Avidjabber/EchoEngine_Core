@@ -3,7 +3,7 @@ import type { PipelineServices } from '../combat-pipeline';
 
 // POST_APPLY phase — after a successful hit, checks whether the defender has
 // equipped reaction actions and populates ctx.pendingReaction if so.
-// Skipped for AI-controlled defenders and when the defender is under a suppress effect.
+// Skipped for AI-controlled defenders, AoE actions, and reaction chains.
 export async function runPostApply(ctx: CombatActionContext, { db }: PipelineServices): Promise<void> {
     if (!ctx.isHit || !ctx.profile?.dealsDamage || !ctx.targetParticipant || ctx.actualTargetId === null) return;
     if (ctx.defeated || ctx.knockedDown) return;
@@ -11,15 +11,6 @@ export async function runPostApply(ctx: CombatActionContext, { db }: PipelineSer
     if (ctx.targetParticipant.hasUsedReaction) return;
     if (ctx.input.aoeIndex !== null) return;  // reactions are suppressed for AoE actions
     if (ctx.input.isReaction) return;         // no reaction chains
-
-    const suppressed = await db.activeCombat_BehaviorEffect.findFirst({
-        where: {
-            affectedParticipantId: ctx.targetParticipant.id,
-            effectType:            { suppressesReactive: true },
-        },
-        select: { id: true },
-    });
-    if (suppressed) return;
 
     const storageId = ctx.targetStorageId;
     if (storageId === null) return;

@@ -34,7 +34,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
                 durationRounds:      true,
                 flatModifier:        true,
                 percentModifier:     true,
-                behaviorEffectType:  { select: { id: true, name: true, redirectsDamage: true, forcesTargeting: true } },
+                behaviorEffectType:  { select: { id: true, name: true, redirectsDamage: true, forcesTargeting: true, removesEffects: true } },
                 targetScope:         { select: { targetsSelf: true, targetsSingle: true, targetsAllies: true, targetsEnemies: true } },
             },
         }),
@@ -63,7 +63,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
         }),
         db.activeCombat_Participant.findFirst({
             where:  { activeCombatId: ctx.input.combatId, entityId: ctx.input.actorEntityId },
-            select: { id: true, turnOrder: true },
+            select: { id: true, turnOrder: true, helpRollMod: true },
         }),
     ]);
 
@@ -104,6 +104,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
             behaviorEffectName:            profileRow.behaviorEffectType?.name         ?? null,
             behaviorEffectRedirectsDamage: profileRow.behaviorEffectType?.redirectsDamage ?? false,
             behaviorEffectForcesTargeting: profileRow.behaviorEffectType?.forcesTargeting ?? false,
+            behaviorEffectRemovesEffects:  profileRow.behaviorEffectType?.removesEffects  ?? false,
             durationRounds:                profileRow.durationRounds,
             flatModifier:                  profileRow.flatModifier   ?? null,
             percentModifier:               profileRow.percentModifier ?? null,
@@ -121,6 +122,9 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
     if (actorParticipantRow) {
         ctx.actorTurnOrder     = actorParticipantRow.turnOrder;
         ctx.actorParticipantId = actorParticipantRow.id;
+        ctx.actorParticipant   = {
+            helpRollMod: (actorParticipantRow.helpRollMod as 'advantage' | 'disadvantage' | null) ?? null,
+        };
     }
 
     if (actorRow) {

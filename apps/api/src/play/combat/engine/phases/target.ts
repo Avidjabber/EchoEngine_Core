@@ -17,7 +17,7 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
         }),
         db.activeCombat_Participant.findFirst({
             where:  { activeCombatId: ctx.input.combatId, entityId: ctx.actualTargetId },
-            select: { id: true, inSecondWind: true, isAiControlled: true, hasUsedReaction: true },
+            select: { id: true, inSecondWind: true, isAiControlled: true, hasUsedReaction: true, tempHp: true, legendaryResistancesRemaining: true },
         }),
         db.entity_Storage.findUnique({
             where:  { entityId: ctx.actualTargetId },
@@ -63,6 +63,8 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
             inSecondWind:    participantRow.inSecondWind,
             isAiControlled:  participantRow.isAiControlled,
             hasUsedReaction: participantRow.hasUsedReaction,
+            tempHp:                       participantRow.tempHp,
+            legendaryResistancesRemaining: participantRow.legendaryResistancesRemaining,
         };
     }
 }
