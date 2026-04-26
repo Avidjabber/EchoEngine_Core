@@ -184,7 +184,7 @@ Within a phase, interceptors run in ascending priority order before the phase
 function itself. Any interceptor (or any phase) can set ctx.aborted = true to
 halt the pipeline immediately — subsequent interceptors and phases are skipped.
 
-STAGE 2 INTERCEPTORS  (STAGE_2_INTERCEPTORS array in interceptors/index.ts)
+COMBAT INTERCEPTORS  (COMBAT_INTERCEPTORS array in interceptors/index.ts)
 ──────────────────────────────────────────────────────────────────────────────
 
   Phase       Priority  File                              Purpose
@@ -194,11 +194,10 @@ STAGE 2 INTERCEPTORS  (STAGE_2_INTERCEPTORS array in interceptors/index.ts)
   TARGET      0         guard-redirect.interceptor.ts     Redirect actualTargetId to guarding entity
   PRE_RESOLVE 0         stat-effect-modifiers.interceptor.ts Adjust actor stats + roll mods from effects
   PRE_RESOLVE 1         ac-mods.interceptor.ts            Adjust targetAC from target's stat effects
+  APPLY       0         guard-absorption.interceptor.ts   Scale finalDamage/finalElementalDamage by
+                                                          guard's percentModifier when redirected
   APPLY       1         damage-modifiers.interceptor.ts   Scale finalDamage/finalElementalDamage by
                                                           resistance, vulnerability, or immunity
-
-  Priority gap: APPLY priority 0 is reserved for guard absorption (stage 3).
-  damage-modifiers runs at priority 1 so resistances apply to the post-absorption amount.
 
 NPC_AI is not an interceptor target — it is a full phase. It is always last and
 always runs (as a no-op) even in stages 1–3. This ensures the phase slot is reserved

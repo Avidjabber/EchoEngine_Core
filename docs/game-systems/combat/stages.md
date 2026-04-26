@@ -62,7 +62,7 @@ Implementation order
     [x] Guard redirect (TARGET phase — redirection only)
     [x] Stat effect modifiers
     [x] Damage resistance / vulnerability / immunity
-    [ ] Guard absorption (APPLY phase — deferred to stage 3)
+    [x] Guard absorption (APPLY phase — deferred to stage 3, now complete)
 
   Group 4 (heaviest — requires Groups 2 and 3):
     [x] Reactions
@@ -97,7 +97,7 @@ Guard redirect  [x] GROUP 3
   Damage is fully dealt to the redirected target (guarding entity).
   Partial absorption of that damage is a separate APPLY interceptor — see stage 3.
 
-Guard absorption  [ ] GROUP 3 — DEFERRED TO STAGE 3
+Guard absorption  [x] GROUP 3 — DEFERRED TO STAGE 3, NOW COMPLETE
   APPLY phase interceptor, priority 0 (runs before damage-modifiers at priority 1).
   When ctx.wasRedirected is true: read the guard effect's percentModifier from
   ActiveCombat_BehaviorEffect. Reduce ctx.finalDamage to:

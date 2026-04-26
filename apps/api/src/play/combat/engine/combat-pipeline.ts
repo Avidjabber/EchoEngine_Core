@@ -70,6 +70,7 @@ function createContext(input: CombatActionInput): CombatActionContext {
         hpAfter:             null,
         knockedDown:         false,
         defeated:            false,
+        absorbedDamage:      0,
         pendingReaction:        null,
         actionId:               null,
         appliedBehaviorEffect:  null,

@@ -2,7 +2,6 @@ import type { CombatActionContext } from '../combat-action-context';
 import type { PipelineServices } from '../combat-pipeline';
 
 // Loads target data from DB and calculates AC.
-// Stage 2+ will add guard-redirect logic here before the data load.
 export async function runTarget(ctx: CombatActionContext, { db }: PipelineServices): Promise<void> {
     if (ctx.actualTargetId === null) return;
 

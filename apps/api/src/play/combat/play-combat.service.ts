@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrimaryDatabaseService } from '../../database/primary.service';
 import { runCombatPipeline } from './engine/combat-pipeline';
-import { STAGE_2_INTERCEPTORS } from './engine/interceptors';
+import { COMBAT_INTERCEPTORS } from './engine/interceptors';
 import { defaultRoller, rollDice } from '../../utils/dice';
 import type { CombatActionContext } from './engine/combat-action-context';
 
@@ -65,7 +65,7 @@ export interface PendingReaction {
 }
 
 export type ActionResultOutcome =
-    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; hpAfter: number; knockedDown: boolean; defeated: boolean }
     | { kind: 'miss';     hitRoll: number; targetAC: number }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
@@ -670,7 +670,7 @@ export class PlayCombatService {
         const ctx = await runCombatPipeline(
             { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber, isReaction: false },
             { db: this.db, roller: defaultRoller },
-            STAGE_2_INTERCEPTORS,
+            COMBAT_INTERCEPTORS,
         );
 
         if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Action aborted');
@@ -689,7 +689,7 @@ export class PlayCombatService {
         const ctx = await runCombatPipeline(
             { combatId, actorEntityId: defenderEntityId, profileId, storedItemId, targetEntityId: attackerEntityId, roundNumber, isReaction: true },
             { db: this.db, roller: defaultRoller },
-            STAGE_2_INTERCEPTORS,
+            COMBAT_INTERCEPTORS,
         );
         if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Reaction aborted');
         return this._toActionResult(ctx);
@@ -832,6 +832,7 @@ export class PlayCombatService {
                     elementalDiceRolls:      ctx.elementalDiceRolls,
                     totalElementalDamage:    ctx.finalElementalDamage,
                     elementalDamageTypeName: ctx.profile?.elementalDamageTypeName ?? null,
+                    absorbedDamage:          ctx.absorbedDamage,
                     hpAfter:                 ctx.hpAfter ?? 0,
                     knockedDown:             ctx.knockedDown,
                     defeated:                ctx.defeated,

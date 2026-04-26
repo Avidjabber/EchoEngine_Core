@@ -130,9 +130,10 @@ export interface CombatActionContext {
     finalElementalDamage: number; // no modifier in stage 1; resistance interceptors scale this in stage 2
 
     // APPLY
-    hpAfter:     number | null;
-    knockedDown: boolean;
-    defeated:    boolean;
+    hpAfter:         number | null;
+    knockedDown:     boolean;
+    defeated:        boolean;
+    absorbedDamage:  number;  // damage intercepted by guard absorption (guard entity took this instead)
 
     // POST_APPLY
     pendingReaction: PendingReaction | null;

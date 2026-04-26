@@ -3,7 +3,6 @@ import type { CombatActionContext } from '../combat-action-context';
 import type { PrimaryDatabaseService } from '../../../../database/primary.service';
 
 // TARGET phase — redirects an incoming attack to the entity guarding the original target.
-// Stores the guard's absorption percent for the guard-absorption APPLY interceptor.
 export const guardRedirectInterceptor: CombatInterceptor = {
     phase:    'TARGET',
     priority: 0,
