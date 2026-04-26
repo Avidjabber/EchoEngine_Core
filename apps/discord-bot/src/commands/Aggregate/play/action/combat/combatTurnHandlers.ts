@@ -207,8 +207,13 @@ async function processAdvanceResult(
 
     // Stage 1–3: AI entities pass their turns here. Stage 4 wires the NPC_AI pipeline phase
     // to replace this loop with actual action selection.
+    // Safety ceiling prevents an infinite loop when all remaining participants are AI-controlled
+    // (e.g. all players fled a mixed fight). Keeps this well above any realistic combat size.
     let current = advance;
-    while (current.isAiControlled && !current.combatEnded) {
+    let aiPassCount = 0;
+    const MAX_AI_PASSES = 50;
+    while (current.isAiControlled && !current.combatEnded && aiPassCount < MAX_AI_PASSES) {
+        aiPassCount++;
         await channel.send({
             components: [{ type: 17, accent_color: colors.info, components: [{ type: 10, content: `-# **${current.nextEntityName}** passes their turn.` }] }],
         } as never).catch(() => null);
@@ -217,6 +222,16 @@ async function processAdvanceResult(
         if (!skipResult.success || !skipResult.value) { deleteTurnEntry(activeCombatId); return; }
         current = skipResult.value;
         await postTurnEndEvents(channel, current.turnEndEvents);
+    }
+
+    // If we hit the ceiling with only AI remaining, abandon the turn state rather than
+    // posting a player prompt for an AI-controlled entity.
+    if (current.isAiControlled && !current.combatEnded) {
+        deleteTurnEntry(activeCombatId);
+        await channel.send({
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: `-# Combat stalled — no eligible players to continue.` }] }],
+        } as never).catch(() => null);
+        return;
     }
 
     if (current.combatEnded) {

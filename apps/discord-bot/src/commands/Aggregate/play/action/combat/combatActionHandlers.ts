@@ -159,14 +159,22 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
     const turnMsg = await channel.messages.fetch(entry.turnPromptMessageId).catch(() => null);
 
     if (result.success && result.value) {
+        // Normalise: single-target returns ActionResult, AoE returns ActionResult[].
+        const results = Array.isArray(result.value) ? result.value : [result.value];
+        const primary  = results[0]!;
+
         // Mark the category only on success so a server-side abort doesn't consume the slot.
         markTurnFlagUsed(activeCombatId, FLAG_BY_SLOT[catSlot]);
-        // Post real result publicly
-        await channel.send({
-            components: buildActionResultComponents(result.value) as never,
-        } as never).catch(() => null);
+        // Post each result publicly (one message per AoE target).
+        for (const r of results) {
+            await channel.send({
+                components: buildActionResultComponents(r) as never,
+            } as never).catch(() => null);
+        }
 
-        const reaction = result.value.pendingReaction;
+        // AoE actions never produce reactions (suppressed server-side), so pendingReaction is
+        // only meaningful on single-target results. Either way, read from primary.
+        const reaction = primary.pendingReaction;
         if (reaction) {
             // Disable turn prompt while awaiting reaction
             if (turnMsg) {
@@ -201,8 +209,8 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
         }
 
         // Acknowledge ephemeral
-        const actionLabel = result.value.actionLabel;
-        const targetName  = result.value.wasRedirected ? result.value.actualTargetName : result.value.targetName;
+        const actionLabel = primary.actionLabel;
+        const targetName  = primary.wasRedirected ? primary.actualTargetName : primary.targetName;
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
             components: [{ type: 17, accent_color: colors.success, components: [{ type: 10, content: `**${actionLabel}** → **${targetName}** — done!` }] }],

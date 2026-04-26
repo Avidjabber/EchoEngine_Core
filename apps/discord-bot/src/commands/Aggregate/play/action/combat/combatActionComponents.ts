@@ -32,7 +32,7 @@ function actionSummary(action: AvailableAction): string {
 }
 
 export function buildActionResultComponents(result: ActionResult): object[] {
-    const { actorName, targetName, actualTargetName, wasRedirected, actionLabel, outcome, appliedEffects } = result;
+    const { actorName, targetName, actualTargetName, wasRedirected, actionLabel, outcome, appliedEffects, summonedEntities } = result;
 
     const redirectNote = wasRedirected ? ` → **${actualTargetName}** *(guard)*` : '';
     const header = `**${actorName}** used **${actionLabel}** on **${targetName}**${redirectNote}`;
@@ -58,6 +58,15 @@ export function buildActionResultComponents(result: ActionResult): object[] {
         const totalLine      = hasElemental ? `\n**${totalDamage} total damage**` : '';
 
         body = `${hitLine}\n${primaryLine}${elementalLine}${totalLine}\n${actualTargetName} now at **${outcome.hpAfter} HP**`;
+
+        if (outcome.absorbedDamage > 0) {
+            body += `\n-# 🛡 ${outcome.absorbedDamage} damage absorbed by guard`;
+        }
+        if (outcome.saveRoll !== null) {
+            body += outcome.savedSuccessfully
+                ? `\n-# 🎲 Save: ${outcome.saveTotal} — succeeded (half damage)`
+                : `\n-# 🎲 Save: ${outcome.saveTotal} — failed`;
+        }
         if (outcome.defeated) {
             body += `\n-# 💀 ${actualTargetName} has been eliminated.`;
         } else if (outcome.knockedDown) {
@@ -83,6 +92,10 @@ export function buildActionResultComponents(result: ActionResult): object[] {
 
     if (appliedEffects.length > 0) {
         body += `\n-# ✦ ${appliedEffects.join(', ')}`;
+    }
+    if (summonedEntities.length > 0) {
+        const names = summonedEntities.map(e => `**${e.name}**`).join(', ');
+        body += `\n-# ✦ Summoned: ${names}`;
     }
 
     return [{

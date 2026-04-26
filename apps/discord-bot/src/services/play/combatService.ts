@@ -114,7 +114,7 @@ export function advanceTurn(combatId: number, currentEntityId: number) {
 }
 
 export type ActionResultOutcome =
-    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
     | { kind: 'miss';     hitRoll: number; targetAC: number }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
@@ -128,6 +128,13 @@ export interface PendingReaction {
     reactionProfiles:   Array<{ profileId: number; storedItemId: number; label: string }>;
 }
 
+export interface SummonedEntity {
+    entityId:      number;
+    name:          string;
+    allyFactionId: number;
+    turnOrder:     number;
+}
+
 export interface ActionResult {
     actionId:         number;
     actionLabel:      string;
@@ -138,6 +145,7 @@ export interface ActionResult {
     outcome:          ActionResultOutcome;
     appliedEffects:   string[];
     pendingReaction?: PendingReaction;
+    summonedEntities: SummonedEntity[];
 }
 
 export function processAction(
@@ -148,7 +156,7 @@ export function processAction(
     targetEntityId: number | null,
     roundNumber:    number,
 ) {
-    return apiClient.post<ActionResult>(`/play/combat/${combatId}/process-action`, {
+    return apiClient.post<ActionResult | ActionResult[]>(`/play/combat/${combatId}/process-action`, {
         actorEntityId, profileId, storedItemId, targetEntityId, roundNumber,
     });
 }

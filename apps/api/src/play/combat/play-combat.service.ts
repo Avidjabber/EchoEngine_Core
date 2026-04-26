@@ -611,12 +611,14 @@ export class PlayCombatService {
     async acceptSecondWind(combatId: number, entityId: number): Promise<void> {
         const stats = await this.db.entityStats.findUnique({
             where:  { entityId },
-            select: { maxHp: true },
+            select: { maxHp: true, currentHp: true },
         });
+        // Only apply second wind if the entity is actually knocked down (HP ≤ 0).
+        if (!stats || (stats.currentHp ?? 1) > 0) return;
         await this.db.$transaction([
             this.db.entityStats.update({
                 where: { entityId },
-                data:  { currentHp: stats?.maxHp ?? 1 },
+                data:  { currentHp: stats.maxHp ?? 1 },
             }),
             this.db.activeCombat_Participant.update({
                 where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
@@ -1200,6 +1202,7 @@ export class PlayCombatService {
         const maxHp   = participant.entity.stats?.maxHp     ?? 0;
         const events: RoundEndEvent[] = [];
 
+        // Accumulate all tick results first; write HP once at the end (or immediately on defeat).
         for (const effect of activeEffects) {
             for (const dot of effect.effectDef.damageOverTime) {
                 const rolls  = rollDice(dot.diceCount, dot.diceSides, defaultRoller);
@@ -1233,10 +1236,6 @@ export class PlayCombatService {
                     return events;
                 }
 
-                await this.db.entityStats.update({
-                    where: { entityId: participant.entityId },
-                    data:  { currentHp },
-                });
                 events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: currentHp, defeated: false, knockedDown: false });
             }
 
@@ -1247,16 +1246,17 @@ export class PlayCombatService {
                 currentHp       += actualHeal;
 
                 if (actualHeal > 0) {
-                    await this.db.entityStats.update({
-                        where: { entityId: participant.entityId },
-                        data:  { currentHp },
-                    });
-                }
-
-                if (actualHeal > 0) {
                     events.push({ kind: 'hot', entityId: participant.entityId, entityName: participant.entity.name, amount: actualHeal, hpAfter: currentHp, defeated: false, knockedDown: false });
                 }
             }
+        }
+
+        // Single HP write covering all DoT/HoT ticks for the turn.
+        if (events.length > 0) {
+            await this.db.entityStats.update({
+                where: { entityId: participant.entityId },
+                data:  { currentHp },
+            });
         }
 
         return events;

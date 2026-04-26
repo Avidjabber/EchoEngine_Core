@@ -9,8 +9,9 @@ export async function runValidate(ctx: CombatActionContext, _svc: PipelineServic
         return;
     }
 
-    // Reactions fire out-of-turn and may have no action category — skip both checks.
-    if (!ctx.profile.isReactionAction || !ctx.input.isReaction) {
+    // Both flags must be true for this to be a genuine reaction; any other combination
+    // requires turn-order and category enforcement.
+    if (!(ctx.profile.isReactionAction && ctx.input.isReaction)) {
         if (ctx.profile.actionCategoryId === null) {
             ctx.aborted     = true;
             ctx.abortReason = 'Combat data could not be loaded.';
