@@ -509,6 +509,7 @@ async function main() {
         { name: 'hit'    },
         { name: 'damage' },
         { name: 'heal'   },
+        { name: 'save'   },
       ],
     })
 

@@ -66,7 +66,7 @@ export interface PendingReaction {
 
 export type ActionResultOutcome =
     | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
-    | { kind: 'miss';     hitRoll: number; targetAC: number }
+    | { kind: 'miss';     hitRoll: number; targetAC: number; isFumble: boolean }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
     | { kind: 'no_op' };
@@ -262,7 +262,7 @@ export class PlayCombatService {
             team.entities.map(e => {
                 const dex      = dexByEntity.get(e.entityId) ?? 10;
                 const modifier = Math.floor((dex - 10) / 2);
-                const roll     = Math.floor(Math.random() * 20) + 1 + modifier;
+                const roll     = rollDice(1, 20, defaultRoller)[0]! + modifier;
                 return { entityId: e.entityId, allyFactionId: teamIdx + 1, initiativeRoll: roll };
             }),
         );
@@ -489,47 +489,30 @@ export class PlayCombatService {
     }
 
     async advanceTurn(combatId: number, currentEntityId: number): Promise<AdvanceTurnResult> {
-        const combat = await this.db.activeCombat.findUnique({
-            where:  { id: combatId },
-            select: {
-                currentTurnOrder: true,
-                currentRound:     true,
-                initiationType:   { select: { canSecondWind: true, allowsFleeing: true } },
-                participants: {
-                    where:   { hasFled: false, isDefeated: false },
-                    select: {
-                        id:               true,
-                        entityId:         true,
-                        allyFactionId:    true,
-                        turnOrder:        true,
-                        isAiControlled:   true,
-                        inSecondWind:     true,
-                        controllerUserId: true,
-                        entity: {
-                            select: {
-                                name:   true,
-                                userId: true,
-                                stats:  { select: { currentHp: true } },
-                            },
-                        },
-                    },
-                    orderBy: { turnOrder: 'asc' },
+        const [combat, endingParticipant] = await Promise.all([
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: {
+                    currentTurnOrder: true,
+                    currentRound:     true,
+                    initiationType:   { select: { canSecondWind: true, allowsFleeing: true } },
                 },
-            },
-        });
+            }),
+            this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: currentEntityId },
+                select: { id: true },
+            }),
+        ]);
         if (!combat) throw new Error(`Combat ${combatId} not found`);
 
-        const active        = combat.participants;
         const canSecondWind = combat.initiationType.canSecondWind;
         const allowsFleeing = combat.initiationType.allowsFleeing;
 
-        const endingParticipant = active.find(p => p.entityId === currentEntityId);
         const turnEndEvents = endingParticipant
-            ? await this._processTurnEnd(combatId, endingParticipant.id, canSecondWind)
+            ? await this._processTurnEnd(endingParticipant.id, canSecondWind)
             : [];
 
-        type ParticipantRow = typeof active[0];
-        const freshActive: ParticipantRow[] = await this.db.activeCombat_Participant.findMany({
+        const freshActive = await this.db.activeCombat_Participant.findMany({
             where:   { activeCombatId: combatId, hasFled: false, isDefeated: false },
             select: {
                 id:               true,
@@ -585,6 +568,10 @@ export class PlayCombatService {
             this.db.activeCombat.update({
                 where: { id: combatId },
                 data:  { currentTurnOrder: next.turnOrder, currentRound: newRound },
+            }),
+            this.db.activeCombat_Participant.update({
+                where: { id: next.id },
+                data:  { hasUsedReaction: false },
             }),
         ]);
 
@@ -677,22 +664,23 @@ export class PlayCombatService {
         targetEntityId: number | null,
         roundNumber:    number,
     ): Promise<ActionResult | ActionResult[]> {
-        // Detect AoE before running the pipeline: check whether the profile's target
-        // scope hits multiple entities automatically (allies, enemies, or both).
-        const scopeRow = await this.db.itemEquipmentProfile.findUnique({
-            where:  { id: profileId },
-            select: { targetScope: { select: { targetsSingle: true, targetsAllies: true, targetsEnemies: true } } },
-        });
+        // Detect AoE before running the pipeline, and fetch actor faction + guildId in parallel.
+        const [scopeRow, actorPart] = await Promise.all([
+            this.db.itemEquipmentProfile.findUnique({
+                where:  { id: profileId },
+                select: { targetScope: { select: { targetsSingle: true, targetsAllies: true, targetsEnemies: true } } },
+            }),
+            this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: actorEntityId },
+                select: { allyFactionId: true, activeCombat: { select: { guildId: true } } },
+            }),
+        ]);
         const scope = scopeRow?.targetScope ?? null;
         const isAoe = scope !== null
             && (scope.targetsAllies || scope.targetsEnemies)
             && !scope.targetsSingle;
 
         if (isAoe) {
-            const actorPart = await this.db.activeCombat_Participant.findFirst({
-                where:  { activeCombatId: combatId, entityId: actorEntityId },
-                select: { allyFactionId: true },
-            });
             if (!actorPart) throw new Error('Actor not found in combat');
 
             // Build faction filter: allies share allyFactionId, enemies differ.
@@ -725,11 +713,8 @@ export class PlayCombatService {
 
             // Summons fire once per action — requires a hit for damaging actions, same gate as behavior effects.
             if (firstCtx && firstCtx.profile?.summonSpeciesId && (!firstCtx.profile.dealsDamage || firstCtx.isHit)) {
-                const combatData = await this.db.activeCombat.findUnique({ where: { id: combatId }, select: { guildId: true } });
-                if (combatData) {
-                    const summons = await this._executeSummons(firstCtx.profile.summonSpeciesId, firstCtx.profile.summonDiceCount, firstCtx.profile.summonDiceSides, combatData.guildId, combatId, actorPart.allyFactionId, roundNumber);
-                    if (results.length > 0) results[0]!.summonedEntities.push(...summons);
-                }
+                const summons = await this._executeSummons(firstCtx.profile.summonSpeciesId, firstCtx.profile.summonDiceCount, firstCtx.profile.summonDiceSides, actorPart.activeCombat.guildId, combatId, actorPart.allyFactionId, roundNumber);
+                if (results.length > 0) results[0]!.summonedEntities.push(...summons);
             }
 
             return results;
@@ -745,14 +730,8 @@ export class PlayCombatService {
         const result = this._toActionResult(ctx);
 
         // Summons fire after a successful single-target action — requires a hit for damaging actions.
-        if (ctx.profile?.summonSpeciesId && (!ctx.profile.dealsDamage || ctx.isHit)) {
-            const [combatData, actorPart] = await Promise.all([
-                this.db.activeCombat.findUnique({ where: { id: combatId }, select: { guildId: true } }),
-                this.db.activeCombat_Participant.findFirst({ where: { activeCombatId: combatId, entityId: actorEntityId }, select: { allyFactionId: true } }),
-            ]);
-            if (combatData && actorPart) {
-                result.summonedEntities.push(...await this._executeSummons(ctx.profile.summonSpeciesId, ctx.profile.summonDiceCount, ctx.profile.summonDiceSides, combatData.guildId, combatId, actorPart.allyFactionId, roundNumber));
-            }
+        if (ctx.profile?.summonSpeciesId && (!ctx.profile.dealsDamage || ctx.isHit) && actorPart) {
+            result.summonedEntities.push(...await this._executeSummons(ctx.profile.summonSpeciesId, ctx.profile.summonDiceCount, ctx.profile.summonDiceSides, actorPart.activeCombat.guildId, combatId, actorPart.allyFactionId, roundNumber));
         }
 
         return result;
@@ -941,37 +920,33 @@ export class PlayCombatService {
         combatId:      number,
         allyFactionId: number,
         roundNumber:   number,
+        entityTypeId:  number,
+        statusId:      number,
     ): Promise<SummonedEntity> {
-        const [species, entityType, status] = await Promise.all([
-            this.db.species.findUnique({
-                where:  { id: speciesId },
-                select: {
-                    name:             true,
-                    baseStrength:     true,
-                    baseDexterity:    true,
-                    baseConstitution: true,
-                    baseIntelligence: true,
-                    baseWisdom:       true,
-                    baseCharisma:     true,
-                    hpDiceCount:      true,
-                    hpDiceSides:      true,
-                    dropTableId:      true,
-                    defaultLoadout:   {
-                        select: {
-                            itemId:    true,
-                            quantity:  true,
-                            autoEquip: true,
-                            item:      { select: { maxUses: true, maxDailyUses: true } },
-                        },
+        const species = await this.db.species.findUnique({
+            where:  { id: speciesId },
+            select: {
+                name:             true,
+                baseStrength:     true,
+                baseDexterity:    true,
+                baseConstitution: true,
+                baseIntelligence: true,
+                baseWisdom:       true,
+                baseCharisma:     true,
+                hpDiceCount:      true,
+                hpDiceSides:      true,
+                dropTableId:      true,
+                defaultLoadout:   {
+                    select: {
+                        itemId:    true,
+                        quantity:  true,
+                        autoEquip: true,
+                        item:      { select: { maxUses: true, maxDailyUses: true } },
                     },
                 },
-            }),
-            this.db.entityType.findFirst({ where: { name: 'NPC' },    select: { id: true } }),
-            this.db.status.findFirst(    { where: { name: 'Active' }, select: { id: true } }),
-        ]);
-        if (!species)    throw new Error(`Species ${speciesId} not found`);
-        if (!entityType) throw new Error('EntityType "NPC" not found');
-        if (!status)     throw new Error('Status "Active" not found');
+            },
+        });
+        if (!species) throw new Error(`Species ${speciesId} not found`);
 
         // For auto-equip items, look up the first profile per item so chosenProfileId can be set.
         const autoEquipItemIds = species.defaultLoadout.filter(l => l.autoEquip).map(l => l.itemId);
@@ -993,7 +968,7 @@ export class PlayCombatService {
 
         const spawned = await this.db.$transaction(async tx => {
             const entity = await tx.entity.create({
-                data:   { guildId, name: species.name, statusId: status.id, typeId: entityType.id, speciesId },
+                data:   { guildId, name: species.name, statusId, typeId: entityTypeId, speciesId },
                 select: { id: true, name: true },
             });
 
@@ -1073,12 +1048,19 @@ export class PlayCombatService {
         allyFactionId: number,
         roundNumber:   number,
     ): Promise<SummonedEntity[]> {
+        const [entityType, status] = await Promise.all([
+            this.db.entityType.findFirst({ where: { name: 'NPC' },    select: { id: true } }),
+            this.db.status.findFirst(    { where: { name: 'Active' }, select: { id: true } }),
+        ]);
+        if (!entityType) throw new Error('EntityType "NPC" not found');
+        if (!status)     throw new Error('Status "Active" not found');
+
         const count = (diceCount && diceSides)
             ? rollDice(diceCount, diceSides, defaultRoller).reduce((a, b) => a + b, 0)
             : 1;
         const results: SummonedEntity[] = [];
         for (let i = 0; i < count; i++) {
-            results.push(await this._spawnNpcEntity(speciesId, guildId, combatId, allyFactionId, roundNumber));
+            results.push(await this._spawnNpcEntity(speciesId, guildId, combatId, allyFactionId, roundNumber, entityType.id, status.id));
         }
         return results;
     }
@@ -1110,7 +1092,7 @@ export class PlayCombatService {
                     defeated:                ctx.defeated,
                 };
             } else {
-                outcome = { kind: 'miss', hitRoll: ctx.hitTotal!, targetAC: ctx.targetAC };
+                outcome = { kind: 'miss', hitRoll: ctx.hitTotal!, targetAC: ctx.targetAC, isFumble: ctx.isFumble };
             }
         } else if (ctx.profile?.restoresHealth) {
             outcome = {
@@ -1150,7 +1132,7 @@ export class PlayCombatService {
         };
     }
 
-    private async _processTurnEnd(_combatId: number, participantId: number, canSecondWind: boolean): Promise<RoundEndEvent[]> {
+    private async _processTurnEnd(participantId: number, canSecondWind: boolean): Promise<RoundEndEvent[]> {
         // Collect active DoT/HoT effects before decrementing so effects at roundsRemaining=1 still fire.
         const activeEffects = await this.db.activeCombat_StatEffect.findMany({
             where:   { affectedParticipantId: participantId },
@@ -1399,7 +1381,7 @@ export class PlayCombatService {
             effectsByParticipant.get(participantId)!.push(effect);
         }
 
-        for (const [participantId, effects] of effectsByParticipant) {
+        await Promise.all([...effectsByParticipant].map(async ([participantId, effects]) => {
             const effectDefIds = effects.map(e => e.effectDefId);
 
             const existing = await this.db.activeCombat_StatEffect.findMany({
@@ -1448,7 +1430,7 @@ export class PlayCombatService {
                     }),
                 ));
             }
-        }
+        }));
     }
 
     private async _getActionEnergyCost(guildId: string, mode: 'spar' | 'fight'): Promise<number> {

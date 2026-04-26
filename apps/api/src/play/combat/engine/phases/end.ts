@@ -49,7 +49,8 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
                 ...(ctx.hitRoll    !== null ? { hitRoll: ctx.hitRoll, hitModifier: ctx.hitModifier }                                       : {}),
                 ...(ctx.isHit      !== null ? { hit: ctx.isHit, isCritical: ctx.isCritical }                                              : {}),
                 ...(ctx.finalDamage        > 0 ? { damageRoll: ctx.rawDamage, damageModifier: ctx.damageModifier, damageDealt: ctx.finalDamage } : {}),
-                ...(ctx.finalElementalDamage > 0 ? { elementalDamageDealt: ctx.finalElementalDamage }                                     : {}),
+                ...(ctx.finalElementalDamage > 0 ? { elementalDamageRoll: ctx.rawElementalDamage, elementalDamageDealt: ctx.finalElementalDamage } : {}),
+                ...(ctx.wasRedirected ? { wasRedirected: true, originalTargetEntityId: ctx.input.targetEntityId }                           : {}),
                 ...(ctx.finalHeal          > 0 ? { healDealt: ctx.finalHeal }                                                             : {}),
                 ...(ctx.knockedDown        ? { secondWindTriggered: true }                                                                 : {}),
                 ...(ctx.absorbedDamage     > 0    ? { absorbedDamage: ctx.absorbedDamage }                                              : {}),
@@ -174,6 +175,16 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
                 });
                 for (const r of toCreate) ctx.appliedStatEffectNames.push(r.effectDef.displayName);
             }
+        }
+
+        // ── Reaction tracking ─────────────────────────────────────────────────
+        // Mark the defender's reaction slot consumed as soon as a reaction prompt is issued
+        // so a second attack in the same round cannot offer them another reaction.
+        if (ctx.pendingReaction !== null && ctx.targetParticipant !== null) {
+            await tx.activeCombat_Participant.update({
+                where: { id: ctx.targetParticipant.id },
+                data:  { hasUsedReaction: true },
+            });
         }
     });
 }

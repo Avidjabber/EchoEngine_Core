@@ -47,6 +47,11 @@ export interface ProfileSnapshot {
     summonSpeciesId: number | null;
     summonDiceCount: number | null;
     summonDiceSides: number | null;
+    // Target scope — available to interceptors that need to inspect action targeting
+    targetsSelf:    boolean;
+    targetsSingle:  boolean;
+    targetsAllies:  boolean;
+    targetsEnemies: boolean;
     // Behavior effect fields
     behaviorEffectTypeId:          number | null;
     behaviorEffectName:            string | null;
@@ -78,6 +83,7 @@ export interface TargetParticipantSnapshot {
     id:             number;
     inSecondWind:   boolean;
     isAiControlled: boolean;
+    hasUsedReaction: boolean;
 }
 
 // ── Reaction data set by POST_APPLY ──────────────────────────────────────────

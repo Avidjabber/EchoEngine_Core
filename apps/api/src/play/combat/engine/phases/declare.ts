@@ -35,6 +35,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
                 flatModifier:        true,
                 percentModifier:     true,
                 behaviorEffectType:  { select: { id: true, name: true, redirectsDamage: true, forcesTargeting: true } },
+                targetScope:         { select: { targetsSelf: true, targetsSingle: true, targetsAllies: true, targetsEnemies: true } },
             },
         }),
         db.activeCombat.findUnique({
@@ -89,6 +90,10 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
             summonSpeciesId:         profileRow.summonSpeciesId ?? null,
             summonDiceCount:         profileRow.summonDiceCount ?? null,
             summonDiceSides:         profileRow.summonDiceSides ?? null,
+            targetsSelf:             profileRow.targetScope?.targetsSelf    ?? false,
+            targetsSingle:           profileRow.targetScope?.targetsSingle  ?? false,
+            targetsAllies:           profileRow.targetScope?.targetsAllies  ?? false,
+            targetsEnemies:          profileRow.targetScope?.targetsEnemies ?? false,
             damageTypeId:            profileRow.damageType?.id            ?? null,
             damageTypeName:          profileRow.damageType?.name          ?? null,
             elementalDiceCount:      profileRow.elementalDiceCount        ?? null,

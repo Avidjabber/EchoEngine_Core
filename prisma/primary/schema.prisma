@@ -991,8 +991,9 @@ model Entity {
   actionLeaderships     ActionInstance[]          @relation("ActionInstanceLeader")
   eventParticipations   ActiveEvent_Participant[]
   combatParticipations   ActiveCombat_Participant[]
-  combatActionsPerformed ActiveCombat_Action[]      @relation("CombatActionActor")
-  combatActionsTargeted  ActiveCombat_Action[]      @relation("CombatActionTarget")
+  combatActionsPerformed        ActiveCombat_Action[] @relation("CombatActionActor")
+  combatActionsTargeted         ActiveCombat_Action[] @relation("CombatActionTarget")
+  combatActionsAsOriginalTarget ActiveCombat_Action[] @relation("CombatActionOriginalTarget")
   namedEncounterDefs     CombatEncounterDef_NamedEntity[]
   preCombatEffects       Entity_PreCombatEffect[]
 
@@ -2443,6 +2444,8 @@ model ItemEquipmentProfile {
   summonSpeciesId   Int?  // which species to spawn into the encounter
   summonDiceCount   Int?  // number of dice rolled to determine how many entities spawn (e.g. 1)
   summonDiceSides   Int?  // sides per die (e.g. 3 for 1d3 = 1–3 rats)
+
+  attackCount Int @default(1)  // number of attack rolls made when this profile is used; >1 enables multiattack (Stage 5)
 
   damageType          DamageType?           @relation("EquipmentDamageType",         fields: [damageTypeId],          references: [id], onDelete: SetNull)
   elementalDamageType DamageType?           @relation("EquipmentElementalDamageType", fields: [elementalDamageTypeId], references: [id], onDelete: SetNull)
@@ -5709,6 +5712,9 @@ model ActiveCombat_Participant {
   hasFled        Boolean @default(false)
   isDefeated     Boolean @default(false)
 
+  hasUsedReaction Boolean @default(false)  // reset at start of each participant's turn; prevents multiple reactions per round
+  tempHp          Int     @default(0)       // temporary HP buffer; absorbs damage before real HP; not restored by healing
+
   activeCombat    ActiveCombat              @relation(fields: [activeCombatId], references: [id], onDelete: Cascade)
   entity          Entity                    @relation(fields: [entityId],       references: [id], onDelete: Cascade)
   dropTable       DropTable?                @relation(fields: [dropTableId],    references: [id], onDelete: SetNull)
@@ -5811,8 +5817,9 @@ model ActiveCombat_Action {
   isCritical     Boolean  @default(false)
   damageRoll     Int?
   damageModifier Int?
-  damageDealt         Int?  // primary damage only
+  damageDealt          Int?  // primary damage only
   elementalDamageDealt Int?  // elemental damage only; null when no elemental component
+  elementalDamageRoll  Int?  // raw elemental dice sum before modifiers; null when no elemental component
   healDealt       Int?
   reflectedDamage Int?  // damage returned to the attacker via a reflect behavior effect
   absorbedDamage  Int?  // damage intercepted by an absorb buffer instead of reducing HP
@@ -5822,13 +5829,17 @@ model ActiveCombat_Action {
 
   secondWindTriggered Boolean  @default(false)
 
+  wasRedirected          Boolean @default(false)  // true when this attack was intercepted by a guard effect
+  originalTargetEntityId Int?                     // entity originally targeted before guard redirect; null when wasRedirected = false
+
   occurredAt DateTime @default(now()) @db.Timestamptz
 
-  activeCombat     ActiveCombat          @relation(fields: [activeCombatId],     references: [id], onDelete: Cascade)
-  actionCategory   CombatActionCategory? @relation(fields: [actionCategoryId],   references: [id], onDelete: Restrict)
-  equipmentProfile ItemEquipmentProfile  @relation(fields: [equipmentProfileId], references: [id], onDelete: Restrict)
-  actorEntity      Entity               @relation("CombatActionActor",  fields: [actorEntityId],  references: [id], onDelete: Cascade)
-  targetEntity     Entity?              @relation("CombatActionTarget", fields: [targetEntityId], references: [id], onDelete: SetNull)
+  activeCombat          ActiveCombat          @relation(fields: [activeCombatId],           references: [id], onDelete: Cascade)
+  actionCategory        CombatActionCategory? @relation(fields: [actionCategoryId],         references: [id], onDelete: Restrict)
+  equipmentProfile      ItemEquipmentProfile  @relation(fields: [equipmentProfileId],       references: [id], onDelete: Restrict)
+  actorEntity           Entity                @relation("CombatActionActor",                fields: [actorEntityId],           references: [id], onDelete: Cascade)
+  targetEntity          Entity?               @relation("CombatActionTarget",               fields: [targetEntityId],          references: [id], onDelete: SetNull)
+  originalTargetEntity  Entity?               @relation("CombatActionOriginalTarget",       fields: [originalTargetEntityId],  references: [id], onDelete: SetNull)
   appliedConditions EntityCondition[]
   appliedStatEffects ActiveCombat_StatEffect[]
 
@@ -5838,6 +5849,7 @@ model ActiveCombat_Action {
   @@index([equipmentProfileId])
   @@index([actorEntityId])
   @@index([targetEntityId])
+  @@index([originalTargetEntityId])
 }
 
 
@@ -5896,7 +5908,7 @@ model CombatEncounterDef_NamedEntity {
 // Seeded reference: which combat roll a RollMod or RollAdvantage effect targets.
 model CombatRollType {
   id   Int    @id @default(autoincrement())
-  name String @unique @db.VarChar(50)  // "hit" | "damage" | "heal"
+  name String @unique @db.VarChar(50)  // "hit" | "damage" | "heal" | "save"
 
   rollMods      CombatStatEffectDef_RollMod[]
   rollAdvantages CombatStatEffectDef_RollAdvantage[]

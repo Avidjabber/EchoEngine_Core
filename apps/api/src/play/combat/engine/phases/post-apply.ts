@@ -8,7 +8,9 @@ export async function runPostApply(ctx: CombatActionContext, { db }: PipelineSer
     if (!ctx.isHit || !ctx.profile?.dealsDamage || !ctx.targetParticipant || ctx.actualTargetId === null) return;
     if (ctx.defeated || ctx.knockedDown) return;
     if (ctx.targetParticipant.isAiControlled) return;
+    if (ctx.targetParticipant.hasUsedReaction) return;
     if (ctx.input.aoeIndex !== null) return;  // reactions are suppressed for AoE actions
+    if (ctx.input.isReaction) return;         // no reaction chains
 
     const suppressed = await db.activeCombat_BehaviorEffect.findFirst({
         where: {
@@ -19,16 +21,17 @@ export async function runPostApply(ctx: CombatActionContext, { db }: PipelineSer
     });
     if (suppressed) return;
 
-    const entityStorage = await db.entity_Storage.findUnique({
-        where:  { entityId: ctx.actualTargetId },
-        select: { storageId: true },
-    });
+    const [entityStorage, cooldowns] = await Promise.all([
+        db.entity_Storage.findUnique({
+            where:  { entityId: ctx.actualTargetId },
+            select: { storageId: true },
+        }),
+        db.activeCombat_Participant_ActionCooldown.findMany({
+            where:  { participantId: ctx.targetParticipant.id },
+            select: { equipmentProfileId: true },
+        }),
+    ]);
     if (!entityStorage) return;
-
-    const cooldowns   = await db.activeCombat_Participant_ActionCooldown.findMany({
-        where:  { participantId: ctx.targetParticipant.id },
-        select: { equipmentProfileId: true },
-    });
 
     const cooldownIds = new Set(cooldowns.map(c => c.equipmentProfileId));
     const isSpar      = ctx.combatMeta?.isSpar ?? false;

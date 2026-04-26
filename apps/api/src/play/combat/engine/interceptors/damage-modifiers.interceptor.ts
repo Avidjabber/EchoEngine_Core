@@ -5,15 +5,30 @@ import type { PrimaryDatabaseService } from '../../../../database/primary.servic
 type DamageModifierRow = { damageTypeId: number; modifier: number; isImmune: boolean };
 type EffectRow = { effectDef: { damageModifiers: DamageModifierRow[] } };
 
+// D&D standard: immunity always wins; one application of resistance and one of vulnerability per
+// damage type (best in each category); if both are present they cancel each other out.
 function applyModifiers(amount: number, damageTypeId: number, effects: EffectRow[]): number {
+    let hasImmunity    = false;
+    let bestResistance = 1.0;
+    let bestVuln       = 1.0;
+
     for (const effect of effects) {
         for (const mod of effect.effectDef.damageModifiers) {
             if (mod.damageTypeId !== damageTypeId) continue;
-            if (mod.isImmune) return 0;
-            amount = Math.floor(amount * mod.modifier);
+            if (mod.isImmune)        { hasImmunity = true; continue; }
+            if (mod.modifier < 1.0)  bestResistance = Math.min(bestResistance, mod.modifier);
+            if (mod.modifier > 1.0)  bestVuln       = Math.max(bestVuln, mod.modifier);
         }
     }
-    return Math.max(0, amount);
+
+    if (hasImmunity) return 0;
+
+    const hasResistance    = bestResistance < 1.0;
+    const hasVulnerability = bestVuln       > 1.0;
+    if (hasResistance && hasVulnerability) return amount;
+    if (hasResistance)                     return Math.max(0, Math.floor(amount * bestResistance));
+    if (hasVulnerability)                  return Math.floor(amount * bestVuln);
+    return amount;
 }
 
 // APPLY phase, priority 1 — scales finalDamage and finalElementalDamage based on the target's

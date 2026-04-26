@@ -3,7 +3,7 @@ import type { PipelineServices } from '../combat-pipeline';
 
 // Pure validation — no DB access. Sets ctx.aborted if the action cannot proceed.
 export async function runValidate(ctx: CombatActionContext, _svc: PipelineServices): Promise<void> {
-    if (!ctx.profile || !ctx.actor || !ctx.combatMeta) {
+    if (!ctx.profile || !ctx.actor || !ctx.combatMeta || ctx.actorParticipantId === null) {
         ctx.aborted     = true;
         ctx.abortReason = 'Combat data could not be loaded.';
         return;

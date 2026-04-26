@@ -33,7 +33,9 @@ export const statEffectModifiersInterceptor: CombatInterceptor = {
         if (ctx.actor) {
             for (const effect of effects) {
                 for (const mod of effect.effectDef.statMods) {
-                    if (mod.context !== null) continue; // contextual mods (Stage 3+)
+                    // TODO (Stage 3): contextual mods (e.g., "only vs undead") need action context
+                    // to evaluate the condition before applying. Skip them until that's implemented.
+                    if (mod.context !== null) continue;
                     const key = mod.stat.name.toLowerCase();
                     if (key in ctx.actor.stats) {
                         ctx.actor.stats[key] = (ctx.actor.stats[key] ?? 10) + mod.value;
