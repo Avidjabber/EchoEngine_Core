@@ -566,12 +566,19 @@ export class PlayCombatService {
 
         const next = freshActive.find(p => p.turnOrder > combat.currentTurnOrder) ?? freshActive[0]!;
 
-        await this._processTurnStart(combatId, next.id);
-
-        await this.db.activeCombat.update({
-            where: { id: combatId },
-            data:  { currentTurnOrder: next.turnOrder, currentRound: newRound },
-        });
+        await this.db.$transaction([
+            this.db.activeCombat_BehaviorEffect.deleteMany({
+                where: { sourceParticipantId: next.id, roundsRemaining: 1 },
+            }),
+            this.db.activeCombat_BehaviorEffect.updateMany({
+                where: { sourceParticipantId: next.id, roundsRemaining: { gt: 1 } },
+                data:  { roundsRemaining: { decrement: 1 } },
+            }),
+            this.db.activeCombat.update({
+                where: { id: combatId },
+                data:  { currentTurnOrder: next.turnOrder, currentRound: newRound },
+            }),
+        ]);
 
         const isAwaitingSecondWind =
             canSecondWind &&
@@ -981,18 +988,6 @@ export class PlayCombatService {
         }
 
         return events;
-    }
-
-    private async _processTurnStart(_combatId: number, participantId: number): Promise<void> {
-        await this.db.$transaction([
-            this.db.activeCombat_BehaviorEffect.deleteMany({
-                where: { sourceParticipantId: participantId, roundsRemaining: 1 },
-            }),
-            this.db.activeCombat_BehaviorEffect.updateMany({
-                where: { sourceParticipantId: participantId, roundsRemaining: { gt: 1 } },
-                data:  { roundsRemaining: { decrement: 1 } },
-            }),
-        ]);
     }
 
     private async _distributeEventCombatXp(combat: {
