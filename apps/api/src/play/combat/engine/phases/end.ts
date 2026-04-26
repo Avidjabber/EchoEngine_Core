@@ -47,7 +47,7 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
                 equipmentProfileId: input.profileId,
                 targetEntityId:     ctx.actualTargetId ?? null,
                 ...(ctx.hitRoll    !== null ? { hitRoll: ctx.hitRoll, hitModifier: ctx.hitModifier }                                       : {}),
-                ...(ctx.isHit      !== null ? { hit: ctx.isHit, isCritical: ctx.isCritical }                                              : {}),
+                ...(ctx.isHit      !== null ? { hit: ctx.isHit, isCritical: ctx.isCritical, isFumble: ctx.isFumble }                    : {}),
                 ...(ctx.finalDamage        > 0 ? { damageRoll: ctx.rawDamage, damageModifier: ctx.damageModifier, damageDealt: ctx.finalDamage } : {}),
                 ...(ctx.finalElementalDamage > 0 ? { elementalDamageRoll: ctx.rawElementalDamage, elementalDamageDealt: ctx.finalElementalDamage } : {}),
                 ...(ctx.wasRedirected ? { wasRedirected: true, originalTargetEntityId: ctx.input.targetEntityId }                           : {}),

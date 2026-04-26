@@ -38,7 +38,8 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
 
     const dex    = targetRow.stats.dexterity ?? 10;
     const dexMod = Math.floor((dex - 10) / 2);
-    ctx.targetAC = (targetRow.species?.baseAc ?? 10) + dexMod + equippedAcBonus;
+    ctx.targetAC        = (targetRow.species?.baseAc ?? 10) + dexMod + equippedAcBonus;
+    ctx.targetStorageId = entityStorageRow?.storageId ?? null;
 
     ctx.target = {
         name:      targetRow.name,

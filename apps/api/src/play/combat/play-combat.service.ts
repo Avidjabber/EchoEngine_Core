@@ -3,7 +3,7 @@ import { PrimaryDatabaseService } from '../../database/primary.service';
 import { runCombatPipeline } from './engine/combat-pipeline';
 import { COMBAT_INTERCEPTORS } from './engine/interceptors';
 import { defaultRoller, rollDice } from '../../utils/dice';
-import type { CombatActionContext } from './engine/combat-action-context';
+import type { CombatActionContext, PendingReaction } from './engine/combat-action-context';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -56,13 +56,7 @@ export interface AvailableAction {
     isOnCooldown:   boolean;
 }
 
-export interface PendingReaction {
-    defenderEntityId:   number;
-    defenderEntityName: string;
-    defenderUserId:     string | null;
-    attackerEntityId:   number;
-    reactionProfiles:   Array<{ profileId: number; storedItemId: number; label: string }>;
-}
+export type { PendingReaction } from './engine/combat-action-context';
 
 export type ActionResultOutcome =
     | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
@@ -266,7 +260,7 @@ export class PlayCombatService {
                 return { entityId: e.entityId, allyFactionId: teamIdx + 1, initiativeRoll: roll };
             }),
         );
-        const tiebreakers = new Map(participants.map(p => [p.entityId, Math.random()]));
+        const tiebreakers = new Map(participants.map(p => [p.entityId, rollDice(1, 20, defaultRoller)[0]!]));
         participants.sort((a, b) =>
             b.initiativeRoll - a.initiativeRoll ||
             (dexByEntity.get(b.entityId) ?? 10) - (dexByEntity.get(a.entityId) ?? 10) ||
@@ -358,34 +352,25 @@ export class PlayCombatService {
         };
         const categoryName = categoryNameMap[category];
 
-        const combat = await this.db.activeCombat.findUnique({
-            where:  { id: combatId },
-            select: {
-                initiationType: { select: { name: true } },
-                participants: {
-                    where:  { entityId },
-                    select: { id: true },
-                },
-            },
-        });
-        if (!combat) return [];
-
-        const participantId = combat.participants[0]?.id;
-        const isSpar        = combat.initiationType.name === 'spar';
-
-        const cooldowns = participantId
-            ? await this.db.activeCombat_Participant_ActionCooldown.findMany({
-                where:  { participantId },
+        const [combat, cooldowns, entityStorage] = await Promise.all([
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: { initiationType: { select: { name: true } } },
+            }),
+            this.db.activeCombat_Participant_ActionCooldown.findMany({
+                where:  { participant: { activeCombatId: combatId, entityId } },
                 select: { equipmentProfileId: true },
-            })
-            : [];
-        const cooldownProfileIds = new Set(cooldowns.map(c => c.equipmentProfileId));
-
-        const entityStorage = await this.db.entity_Storage.findUnique({
-            where:  { entityId },
-            select: { storageId: true },
-        });
+            }),
+            this.db.entity_Storage.findUnique({
+                where:  { entityId },
+                select: { storageId: true },
+            }),
+        ]);
+        if (!combat) return [];
         if (!entityStorage) return [];
+
+        const isSpar             = combat.initiationType.name === 'spar';
+        const cooldownProfileIds = new Set(cooldowns.map(c => c.equipmentProfileId));
 
         const profileSelect = {
             id:              true,
@@ -628,6 +613,9 @@ export class PlayCombatService {
             this.db.activeCombat_BehaviorEffect.deleteMany({
                 where: { sourceParticipantId: participant.id },
             }),
+            this.db.activeCombat_StatEffect.deleteMany({
+                where: { affectedParticipantId: participant.id },
+            }),
         ]);
     }
 
@@ -649,6 +637,9 @@ export class PlayCombatService {
             }),
             this.db.activeCombat_BehaviorEffect.deleteMany({
                 where: { sourceParticipantId: participant.id },
+            }),
+            this.db.activeCombat_StatEffect.deleteMany({
+                where: { affectedParticipantId: participant.id },
             }),
         ]);
         return { allowed: true };
@@ -1133,19 +1124,30 @@ export class PlayCombatService {
     }
 
     private async _processTurnEnd(participantId: number, canSecondWind: boolean): Promise<RoundEndEvent[]> {
-        // Collect active DoT/HoT effects before decrementing so effects at roundsRemaining=1 still fire.
-        const activeEffects = await this.db.activeCombat_StatEffect.findMany({
-            where:   { affectedParticipantId: participantId },
-            orderBy: { id: 'asc' },
-            select: {
-                effectDef: {
-                    select: {
-                        damageOverTime: { select: { diceCount: true, diceSides: true, flatDamage: true } },
-                        healOverTime:   { select: { diceCount: true, diceSides: true, flatHeal: true } },
+        // Fetch both in parallel — the tick transaction doesn't touch participant HP or metadata.
+        const [activeEffects, participant] = await Promise.all([
+            this.db.activeCombat_StatEffect.findMany({
+                where:   { affectedParticipantId: participantId },
+                orderBy: { id: 'asc' },
+                select: {
+                    effectDef: {
+                        select: {
+                            damageOverTime: { select: { diceCount: true, diceSides: true, flatDamage: true } },
+                            healOverTime:   { select: { diceCount: true, diceSides: true, flatHeal: true } },
+                        },
                     },
                 },
-            },
-        });
+            }),
+            this.db.activeCombat_Participant.findUnique({
+                where:  { id: participantId },
+                select: {
+                    entityId:       true,
+                    isAiControlled: true,
+                    inSecondWind:   true,
+                    entity: { select: { name: true, stats: { select: { currentHp: true, maxHp: true } } } },
+                },
+            }),
+        ]);
 
         await this.db.$transaction([
             this.db.activeCombat_Participant_ActionCooldown.deleteMany({
@@ -1168,16 +1170,6 @@ export class PlayCombatService {
             e => e.effectDef.damageOverTime.length > 0 || e.effectDef.healOverTime.length > 0,
         );
         if (!hasDotOrHot) return [];
-
-        const participant = await this.db.activeCombat_Participant.findUnique({
-            where:  { id: participantId },
-            select: {
-                entityId:      true,
-                isAiControlled: true,
-                inSecondWind:  true,
-                entity: { select: { name: true, stats: { select: { currentHp: true, maxHp: true } } } },
-            },
-        });
         if (!participant) return [];
 
         let currentHp = participant.entity.stats?.currentHp ?? 0;
@@ -1211,6 +1203,9 @@ export class PlayCombatService {
                             }),
                             this.db.activeCombat_BehaviorEffect.deleteMany({
                                 where: { sourceParticipantId: participantId },
+                            }),
+                            this.db.activeCombat_StatEffect.deleteMany({
+                                where: { affectedParticipantId: participantId },
                             }),
                         ]);
                         events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: true, knockedDown: false });

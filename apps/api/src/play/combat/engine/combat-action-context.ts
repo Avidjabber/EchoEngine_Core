@@ -120,6 +120,7 @@ export interface CombatActionContext {
     target:             TargetSnapshot | null;
     targetParticipant:     TargetParticipantSnapshot | null;
     targetAC:              number;
+    targetStorageId:       number | null;  // cached from TARGET to avoid re-fetch in POST_APPLY
 
     // PRE_RESOLVE
     hitModifier:     number;
@@ -128,6 +129,8 @@ export interface CombatActionContext {
     hitAdvantage:    'advantage' | 'disadvantage' | null;
     damageAdvantage: 'advantage' | 'disadvantage' | null;
     healAdvantage:   'advantage' | 'disadvantage' | null;
+    primaryDamageMultiplier:   number;  // precomputed from target stat effects; applied to finalDamage in APPLY
+    elementalDamageMultiplier: number;  // precomputed from target stat effects; applied to finalElementalDamage in APPLY
 
     // RESOLVE
     hitRoll:     number | null;  // raw d20 result (stored in action log)

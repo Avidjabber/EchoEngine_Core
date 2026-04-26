@@ -5815,6 +5815,7 @@ model ActiveCombat_Action {
   hitModifier    Int?
   hit            Boolean?
   isCritical     Boolean  @default(false)
+  isFumble       Boolean  @default(false)
   damageRoll     Int?
   damageModifier Int?
   damageDealt          Int?  // primary damage only
