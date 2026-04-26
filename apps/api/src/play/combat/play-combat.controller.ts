@@ -118,8 +118,8 @@ export class PlayCombatController {
         @Param('id', ParseIntPipe) id:   number,
         @Body()                    body: { entityId: number; allyFactionId: number; roundNumber: number },
     ) {
-        if (!body?.entityId || !body?.allyFactionId || body?.roundNumber === undefined) {
-            throw new BadRequestException('entityId, allyFactionId, and roundNumber are required');
+        if (!body?.entityId || !body?.allyFactionId || body?.roundNumber === undefined || body.roundNumber < 1) {
+            throw new BadRequestException('entityId, allyFactionId, and roundNumber are required; roundNumber must be ≥ 1');
         }
         return this.service.joinCombat(id, body.entityId, body.allyFactionId, body.roundNumber);
     }

@@ -97,13 +97,14 @@ Guard redirect  [x] GROUP 3
   Damage is fully dealt to the redirected target (guarding entity).
   Partial absorption of that damage is a separate APPLY interceptor — see stage 3.
 
-Guard absorption  [x] GROUP 3 — DEFERRED TO STAGE 3, NOW COMPLETE
+Guard absorption  [x] GROUP 3 — implemented in stage 3
   APPLY phase interceptor, priority 0 (runs before damage-modifiers at priority 1).
   When ctx.wasRedirected is true: read the guard effect's percentModifier from
   ActiveCombat_BehaviorEffect. Reduce ctx.finalDamage to:
     ctx.finalDamage = Math.floor(ctx.finalDamage * percentModifier)
   This represents the guard absorbing a fraction of the incoming damage.
   Resistances and immunities (priority 1) then apply to the post-absorption amount.
+  ctx.absorbedDamage records the difference and is written to the action log.
 
 Stat effect modifiers  [x] GROUP 3
   PRE_RESOLVE interceptor, priority 0 (runs before runPreResolve).
@@ -140,10 +141,9 @@ Pre-combat effects  [x] GROUP 4
 STAGE 3 — GUARD ABSORPTION, SAVING THROWS, AOE, JOINS
 ─────────────────────────────────────────────
 
-Guard absorption  (carried over from stage 2 — see GROUP 3 entry above)
-  APPLY phase interceptor, priority 0.
-  When ctx.wasRedirected is true: read percentModifier from the guard
-  BehaviorEffect and reduce ctx.finalDamage proportionally before APPLY writes HP.
+Guard absorption  [x]
+  See GROUP 3 in Stage 2 above for full notes. The interceptor was planned in Stage 2
+  and implemented here in Stage 3.
 
 Saving throws  [x]
   RESOLVE phase extended: profiles with savingThrowStat trigger a defender roll
@@ -151,7 +151,12 @@ Saving throws  [x]
   Schema: savingThrowStatId + saveDC on ItemEquipmentProfile;
           saveRoll + savedSuccessfully on ActiveCombat_Action.
   Context: saveRoll, saveTotal, savedSuccessfully set in RESOLVE.
+  Trigger: fires on a hit for damage actions; fires unconditionally for non-damage
+  actions (e.g. a stun with no attack roll still uses a save to determine outcome).
   Halving applies to both finalDamage and finalElementalDamage before APPLY interceptors run.
+  Effect-skipping (end.ts): for non-damage actions only — a successful save prevents
+  behavior effects and stat effects from being applied. For damage actions, a successful
+  save only halves damage; effects (if any) still apply.
 
 AoE / multi-target  [x]
   Service-level orchestration (Option A): pipeline stays single-target; processAction
@@ -165,6 +170,9 @@ AoE / multi-target  [x]
     1+    = follow-up targets: cooldown/use tracking skipped, reactions suppressed
   Actor-side abort on the first target (off-turn, stunned) fails the whole AoE.
   Subsequent aborts (e.g. taunt mismatch on a specific target) skip that target only.
+  AoE + guard redirect: if guard entity A protects enemy B, an AoE targeting all
+  enemies will hit A twice — once as the redirect target for B, and once directly as
+  a target in its own right. This is a known accepted edge case for Stage 3.
 
 Mid-combat joins and summons  [x]
   joinCombat(combatId, entityId, allyFactionId) — public service method + POST /:id/join

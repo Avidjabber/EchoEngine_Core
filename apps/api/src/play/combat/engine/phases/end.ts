@@ -85,8 +85,11 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
         if (sideWrites.length > 0) await Promise.all(sideWrites);
 
         // ── Behavior effect ───────────────────────────────────────────────────
+        // For damage actions: save halves damage but does not skip the effect.
+        // For non-damage actions: a successful save skips the effect entirely.
         if (profile.behaviorEffectTypeId && profile.durationRounds > 0 && ctx.actorParticipantId !== null
-            && (!profile.dealsDamage || ctx.isHit)) {
+            && (!profile.dealsDamage || ctx.isHit)
+            && (profile.dealsDamage  || !ctx.savedSuccessfully)) {
             const isGuard = profile.behaviorEffectRedirectsDamage;
             const isTaunt = profile.behaviorEffectForcesTargeting;
 
@@ -131,7 +134,8 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
         }
 
         // ── Stat effects ──────────────────────────────────────────────────────
-        if (rolledEffects.length > 0 && targetPartId !== null) {
+        // Non-damage actions: a successful save skips stat effects (same rule as behavior effects above).
+        if (rolledEffects.length > 0 && targetPartId !== null && (profile.dealsDamage || !ctx.savedSuccessfully)) {
             const effectDefIds = rolledEffects.map(r => r.effectDefId);
 
             // Single query to find all pre-existing instances for these defs.
