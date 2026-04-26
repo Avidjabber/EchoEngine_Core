@@ -112,6 +112,18 @@ export class PlayCombatController {
         return this.service.flee(id, body.entityId);
     }
 
+    @Post(':id/join')
+    @HttpCode(HttpStatus.OK)
+    joinCombat(
+        @Param('id', ParseIntPipe) id:   number,
+        @Body()                    body: { entityId: number; allyFactionId: number; roundNumber: number },
+    ) {
+        if (!body?.entityId || !body?.allyFactionId || body?.roundNumber === undefined) {
+            throw new BadRequestException('entityId, allyFactionId, and roundNumber are required');
+        }
+        return this.service.joinCombat(id, body.entityId, body.allyFactionId, body.roundNumber);
+    }
+
     @Post(':id/process-reaction')
     @HttpCode(HttpStatus.OK)
     processReaction(

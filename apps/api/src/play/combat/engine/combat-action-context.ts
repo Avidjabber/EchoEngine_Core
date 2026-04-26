@@ -44,6 +44,9 @@ export interface ProfileSnapshot {
     isReactionAction: boolean;
     savingThrowStatName: string | null;
     saveDC:              number;
+    summonSpeciesId: number | null;
+    summonDiceCount: number | null;
+    summonDiceSides: number | null;
     // Behavior effect fields
     behaviorEffectTypeId:          number | null;
     behaviorEffectName:            string | null;

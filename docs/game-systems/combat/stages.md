@@ -166,11 +166,22 @@ AoE / multi-target  [x]
   Actor-side abort on the first target (off-turn, stunned) fails the whole AoE.
   Subsequent aborts (e.g. taunt mismatch on a specific target) skip that target only.
 
-Mid-combat joins and summons
-  joinCombat endpoint: roll initiative, insert participant at correct turnOrder,
-  increment all higher turnOrder values.
-  Summon: triggered from an action's summonSpeciesId, spawns entity + loadout,
-  calls join logic.
+Mid-combat joins and summons  [x]
+  joinCombat(combatId, entityId, allyFactionId) — public service method + POST /:id/join
+  controller endpoint. Appends new participant at maxTurnOrder + 1 (no initiative re-sort
+  since historical rolls are not stored). Seeds pre-combat stat effects for the joiner.
+  Returns SummonedEntity { entityId, name, allyFactionId, turnOrder }.
+
+  Summon — triggered after a successful action when profile.summonSpeciesId is set.
+  _spawnNpcEntity creates: Entity (NPC type, Active status, given species), EntityStats
+  (base stats from species; HP = floor(count*sides/2) + CON mod), Storage + Entity_Storage,
+  StoredItems from SpeciesDefaultLoadout (autoEquip items get isEquipped + chosenProfileId),
+  ActiveCombat_Participant (isAiControlled = true, appended at maxTurnOrder + 1 inside the
+  transaction). Calls _seedPreCombatEffects after the transaction.
+  _executeSummons rolls summonDiceCount d summonDiceSides to determine spawn count (defaults
+  to 1 if dice fields are null), then calls _spawnNpcEntity once per entity.
+  summonedEntities: SummonedEntity[] is returned on ActionResult; populated after the pipeline
+  completes. AoE summons attach to results[0].summonedEntities.
 
 
 ─────────────────────────────────────────────

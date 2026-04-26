@@ -101,7 +101,8 @@ Source type: apps/api/src/play/combat/engine/combat-action-context.ts
   actor              — ActorSnapshot: entity name + all six stats
   profile            — ProfileSnapshot: label, dice, bonuses, actionCategoryId,
                        dealsDamage, restoresHealth, isReactionAction, behavior
-                       effect fields, elemental damage fields
+                       effect fields, elemental damage fields, saving throw fields,
+                       summonSpeciesId / summonDiceCount / summonDiceSides
   combatMeta         — CombatMetaSnapshot: canSecondWind, currentTurnOrder, isSpar
   existingActionCount — count of actions already logged this round (turnIndex in log)
   actorTurnOrder      — actor's turnOrder from their participant row; null if not found
