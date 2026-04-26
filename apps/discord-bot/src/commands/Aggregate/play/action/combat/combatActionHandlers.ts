@@ -176,13 +176,10 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
         // only meaningful on single-target results. Either way, read from primary.
         const reaction = primary.pendingReaction;
         if (reaction) {
-            // Disable turn prompt while awaiting reaction
-            if (turnMsg) {
-                await turnMsg.edit({
-                    components: buildTurnAwaitingReactionComponents(entry.entityName, reaction.defenderEntityName) as never,
-                }).catch(() => null);
-            }
-            // Post reaction prompt
+            // Send the reaction prompt FIRST — only freeze the turn prompt once we know the
+            // reaction message was successfully posted. If the send fails (e.g. component
+            // overflow, rate limit), we fall through and leave the turn prompt interactive so
+            // the attacker is not deadlocked.
             const reactionMsg = await channel.send({
                 components: buildReactionPromptComponents(
                     activeCombatId, reaction.defenderEntityId, reaction.defenderEntityName,
@@ -195,6 +192,12 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
                     reaction.defenderEntityId, reaction.defenderEntityName, reaction.defenderUserId ?? undefined,
                     reaction.attackerEntityId, reaction.reactionProfiles,
                 );
+                // Disable turn prompt only after the reaction prompt is confirmed live.
+                if (turnMsg) {
+                    await turnMsg.edit({
+                        components: buildTurnAwaitingReactionComponents(entry.entityName, reaction.defenderEntityName) as never,
+                    }).catch(() => null);
+                }
             }
         } else {
             // No reaction — just update turn prompt with disabled action slot
