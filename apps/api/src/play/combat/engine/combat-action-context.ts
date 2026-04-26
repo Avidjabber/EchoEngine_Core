@@ -38,6 +38,8 @@ export interface ProfileSnapshot {
     elementalDamageTypeId:   number | null;
     elementalDamageTypeName: string | null;
     isReactionAction: boolean;
+    savingThrowStatName: string | null;
+    saveDC:              number;
     // Behavior effect fields
     behaviorEffectTypeId:          number | null;
     behaviorEffectName:            string | null;
@@ -62,7 +64,7 @@ export interface TargetSnapshot {
     currentHp: number;
     maxHp:     number;
     baseAc:    number;
-    dexterity: number;
+    stats:     Record<string, number>;
 }
 
 export interface TargetParticipantSnapshot {
@@ -127,7 +129,10 @@ export interface CombatActionContext {
     finalHeal:   number;
     elementalDiceRolls:   number[];
     rawElementalDamage:   number;
-    finalElementalDamage: number; // no modifier in stage 1; resistance interceptors scale this in stage 2
+    finalElementalDamage: number; // resistance interceptors scale this in APPLY
+    saveRoll:          number | null;   // defender's raw d20 (null = no save triggered)
+    saveTotal:         number | null;   // saveRoll + stat modifier
+    savedSuccessfully: boolean | null;  // true = save succeeded and damage was halved
 
     // APPLY
     hpAfter:         number | null;

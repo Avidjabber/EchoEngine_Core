@@ -48,6 +48,19 @@ export async function runResolve(ctx: CombatActionContext, { roller }: PipelineS
             // Resistance interceptors scale finalElementalDamage in APPLY.
             ctx.finalElementalDamage = ctx.rawElementalDamage;
         }
+
+        if (ctx.isHit && profile.savingThrowStatName && profile.saveDC > 0) {
+            const statValue = target.stats[profile.savingThrowStatName] ?? 10;
+            const statMod   = Math.floor((statValue - 10) / 2);
+            const saveD20   = rollDice(1, 20, roller)[0]!;
+            ctx.saveRoll          = saveD20;
+            ctx.saveTotal         = saveD20 + statMod;
+            ctx.savedSuccessfully = ctx.saveTotal >= profile.saveDC;
+            if (ctx.savedSuccessfully) {
+                ctx.finalDamage          = Math.floor(ctx.finalDamage / 2);
+                ctx.finalElementalDamage = Math.floor(ctx.finalElementalDamage / 2);
+            }
+        }
     } else if (profile.restoresHealth) {
         if (profile.healDiceCount && profile.healDiceSides) {
             ctx.diceRolls = rollDiceWithAdvantage(profile.healDiceCount, profile.healDiceSides, ctx.healAdvantage, roller);

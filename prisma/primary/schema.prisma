@@ -314,9 +314,10 @@ model Stat {
   envConditionModifiers  EnvCondition_StatModifier[]
   conditionStatEffects   ConditionDef_StatEffect[]
   proficiencyDefs        ProficiencyDef[]
-  profilesAsDamageStat   ItemEquipmentProfile[]   @relation("ProfileDamageStat")
-  profilesAsHitStat      ItemEquipmentProfile[]   @relation("ProfileHitStat")
-  profilesAsHealStat     ItemEquipmentProfile[]   @relation("ProfileHealStat")
+  profilesAsDamageStat        ItemEquipmentProfile[]   @relation("ProfileDamageStat")
+  profilesAsHitStat           ItemEquipmentProfile[]   @relation("ProfileHitStat")
+  profilesAsHealStat          ItemEquipmentProfile[]   @relation("ProfileHealStat")
+  profilesAsSavingThrowStat   ItemEquipmentProfile[]   @relation("ProfileSavingThrowStat")
   conditionCombatEffects ConditionDef_CombatEffect[]
   abilityStatModifiers   Ability_StatModifier[]
   actionStepDefaults           ActionType_Step[]                  @relation("ActionStepDefaultStat")
@@ -2424,6 +2425,11 @@ model ItemEquipmentProfile {
   damageBonus  Int   @default(0)
   healBonus    Int   @default(0)
 
+  // Saving throw — when set, a hit triggers a defender roll (d20 + stat mod) vs. saveDC;
+  // on a successful save the damage is halved (both primary and elemental).
+  savingThrowStatId Int?
+  saveDC            Int @default(0)
+
   // Optional event trigger on action use
   triggersEventDefId Int?
   triggerDC          Int @default(1)  // minimum d20 roll to fire the event; 1 = always, 20 = nat 20 only
@@ -2445,9 +2451,10 @@ model ItemEquipmentProfile {
   actionType          ItemActionType?       @relation(fields: [actionTypeId],          references: [id], onDelete: Restrict)
   targetScope         CombatTargetScope?    @relation(fields: [targetScopeId],         references: [id], onDelete: Restrict)
   behaviorEffectType  CombatEffectType?     @relation("ProfileBehaviorEffect",         fields: [behaviorEffectTypeId], references: [id], onDelete: Restrict)
-  hitStat             Stat?                 @relation("ProfileHitStat",                fields: [hitStatId],    references: [id], onDelete: Restrict)
-  damageStat          Stat?                 @relation("ProfileDamageStat",             fields: [damageStatId], references: [id], onDelete: Restrict)
-  healStat            Stat?                 @relation("ProfileHealStat",               fields: [healStatId],   references: [id], onDelete: Restrict)
+  hitStat             Stat?                 @relation("ProfileHitStat",                fields: [hitStatId],             references: [id], onDelete: Restrict)
+  damageStat          Stat?                 @relation("ProfileDamageStat",             fields: [damageStatId],          references: [id], onDelete: Restrict)
+  healStat            Stat?                 @relation("ProfileHealStat",               fields: [healStatId],            references: [id], onDelete: Restrict)
+  savingThrowStat     Stat?                 @relation("ProfileSavingThrowStat",        fields: [savingThrowStatId],     references: [id], onDelete: Restrict)
   triggersEventDef    EventDef?             @relation(fields: [triggersEventDefId],     references: [id], onDelete: SetNull)
   summonSpecies       Species?              @relation("ProfileSummonSpecies",          fields: [summonSpeciesId], references: [id], onDelete: SetNull)
 
@@ -2475,6 +2482,7 @@ model ItemEquipmentProfile {
   @@index([hitStatId])
   @@index([damageStatId])
   @@index([healStatId])
+  @@index([savingThrowStatId])
 }
 
 // Buff, debuff, or heal effects applied by an ItemAction.
@@ -5808,6 +5816,9 @@ model ActiveCombat_Action {
   healDealt       Int?
   reflectedDamage Int?  // damage returned to the attacker via a reflect behavior effect
   absorbedDamage  Int?  // damage intercepted by an absorb buffer instead of reducing HP
+
+  saveRoll          Int?      // defender's raw d20 for a saving throw (null = no save triggered)
+  savedSuccessfully Boolean?  // true = save succeeded and damage was halved; null = no save triggered
 
   secondWindTriggered Boolean  @default(false)
 

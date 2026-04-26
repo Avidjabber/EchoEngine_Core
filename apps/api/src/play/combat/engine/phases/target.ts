@@ -12,7 +12,7 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
                 name:    true,
                 userId:  true,
                 species: { select: { baseAc: true } },
-                stats:   { select: { dexterity: true, currentHp: true, maxHp: true } },
+                stats:   { select: { strength: true, dexterity: true, constitution: true, intelligence: true, wisdom: true, charisma: true, currentHp: true, maxHp: true } },
             },
         }),
         db.activeCombat_Participant.findFirst({
@@ -36,7 +36,8 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
         equippedAcBonus = equipped.reduce((sum, i) => sum + (i.chosenProfile?.acModifier ?? 0), 0);
     }
 
-    const dexMod = Math.floor(((targetRow.stats.dexterity ?? 10) - 10) / 2);
+    const dex    = targetRow.stats.dexterity ?? 10;
+    const dexMod = Math.floor((dex - 10) / 2);
     ctx.targetAC = (targetRow.species?.baseAc ?? 10) + dexMod + equippedAcBonus;
 
     ctx.target = {
@@ -45,7 +46,14 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
         currentHp: targetRow.stats.currentHp ?? 0,
         maxHp:     targetRow.stats.maxHp     ?? 0,
         baseAc:    targetRow.species?.baseAc  ?? 10,
-        dexterity: targetRow.stats.dexterity  ?? 10,
+        stats: {
+            strength:     targetRow.stats.strength     ?? 10,
+            dexterity:    dex,
+            constitution: targetRow.stats.constitution ?? 10,
+            intelligence: targetRow.stats.intelligence ?? 10,
+            wisdom:       targetRow.stats.wisdom       ?? 10,
+            charisma:     targetRow.stats.charisma     ?? 10,
+        },
     };
 
     if (participantRow) {

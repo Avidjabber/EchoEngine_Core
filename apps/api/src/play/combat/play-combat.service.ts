@@ -65,7 +65,7 @@ export interface PendingReaction {
 }
 
 export type ActionResultOutcome =
-    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
     | { kind: 'miss';     hitRoll: number; targetAC: number }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
@@ -833,6 +833,9 @@ export class PlayCombatService {
                     totalElementalDamage:    ctx.finalElementalDamage,
                     elementalDamageTypeName: ctx.profile?.elementalDamageTypeName ?? null,
                     absorbedDamage:          ctx.absorbedDamage,
+                    saveRoll:                ctx.saveRoll,
+                    saveTotal:               ctx.saveTotal,
+                    savedSuccessfully:       ctx.savedSuccessfully,
                     hpAfter:                 ctx.hpAfter ?? 0,
                     knockedDown:             ctx.knockedDown,
                     defeated:                ctx.defeated,

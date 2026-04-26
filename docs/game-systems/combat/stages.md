@@ -137,7 +137,7 @@ Pre-combat effects  [x] GROUP 4
 
 
 ─────────────────────────────────────────────
-STAGE 3 — GUARD ABSORPTION, SAVING THROWS, AOE, JOINS  (future)
+STAGE 3 — GUARD ABSORPTION, SAVING THROWS, AOE, JOINS
 ─────────────────────────────────────────────
 
 Guard absorption  (carried over from stage 2 — see GROUP 3 entry above)
@@ -145,9 +145,13 @@ Guard absorption  (carried over from stage 2 — see GROUP 3 entry above)
   When ctx.wasRedirected is true: read percentModifier from the guard
   BehaviorEffect and reduce ctx.finalDamage proportionally before APPLY writes HP.
 
-Saving throws
+Saving throws  [x]
   RESOLVE phase extended: profiles with savingThrowStat trigger a defender roll
   (d20 + stat modifier) vs. saveDC. On save: damage halved or effect skipped.
+  Schema: savingThrowStatId + saveDC on ItemEquipmentProfile;
+          saveRoll + savedSuccessfully on ActiveCombat_Action.
+  Context: saveRoll, saveTotal, savedSuccessfully set in RESOLVE.
+  Halving applies to both finalDamage and finalElementalDamage before APPLY interceptors run.
 
 AoE / multi-target
   Pipeline currently processes one target per call. Multi-target actions will

@@ -145,6 +145,9 @@ Source type: apps/api/src/play/combat/engine/combat-action-context.ts
   rawElementalDamage   — sum of elemental dice before any scaling
   finalElementalDamage — post-resistance scaling (set to rawElementalDamage by RESOLVE;
                          resistance interceptors scale it in APPLY)
+  saveRoll           — defender's raw d20 for a saving throw; null if no save triggered
+  saveTotal          — saveRoll + defender's stat modifier; null if no save triggered
+  savedSuccessfully  — true if saveTotal >= profile.saveDC (damage halved); null if no save
 
   APPLY
   ──────
