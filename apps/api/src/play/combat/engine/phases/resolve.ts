@@ -48,26 +48,26 @@ export async function runResolve(ctx: CombatActionContext, { roller }: PipelineS
             // Resistance interceptors scale finalElementalDamage in APPLY.
             ctx.finalElementalDamage = ctx.rawElementalDamage;
         }
-
-        // Saving throw fires on a hit for damage actions, or always for non-damage actions
-        // (e.g. a stun has no hit roll — ctx.isHit stays null — but still needs a save).
-        if ((ctx.isHit || !profile.dealsDamage) && profile.savingThrowStatName && profile.saveDC > 0) {
-            const statValue = target.stats[profile.savingThrowStatName] ?? 10;
-            const statMod   = Math.floor((statValue - 10) / 2);
-            const saveD20   = rollDice(1, 20, roller)[0]!;
-            ctx.saveRoll          = saveD20;
-            ctx.saveTotal         = saveD20 + statMod;
-            ctx.savedSuccessfully = ctx.saveTotal >= profile.saveDC;
-            if (ctx.savedSuccessfully) {
-                ctx.finalDamage          = Math.floor(ctx.finalDamage / 2);
-                ctx.finalElementalDamage = Math.floor(ctx.finalElementalDamage / 2);
-            }
-        }
     } else if (profile.restoresHealth) {
         if (profile.healDiceCount && profile.healDiceSides) {
             ctx.diceRolls = rollDiceWithAdvantage(profile.healDiceCount, profile.healDiceSides, ctx.healAdvantage, roller);
             ctx.rawHeal   = ctx.diceRolls.reduce((a, b) => a + b, 0);
         }
         ctx.finalHeal = Math.max(0, ctx.rawHeal + ctx.healModifier);
+    }
+
+    // Saving throw: fires on a hit for damage actions, or unconditionally for non-damage actions
+    // (e.g. a stun has no hit roll but still triggers a defender save).
+    if (profile.savingThrowStatName && profile.saveDC > 0 && (ctx.isHit === true || !profile.dealsDamage)) {
+        const statValue = target.stats[profile.savingThrowStatName] ?? 10;
+        const statMod   = Math.floor((statValue - 10) / 2);
+        const saveD20   = rollDice(1, 20, roller)[0]!;
+        ctx.saveRoll          = saveD20;
+        ctx.saveTotal         = saveD20 + statMod;
+        ctx.savedSuccessfully = ctx.saveTotal >= profile.saveDC;
+        if (ctx.savedSuccessfully && profile.dealsDamage) {
+            ctx.finalDamage          = Math.floor(ctx.finalDamage / 2);
+            ctx.finalElementalDamage = Math.floor(ctx.finalElementalDamage / 2);
+        }
     }
 }

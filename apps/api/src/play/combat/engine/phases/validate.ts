@@ -30,6 +30,12 @@ export async function runValidate(ctx: CombatActionContext, _svc: PipelineServic
         return;
     }
 
+    if (ctx.profile.restoresHealth && ctx.actualTargetId === null) {
+        ctx.aborted     = true;
+        ctx.abortReason = 'A target is required for healing actions.';
+        return;
+    }
+
     // Non-guard behavior effects (stun, suppress, taunt) must target an enemy, not the actor.
     if (ctx.profile.behaviorEffectTypeId !== null && !ctx.profile.behaviorEffectRedirectsDamage && ctx.actualTargetId === null) {
         ctx.aborted     = true;
