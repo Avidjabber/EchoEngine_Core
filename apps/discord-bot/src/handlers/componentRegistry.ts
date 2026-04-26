@@ -15,7 +15,7 @@ import { handlePaActionBack, handlePaActionPick }                               
 import { handlePaCombatAddChar, handlePaCombatSignup, handlePaCombatRemove, handlePaCombatAddTeam, handlePaCombatCancel, handlePaCombatStart } from '../commands/Aggregate/play/action/combat/setupHandlers';
 import { handlePaInviteAccept, handlePaInviteReject }                                                                                         from '../commands/Aggregate/play/action/combat/inviteHandlers';
 import { handlePaEpickInvitePage, handlePaEpickSignupPage, handlePaEpickInvitePick, handlePaEpickSignupPick, handlePaEpickCancel }             from '../commands/Aggregate/play/action/combat/entityPickerHandlers';
-import { handlePaTurnMain, handlePaTurnBonus, handlePaTurnItem, handlePaTurnEnd, handlePaTurnFlee, handlePaSwAccept, handlePaSwDecline }        from '../commands/Aggregate/play/action/combat/combatTurnHandlers';
+import { handlePaTurnMain, handlePaTurnBonus, handlePaTurnItem, handlePaTurnEnd, handlePaTurnFlee, handlePaDeceasedMark, handlePaDeceasedSpare } from '../commands/Aggregate/play/action/combat/combatTurnHandlers';
 import { handlePaCbtPick, handlePaCbtTarget, handlePaCbtConfirm, handlePaCbtBack, handlePaCbtCancel }                                           from '../commands/Aggregate/play/action/combat/combatActionHandlers';
 import { handlePaReactUse, handlePaReactSkip }                                                                                                from '../commands/Aggregate/play/action/combat/combatReactionHandlers';
 import {
@@ -82,9 +82,9 @@ export const buttonHandlers: ComponentHandler[] = [
     { prefix: 'pa_turn_bonus:',        handler: interaction => handlePaTurnBonus(interaction as ButtonInteraction)         },
     { prefix: 'pa_turn_item:',         handler: interaction => handlePaTurnItem(interaction as ButtonInteraction)          },
     { prefix: 'pa_turn_end:',          handler: interaction => handlePaTurnEnd(interaction as ButtonInteraction)           },
-    { prefix: 'pa_turn_flee:',         handler: interaction => handlePaTurnFlee(interaction as ButtonInteraction)          },
-    { prefix: 'pa_sw_accept:',         handler: interaction => handlePaSwAccept(interaction as ButtonInteraction)          },
-    { prefix: 'pa_sw_decline:',        handler: interaction => handlePaSwDecline(interaction as ButtonInteraction)         },
+    { prefix: 'pa_turn_flee:',          handler: interaction => handlePaTurnFlee(interaction as ButtonInteraction)          },
+    { prefix: 'pa_deceased_mark:',     handler: interaction => handlePaDeceasedMark(interaction as ButtonInteraction)      },
+    { prefix: 'pa_deceased_spare:',    handler: interaction => handlePaDeceasedSpare(interaction as ButtonInteraction)     },
     { prefix: 'pa_cbt_pick:',          handler: interaction => handlePaCbtPick(interaction as ButtonInteraction)           },
     { prefix: 'pa_cbt_target:',        handler: interaction => handlePaCbtTarget(interaction as ButtonInteraction)         },
     { prefix: 'pa_cbt_confirm:',       handler: interaction => handlePaCbtConfirm(interaction as ButtonInteraction)        },

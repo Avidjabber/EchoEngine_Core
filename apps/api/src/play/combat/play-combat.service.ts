@@ -104,20 +104,37 @@ export interface RoundEndEvent {
     amount:      number;
     hpAfter:     number;
     defeated:    boolean;
-    knockedDown: boolean;  // true when HP hits 0 and entity is eligible for second wind
+    knockedDown: boolean;  // true when HP hits 0 and entity enters death save state
+}
+
+export interface DeathSaveEvent {
+    entityId:   number;
+    entityName: string;
+    roll:       number;  // raw d20 result
+    successes:  number;  // total after this roll
+    failures:   number;  // total after this roll
+    result:     'success' | 'failure' | 'revived' | 'stable' | 'defeated';
+}
+
+export interface MortallyWoundedCharacter {
+    entityId:    number;
+    name:        string;
+    userId:      string | null;
+    wasDefeated: boolean;  // true = died from 3 save failures; false = still unconscious at combat end
 }
 
 export interface AdvanceTurnResult {
-    combatEnded:            boolean;
-    turnEndEvents:          RoundEndEvent[];
-    nextEntityId:           number | null;
-    nextEntityName:         string | null;
-    nextUserId:             string | null;
-    isAiControlled:         boolean;
-    isAwaitingSecondWind:   boolean;
-    allowsFleeing:          boolean;
-    round:                  number;
-    winningAllyFactionId:   number | null;
+    combatEnded:          boolean;
+    turnEndEvents:        RoundEndEvent[];
+    nextEntityId:         number | null;
+    nextEntityName:       string | null;
+    nextUserId:           string | null;
+    isAiControlled:       boolean;
+    deathSaveEvent:       DeathSaveEvent | null;
+    allowsFleeing:        boolean;
+    round:                number;
+    winningAllyFactionId: number | null;
+    mortallyWounded:      MortallyWoundedCharacter[];  // non-empty only when combatEnded = true and canResultInDeath = true
 }
 
 export interface CombatTargetEntity {
@@ -503,7 +520,7 @@ export class PlayCombatService {
                 select: {
                     currentTurnOrder: true,
                     currentRound:     true,
-                    initiationType:   { select: { canSecondWind: true, allowsFleeing: true } },
+                    initiationType:   { select: { usesDeathSaves: true, allowsFleeing: true, canResultInDeath: true } },
                 },
             }),
             this.db.activeCombat_Participant.findFirst({
@@ -513,23 +530,26 @@ export class PlayCombatService {
         ]);
         if (!combat) throw new Error(`Combat ${combatId} not found`);
 
-        const canSecondWind = combat.initiationType.canSecondWind;
-        const allowsFleeing = combat.initiationType.allowsFleeing;
+        const usesDeathSaves  = combat.initiationType.usesDeathSaves;
+        const allowsFleeing   = combat.initiationType.allowsFleeing;
+        const canResultInDeath = combat.initiationType.canResultInDeath;
 
         const turnEndEvents = endingParticipant
-            ? await this._processTurnEnd(endingParticipant.id, canSecondWind)
+            ? await this._processTurnEnd(endingParticipant.id, usesDeathSaves)
             : [];
 
-        const freshActive = await this.db.activeCombat_Participant.findMany({
+        let freshActive = await this.db.activeCombat_Participant.findMany({
             where:   { activeCombatId: combatId, hasFled: false, isDefeated: false },
             select: {
-                id:               true,
-                entityId:         true,
-                allyFactionId:    true,
-                turnOrder:        true,
-                isAiControlled:   true,
-                inSecondWind:     true,
-                controllerUserId: true,
+                id:                   true,
+                entityId:             true,
+                allyFactionId:        true,
+                turnOrder:            true,
+                isAiControlled:       true,
+                isUnconscious:         true,
+                deathSaveSuccesses:   true,
+                deathSaveFailures:    true,
+                controllerUserId:     true,
                 entity: {
                     select: {
                         name:   true,
@@ -546,11 +566,30 @@ export class PlayCombatService {
         const roundBoundary = freshActive.length > 0 && !freshActive.some(p => p.turnOrder > combat.currentTurnOrder);
         const newRound      = roundBoundary ? combat.currentRound + 1 : combat.currentRound;
 
-        const factions = new Set(freshActive.map(p => p.allyFactionId));
-        if (factions.size < 2) {
+        const endCombat = async (active: typeof freshActive): Promise<AdvanceTurnResult> => {
+            const factions             = new Set(active.map(p => p.allyFactionId));
             const winningAllyFactionId = factions.size === 1 ? [...factions][0]! : null;
             const outcomeName          = winningAllyFactionId !== null ? 'win' : 'draw';
-            const outcome              = await this.db.combatOutcome.findFirst({ where: { name: outcomeName }, select: { id: true } });
+
+            const [outcome, mortallyWoundedRows] = await Promise.all([
+                this.db.combatOutcome.findFirst({ where: { name: outcomeName }, select: { id: true } }),
+                canResultInDeath
+                    ? this.db.activeCombat_Participant.findMany({
+                        where: {
+                            activeCombatId: combatId,
+                            isAiControlled: false,
+                            hasFled:        false,
+                            OR: [{ isDefeated: true }, { isUnconscious: true }],
+                        },
+                        select: {
+                            entityId:     true,
+                            isDefeated:   true,
+                            entity: { select: { name: true, userId: true } },
+                        },
+                    })
+                    : Promise.resolve([]),
+            ]);
+
             await this.db.activeCombat.update({
                 where: { id: combatId },
                 data:  {
@@ -560,10 +599,129 @@ export class PlayCombatService {
                     completedAt:          new Date(),
                 },
             });
-            return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, isAwaitingSecondWind: false, allowsFleeing, round: newRound, winningAllyFactionId };
+
+            const mortallyWounded: MortallyWoundedCharacter[] = mortallyWoundedRows.map(r => ({
+                entityId:    r.entityId,
+                name:        r.entity.name,
+                userId:      r.entity.userId ?? null,
+                wasDefeated: r.isDefeated,
+            }));
+
+            return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, deathSaveEvent: null, allowsFleeing, round: newRound, winningAllyFactionId, mortallyWounded };
+        };
+
+        if (new Set(freshActive.map(p => p.allyFactionId)).size < 2) {
+            return endCombat(freshActive);
         }
 
-        const next = freshActive.find(p => p.turnOrder > combat.currentTurnOrder) ?? freshActive[0]!;
+        let next = freshActive.find(p => p.turnOrder > combat.currentTurnOrder) ?? freshActive[0]!;
+
+        // ── Death saving throw ────────────────────────────────────────────────
+        // If the next entity is knocked down (isUnconscious) and player-controlled,
+        // their "turn" is consumed by a death save roll. The actual acting turn then
+        // passes to the entity after them (unless they roll a natural 20 and revive).
+        let deathSaveEvent: DeathSaveEvent | null = null;
+
+        if (next.isUnconscious && !next.isAiControlled) {
+            const roll        = rollDice(1, 20, defaultRoller)[0]!;
+            let newSuccesses  = next.deathSaveSuccesses;
+            let newFailures   = next.deathSaveFailures;
+            let result: DeathSaveEvent['result'];
+
+            if (roll === 20) {
+                // Natural 20: revive at 1 HP — entity gets to act this turn.
+                result       = 'revived';
+                newSuccesses = 0;
+                newFailures  = 0;
+                await this.db.$transaction([
+                    this.db.entityStats.update({
+                        where: { entityId: next.entityId },
+                        data:  { currentHp: 1 },
+                    }),
+                    this.db.activeCombat_Participant.update({
+                        where: { id: next.id },
+                        data:  { isUnconscious: false, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                    }),
+                ]);
+            } else if (roll === 1) {
+                // Natural 1: two failures.
+                newFailures = Math.min(next.deathSaveFailures + 2, 3);
+                if (newFailures >= 3) {
+                    result = 'defeated';
+                    await this.db.$transaction([
+                        this.db.activeCombat_Participant.update({
+                            where: { id: next.id },
+                            data:  { isDefeated: true, deathSaveFailures: newFailures },
+                        }),
+                        this.db.activeCombat_BehaviorEffect.deleteMany({ where: { sourceParticipantId: next.id } }),
+                        this.db.activeCombat_StatEffect.deleteMany({ where: { affectedParticipantId: next.id } }),
+                    ]);
+                    freshActive = freshActive.filter(p => p.id !== next.id);
+                } else {
+                    result = 'failure';
+                    await this.db.activeCombat_Participant.update({
+                        where: { id: next.id },
+                        data:  { deathSaveFailures: newFailures },
+                    });
+                }
+            } else if (roll >= 10) {
+                newSuccesses = next.deathSaveSuccesses + 1;
+                if (newSuccesses >= 3) {
+                    // Stable: no longer rolling saves; remains at 0 HP until healed.
+                    result = 'stable';
+                    await this.db.activeCombat_Participant.update({
+                        where: { id: next.id },
+                        data:  { isUnconscious: false, deathSaveSuccesses: newSuccesses },
+                    });
+                } else {
+                    result = 'success';
+                    await this.db.activeCombat_Participant.update({
+                        where: { id: next.id },
+                        data:  { deathSaveSuccesses: newSuccesses },
+                    });
+                }
+            } else {
+                newFailures = next.deathSaveFailures + 1;
+                if (newFailures >= 3) {
+                    result = 'defeated';
+                    await this.db.$transaction([
+                        this.db.activeCombat_Participant.update({
+                            where: { id: next.id },
+                            data:  { isDefeated: true, deathSaveFailures: newFailures },
+                        }),
+                        this.db.activeCombat_BehaviorEffect.deleteMany({ where: { sourceParticipantId: next.id } }),
+                        this.db.activeCombat_StatEffect.deleteMany({ where: { affectedParticipantId: next.id } }),
+                    ]);
+                    freshActive = freshActive.filter(p => p.id !== next.id);
+                } else {
+                    result = 'failure';
+                    await this.db.activeCombat_Participant.update({
+                        where: { id: next.id },
+                        data:  { deathSaveFailures: newFailures },
+                    });
+                }
+            }
+
+            deathSaveEvent = {
+                entityId:   next.entityId,
+                entityName: next.entity.name,
+                roll,
+                successes:  newSuccesses,
+                failures:   newFailures,
+                result,
+            };
+
+            if (result !== 'revived') {
+                // Turn passes to the entity after the death-saver.
+                if (result === 'defeated') {
+                    if (new Set(freshActive.map(p => p.allyFactionId)).size < 2) {
+                        return endCombat(freshActive);
+                    }
+                }
+                const deathSaverTurnOrder = next.turnOrder;
+                next = freshActive.find(p => p.turnOrder > deathSaverTurnOrder) ?? freshActive[0]!;
+            }
+        }
 
         await this.db.$transaction([
             // Clear unconsumed Help roll mod on the participant whose turn just ended.
@@ -588,12 +746,6 @@ export class PlayCombatService {
             }),
         ]);
 
-        const isAwaitingSecondWind =
-            canSecondWind &&
-            !next.isAiControlled &&
-            !next.inSecondWind &&
-            (next.entity.stats?.currentHp ?? 1) <= 0;
-
         return {
             combatEnded:          false,
             turnEndEvents,
@@ -601,50 +753,19 @@ export class PlayCombatService {
             nextEntityName:       next.entity.name,
             nextUserId:           next.controllerUserId ?? next.entity.userId ?? null,
             isAiControlled:       next.isAiControlled,
-            isAwaitingSecondWind,
+            deathSaveEvent,
             allowsFleeing,
             round:                newRound,
             winningAllyFactionId: null,
+            mortallyWounded:      [],
         };
     }
 
-    async acceptSecondWind(combatId: number, entityId: number): Promise<void> {
-        const stats = await this.db.entityStats.findUnique({
-            where:  { entityId },
-            select: { maxHp: true, currentHp: true },
+    async markDeceased(entityId: number): Promise<void> {
+        await this.db.entity.update({
+            where: { id: entityId },
+            data:  { isDeceased: true },
         });
-        // Only apply second wind if the entity is actually knocked down (HP ≤ 0).
-        if (!stats || (stats.currentHp ?? 1) > 0) return;
-        await this.db.$transaction([
-            this.db.entityStats.update({
-                where: { entityId },
-                data:  { currentHp: stats.maxHp ?? 1 },
-            }),
-            this.db.activeCombat_Participant.update({
-                where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
-                data:  { inSecondWind: true },
-            }),
-        ]);
-    }
-
-    async declineSecondWind(combatId: number, entityId: number): Promise<void> {
-        const participant = await this.db.activeCombat_Participant.findUnique({
-            where:  { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
-            select: { id: true },
-        });
-        if (!participant) return;
-        await this.db.$transaction([
-            this.db.activeCombat_Participant.update({
-                where: { id: participant.id },
-                data:  { isDefeated: true },
-            }),
-            this.db.activeCombat_BehaviorEffect.deleteMany({
-                where: { sourceParticipantId: participant.id },
-            }),
-            this.db.activeCombat_StatEffect.deleteMany({
-                where: { affectedParticipantId: participant.id },
-            }),
-        ]);
     }
 
     async flee(combatId: number, entityId: number): Promise<{ allowed: boolean }> {
@@ -1302,7 +1423,7 @@ export class PlayCombatService {
         };
     }
 
-    private async _processTurnEnd(participantId: number, canSecondWind: boolean): Promise<RoundEndEvent[]> {
+    private async _processTurnEnd(participantId: number, usesDeathSaves: boolean): Promise<RoundEndEvent[]> {
         // Fetch both in parallel — the tick transaction doesn't touch participant HP or metadata.
         const [activeEffects, participant] = await Promise.all([
             this.db.activeCombat_StatEffect.findMany({
@@ -1322,7 +1443,7 @@ export class PlayCombatService {
                 select: {
                     entityId:       true,
                     isAiControlled: true,
-                    inSecondWind:   true,
+                    isUnconscious:   true,
                     entity: { select: { name: true, stats: { select: { currentHp: true, maxHp: true } } } },
                 },
             }),
@@ -1363,12 +1484,19 @@ export class PlayCombatService {
                 currentHp   -= amount;
 
                 if (currentHp <= 0) {
-                    const canUseSecondWind = !participant.isAiControlled && canSecondWind && !participant.inSecondWind;
-                    if (canUseSecondWind) {
-                        await this.db.entityStats.update({
-                            where: { entityId: participant.entityId },
-                            data:  { currentHp: 0 },
-                        });
+                    // Eligible for death saves if player-controlled, combat allows it, and not already saving.
+                    const canStartDeathSaves = !participant.isAiControlled && usesDeathSaves && !participant.isUnconscious;
+                    if (canStartDeathSaves) {
+                        await this.db.$transaction([
+                            this.db.entityStats.update({
+                                where: { entityId: participant.entityId },
+                                data:  { currentHp: 0 },
+                            }),
+                            this.db.activeCombat_Participant.update({
+                                where: { id: participantId },
+                                data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                            }),
+                        ]);
                         events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: false, knockedDown: true });
                     } else {
                         await this.db.$transaction([

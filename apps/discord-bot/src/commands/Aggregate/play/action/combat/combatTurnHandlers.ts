@@ -1,10 +1,10 @@
-import { ButtonInteraction, MessageFlags, TextChannel, ThreadChannel } from 'discord.js';
+import { ButtonInteraction, MessageFlags, PermissionFlagsBits, TextChannel, ThreadChannel } from 'discord.js';
 import { colors } from '../../../../../core/colors';
 import { messages } from '@echoengine/shared';
-import { fetchAvailableActions, advanceTurn, distributeCombatXp, acceptSecondWind, declineSecondWind, flee } from '../../../../../services/play/combatService';
-import type { AdvanceTurnResult, RoundEndEvent } from '../../../../../services/play/combatService';
+import { fetchAvailableActions, advanceTurn, distributeCombatXp, markDeceased, flee } from '../../../../../services/play/combatService';
+import type { AdvanceTurnResult, DeathSaveEvent, MortallyWoundedCharacter, RoundEndEvent } from '../../../../../services/play/combatService';
 import { buildActionPickerComponents } from './combatActionComponents';
-import { buildTurnPromptComponents, buildTurnEndedComponents, buildSecondWindComponents, buildCombatOutcomeComponents } from './combatTurnComponents';
+import { buildTurnPromptComponents, buildTurnEndedComponents, buildDeceasedPromptComponents, buildDeceasedResolvedComponents, buildCombatOutcomeComponents } from './combatTurnComponents';
 import { getTurnEntry, setTurnEntry, deleteTurnEntry } from './combatTurnState';
 
 function errEphemeral(interaction: ButtonInteraction, content: string) {
@@ -117,60 +117,47 @@ export async function handlePaTurnFlee(interaction: ButtonInteraction): Promise<
     await processAdvanceResult(channel, activeCombatId, result.value);
 }
 
-// customId: pa_sw_accept:{activeCombatId}:{entityId}
-export async function handlePaSwAccept(interaction: ButtonInteraction): Promise<void> {
+// customId: pa_deceased_mark:{activeCombatId}:{entityId}
+export async function handlePaDeceasedMark(interaction: ButtonInteraction): Promise<void> {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return;
+
     const parts          = interaction.customId.split(':');
     const activeCombatId = parseInt(parts[1], 10);
     const entityId       = parseInt(parts[2], 10);
 
     await interaction.deferUpdate();
 
-    const entry = getTurnEntry(activeCombatId);
-    if (!entry || entry.entityId !== entityId || entry.userId !== interaction.user.id) return;
+    // Best-effort: parse the entity name from the message text so the confirmation is specific.
+    const originalText = (interaction.message.components as unknown as Array<{ components: Array<{ content?: string }> }>)
+        ?.[0]?.components?.[0]?.content ?? '';
+    const nameMatch    = originalText.match(/^\*\*(.+?)\*\*/);
+    const entityName   = nameMatch?.[1] ?? 'The character';
 
-    await acceptSecondWind(activeCombatId, entityId).catch(() => null);
+    await markDeceased(activeCombatId, entityId).catch(() => null);
 
     await interaction.message.edit({
-        components: [{
-            type:         17,
-            accent_color: colors.warning,
-            components:   [{ type: 10, content: `-# **${entry.entityName}** accepted second wind — HP restored. Fall again and you're out.` }],
-        }],
-    } as never).catch(() => null);
-
-    const channel = interaction.channel as TextChannel | ThreadChannel;
-    await postNextTurnPrompt(channel, activeCombatId, entityId, entry.entityName, entry.userId ?? null, entry.round, entry.allowsFleeing);
+        components: buildDeceasedResolvedComponents(entityName, true) as never,
+    }).catch(() => null);
 }
 
-// customId: pa_sw_decline:{activeCombatId}:{entityId}
-export async function handlePaSwDecline(interaction: ButtonInteraction): Promise<void> {
-    const parts          = interaction.customId.split(':');
-    const activeCombatId = parseInt(parts[1], 10);
-    const entityId       = parseInt(parts[2], 10);
+// customId: pa_deceased_spare:{activeCombatId}:{entityId}
+export async function handlePaDeceasedSpare(interaction: ButtonInteraction): Promise<void> {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return;
+
+    const parts    = interaction.customId.split(':');
+    const entityName_unused = parts[2]; // entityId not needed — spare is the default state
+    void entityName_unused;
 
     await interaction.deferUpdate();
 
-    const entry = getTurnEntry(activeCombatId);
-    if (!entry || entry.entityId !== entityId || entry.userId !== interaction.user.id) return;
-
-    await declineSecondWind(activeCombatId, entityId).catch(() => null);
+    const originalText = (interaction.message.components as unknown as Array<{ components: Array<{ content?: string }> }>)
+        ?.[0]?.components?.[0]?.content ?? '';
+    const nameMatch    = originalText.match(/^\*\*(.+?)\*\*/);
+    const entityName   = nameMatch?.[1] ?? 'The character';
 
     await interaction.message.edit({
-        components: [{
-            type:         17,
-            accent_color: colors.info,
-            components:   [{ type: 10, content: `-# **${entry.entityName}** has been eliminated.` }],
-        }],
-    } as never).catch(() => null);
-
-    const channel = interaction.channel as TextChannel | ThreadChannel;
-    const result  = await advanceTurn(activeCombatId, entityId);
-    if (!result.success || !result.value) {
-        deleteTurnEntry(activeCombatId);
-        return;
-    }
-
-    await processAdvanceResult(channel, activeCombatId, result.value);
+        components: buildDeceasedResolvedComponents(entityName, false) as never,
+    }).catch(() => null);
 }
 
 async function postTurnEndEvents(
@@ -181,7 +168,7 @@ async function postTurnEndEvents(
     const lines = events.map(e => {
         if (e.kind === 'dot') {
             if (e.defeated)    return `-# **${e.entityName}** takes ${e.amount} damage and is defeated.`;
-            if (e.knockedDown) return `-# **${e.entityName}** takes ${e.amount} damage and is knocked down — second wind pending.`;
+            if (e.knockedDown) return `-# **${e.entityName}** takes ${e.amount} damage and falls unconscious — death saves begin on their next turn.`;
             return `-# **${e.entityName}** takes ${e.amount} damage (${e.hpAfter} HP remaining).`;
         }
         return `-# **${e.entityName}** heals for ${e.amount} (${e.hpAfter} HP remaining).`;
@@ -189,6 +176,50 @@ async function postTurnEndEvents(
     await channel.send({
         components: [{ type: 17, accent_color: colors.warning, components: [{ type: 10, content: lines.join('\n') }] }],
     } as never).catch(() => null);
+}
+
+async function postDeathSaveResult(
+    channel: TextChannel | ThreadChannel,
+    event:   DeathSaveEvent,
+): Promise<void> {
+    let text: string;
+    switch (event.result) {
+        case 'revived':
+            text = `🎲 **${event.entityName}** rolled a **natural 20** on their death save — they spring back up at 1 HP!`;
+            break;
+        case 'stable':
+            text = `🎲 **${event.entityName}** rolled **${event.roll}** — third success. They stabilise and are no longer in danger.`;
+            break;
+        case 'defeated':
+            text = `🎲 **${event.entityName}** rolled **${event.roll}**${event.roll === 1 ? ' (natural 1 — two failures)' : ''} — ${event.failures >= 3 ? 'three failures. They have succumbed to their wounds.' : 'defeated.'}`;
+            break;
+        case 'success':
+            text = `🎲 **${event.entityName}** rolled **${event.roll}** — success. (${event.successes}/3 successes, ${event.failures}/3 failures)`;
+            break;
+        case 'failure':
+            text = `🎲 **${event.entityName}** rolled **${event.roll}**${event.roll === 1 ? ' (natural 1 — two failures)' : ''} — failure. (${event.successes}/3 successes, ${event.failures}/3 failures)`;
+            break;
+    }
+    const accentColor = event.result === 'revived' ? colors.special
+        : event.result === 'defeated' ? colors.error
+        : event.result === 'stable'   ? colors.info
+        : event.result === 'success'  ? colors.success
+        : colors.warning;
+    await channel.send({
+        components: [{ type: 17, accent_color: accentColor, components: [{ type: 10, content: text }] }],
+    } as never).catch(() => null);
+}
+
+async function postDeceasedPrompts(
+    channel:         TextChannel | ThreadChannel,
+    activeCombatId:  number,
+    mortallyWounded: MortallyWoundedCharacter[],
+): Promise<void> {
+    for (const char of mortallyWounded) {
+        await channel.send({
+            components: buildDeceasedPromptComponents(activeCombatId, char.entityId, char.name, char.userId, char.wasDefeated) as never,
+        }).catch(() => null);
+    }
 }
 
 async function processAdvanceResult(
@@ -200,10 +231,12 @@ async function processAdvanceResult(
         deleteTurnEntry(activeCombatId);
         await postTurnEndEvents(channel, advance.turnEndEvents);
         await postCombatOutcome(channel, activeCombatId, advance.winningAllyFactionId);
+        await postDeceasedPrompts(channel, activeCombatId, advance.mortallyWounded);
         return;
     }
 
     await postTurnEndEvents(channel, advance.turnEndEvents);
+    if (advance.deathSaveEvent) await postDeathSaveResult(channel, advance.deathSaveEvent);
 
     // Stage 1–3: AI entities pass their turns here. Stage 4 wires the NPC_AI pipeline phase
     // to replace this loop with actual action selection.
@@ -222,6 +255,7 @@ async function processAdvanceResult(
         if (!skipResult.success || !skipResult.value) { deleteTurnEntry(activeCombatId); return; }
         current = skipResult.value;
         await postTurnEndEvents(channel, current.turnEndEvents);
+        if (current.deathSaveEvent) await postDeathSaveResult(channel, current.deathSaveEvent);
     }
 
     // If we hit the ceiling with only AI remaining, abandon the turn state rather than
@@ -237,11 +271,8 @@ async function processAdvanceResult(
     if (current.combatEnded) {
         deleteTurnEntry(activeCombatId);
         await postCombatOutcome(channel, activeCombatId, current.winningAllyFactionId);
+        await postDeceasedPrompts(channel, activeCombatId, current.mortallyWounded);
         return;
-    }
-
-    if (current.isAwaitingSecondWind) {
-        return postSecondWindPrompt(channel, activeCombatId, current.nextEntityId!, current.nextEntityName!, current.nextUserId, current.round);
     }
 
     return postNextTurnPrompt(channel, activeCombatId, current.nextEntityId!, current.nextEntityName!, current.nextUserId, current.round, current.allowsFleeing);
@@ -260,20 +291,6 @@ async function postNextTurnPrompt(
         components: buildTurnPromptComponents(activeCombatId, nextEntityId, nextEntityName, nextUserId ?? undefined, round, 0, allowsFleeing) as never,
     });
     setTurnEntry(activeCombatId, msg.id, channel.id, nextEntityId, nextEntityName, nextUserId ?? undefined, round, allowsFleeing);
-}
-
-async function postSecondWindPrompt(
-    channel:        TextChannel | ThreadChannel,
-    activeCombatId: number,
-    entityId:       number,
-    entityName:     string,
-    userId:         string | null,
-    round:          number,
-): Promise<void> {
-    const msg = await channel.send({
-        components: buildSecondWindComponents(activeCombatId, entityId, entityName, userId ?? undefined, round) as never,
-    });
-    setTurnEntry(activeCombatId, msg.id, channel.id, entityId, entityName, userId ?? undefined, round, false);
 }
 
 async function postCombatOutcome(

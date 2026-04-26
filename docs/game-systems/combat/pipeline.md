@@ -103,7 +103,7 @@ Source type: apps/api/src/play/combat/engine/combat-action-context.ts
                        dealsDamage, restoresHealth, isReactionAction, behavior
                        effect fields, elemental damage fields, saving throw fields,
                        summonSpeciesId / summonDiceCount / summonDiceSides
-  combatMeta         — CombatMetaSnapshot: canSecondWind, currentTurnOrder, isSpar
+  combatMeta         — CombatMetaSnapshot: usesDeathSaves, currentTurnOrder, isSpar
   existingActionCount — count of actions already logged this round (turnIndex in log)
   actorTurnOrder      — actor's turnOrder from their participant row; null if not found
   actorParticipantId  — actor's ActiveCombat_Participant.id; null if not found
@@ -119,7 +119,7 @@ Source type: apps/api/src/play/combat/engine/combat-action-context.ts
   wasRedirected      — true if a guard effect changed the target
   originalTargetName — name of input.targetEntityId when redirected; null otherwise
   target             — TargetSnapshot: name, userId, currentHp, maxHp, baseAc, dexterity
-  targetParticipant  — TargetParticipantSnapshot: id, inSecondWind, isAiControlled
+  targetParticipant  — TargetParticipantSnapshot: id, isUnconscious, isAiControlled
   targetAC           — final computed AC (baseAc + dex modifier + equipped AC bonus items)
                        Stage 2 ac-mods interceptor may further adjust this.
 

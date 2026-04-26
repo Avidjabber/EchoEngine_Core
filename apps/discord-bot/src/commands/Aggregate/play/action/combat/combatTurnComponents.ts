@@ -160,6 +160,41 @@ export function buildSecondWindComponents(
     }];
 }
 
+export function buildDeceasedPromptComponents(
+    activeCombatId: number,
+    entityId:       number,
+    entityName:     string,
+    userId:         string | null,
+    wasDefeated:    boolean,
+): object[] {
+    const status = wasDefeated
+        ? 'died from their wounds'
+        : 'was left unconscious at the end of combat';
+    const ping = userId ? ` (<@${userId}>)` : '';
+    return [{
+        type:         17,
+        accent_color: colors.error,
+        components: [
+            { type: 10, content: `**${entityName}**${ping} ${status}. Should they be marked as permanently deceased?\n-# Only server administrators can respond.` },
+            { type: 14 },
+            {
+                type: 1,
+                components: [
+                    { type: 2, style: 4, label: 'Mark as Deceased', custom_id: `pa_deceased_mark:${activeCombatId}:${entityId}` },
+                    { type: 2, style: 2, label: 'Spare',            custom_id: `pa_deceased_spare:${activeCombatId}:${entityId}` },
+                ],
+            },
+        ],
+    }];
+}
+
+export function buildDeceasedResolvedComponents(entityName: string, wasMarked: boolean): object[] {
+    const text = wasMarked
+        ? `-# **${entityName}** has been marked as permanently deceased.`
+        : `-# **${entityName}** has been spared.`;
+    return [{ type: 17, accent_color: wasMarked ? colors.error : colors.info, components: [{ type: 10, content: text }] }];
+}
+
 export function buildCombatOutcomeComponents(
     winningAllyFactionId: number | null,
     xpGrants:             XpGrant[],

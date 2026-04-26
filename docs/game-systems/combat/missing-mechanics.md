@@ -105,42 +105,32 @@ TEMPORARY HIT POINTS
 
 DEATH SAVING THROWS
   Complexity: Medium
+  Status: IMPLEMENTED (replaces Second Wind, 2026-04-26)
   What: Standard 5e unconscious-but-not-dead mechanic. At the start of each turn
   while at 0 HP: roll d20. 10+ = success, <10 = failure. 3 successes = stable
   (unconscious, no longer making saves). 3 failures = dead. Natural 20 = regain
   1 HP. Natural 1 = counts as 2 failures. Being healed above 0 HP clears all counts.
-  Currently: The system uses a homebrew "Second Wind" (choose to restore to full
-  HP or be permanently defeated). These are distinct systems — Second Wind is
-  a narrative choice; death saves are an automatic per-turn mechanic.
-  Note: Both systems can coexist. Second Wind could be retained as a separate
-  narrative beat (a once-per-combat dramatic recovery) while death saves govern
-  the standard 0-HP state. Requires design clarification before implementation.
-  Implementation path:
-    - Add deathSaveSuccesses Int (0) + deathSaveFailures Int (0) to
-      ActiveCombat_Participant.
-    - DECLARE/VALIDATE: if actor.currentHp == 0 and not inSecondWind and not isDefeated,
-      roll a death save instead of processing a normal action.
-    - APPLY: on a successful heal bringing HP > 0, clear both counters.
-    - Defeat path: 3 failures → isDefeated = true (same as current defeat logic).
-    - Stable path: 3 successes → new flag isStabilized = true; no further saves but
-      still cannot act until healed above 0.
+  Implemented:
+    - deathSaveSuccesses Int (0) + deathSaveFailures Int (0) on ActiveCombat_Participant.
+    - isUnconscious repurposed: true = currently making death saves at 0 HP.
+    - apply.ts: on damage knockdown (usesDeathSaves && !isAiControlled), sets
+      isUnconscious = true, resets both counters. Heal above 0 clears all three fields.
+    - advanceTurn: if next entity has isUnconscious = true, rolls d20 automatically.
+      Nat 20 → revive at 1 HP, entity gets real turn. 10+ → success (stable at 3).
+      <10 → failure (defeated at 3). Nat 1 → 2 failures. Turn passes to next entity
+      unless revived; DeathSaveEvent returned alongside next actor info.
+    - _processTurnEnd DoT path updated to set isUnconscious instead of waiting for
+      player choice.
+    - Second Wind accept/decline endpoints removed; no more player choice at 0 HP.
+  Note: usesDeathSaves on CombatInitiationType is now the death-saves gate — combats
+  with usesDeathSaves = false (e.g., spars) defeat player entities immediately at 0 HP.
 
 EXHAUSTION
   Complexity: Medium
+  Status: DEFERRED (v2)
   What: 6 stacking severity levels. Each level adds -2 to all d20 tests (attack
   rolls, saving throws, ability checks) and -5 ft. speed. At level 6: dead.
-  In 5.5e (2024) this replaces the more complex 2014 table with a single penalty
-  per level.
-  Currently: No exhaustion tracking; the stat effect system supports roll mods but
-  not a stacked-level counter with a death threshold.
-  Implementation path:
-    - Add exhaustionLevel Int (0) to ActiveCombat_Participant (or Entity for
-      persistence across combats — design decision).
-    - PRE_RESOLVE: apply -(exhaustionLevel * 2) to all d20 test roll modifiers.
-    - APPLY: if exhaustionLevel reaches 6, set isDefeated = true.
-    - Exhaustion grant/reduce: action type or out-of-combat endpoint to
-      increment/decrement the level.
-    - Display: show current level on the turn prompt.
+  Not in scope for v1 combat engine.
 
 
 ─────────────────────────────────────────────
@@ -274,6 +264,7 @@ HEROIC INSPIRATION  (5.5e)
 WEAPON MASTERY PROPERTIES  (5.5e)
 ─────────────────────────────────────────────
 
+  Status: DEFERRED (v2) — requires equipment slot system not yet built.
   Complexity: High (as a group; each property individually is Low-Medium)
   What: Each martial weapon has one Weapon Mastery property. A character can apply
   one mastery property per turn when they take the Attack action (or Extra Attack).

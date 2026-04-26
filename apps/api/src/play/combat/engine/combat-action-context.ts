@@ -64,7 +64,7 @@ export interface ProfileSnapshot {
 }
 
 export interface CombatMetaSnapshot {
-    canSecondWind:    boolean;
+    usesDeathSaves:   boolean;
     currentTurnOrder: number;
     isSpar:           boolean;
 }
@@ -86,7 +86,7 @@ export interface ActorParticipantSnapshot {
 
 export interface TargetParticipantSnapshot {
     id:             number;
-    inSecondWind:   boolean;
+    isUnconscious:  boolean;
     isAiControlled: boolean;
     hasUsedReaction: boolean;
     tempHp:                       number;

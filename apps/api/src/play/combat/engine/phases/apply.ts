@@ -11,10 +11,12 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
         const newHp     = ctx.target.currentHp - ctx.finalDamage - ctx.finalElementalDamage;
         const clampedHp = Math.max(0, newHp);
 
-        const canSecondWind   = ctx.combatMeta?.canSecondWind ?? false;
+        const usesDeathSaves   = ctx.combatMeta?.usesDeathSaves ?? false;
         const participant     = ctx.targetParticipant;
+        // Defeat immediately for AI or combats without death saves.
+        // With death saves enabled, defeat only comes from 3 failures (rolled in advanceTurn).
         const shouldDefeat    = newHp <= 0 && participant !== null
-            && (participant.isAiControlled || !canSecondWind || participant.inSecondWind);
+            && (participant.isAiControlled || !usesDeathSaves);
         const shouldKnockDown = newHp <= 0 && participant !== null && !shouldDefeat;
 
         await db.$transaction(async tx => {
@@ -33,6 +35,12 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
                 await tx.activeCombat_StatEffect.deleteMany({
                     where: { affectedParticipantId: participant!.id },
                 });
+            } else if (shouldKnockDown) {
+                // Enter death save state immediately; save rolls happen in advanceTurn.
+                await tx.activeCombat_Participant.update({
+                    where: { id: participant!.id },
+                    data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                });
             }
         });
 
@@ -45,9 +53,18 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
         ctx.hpAfter   = ctx.target.currentHp + actualHeal;
 
         if (actualHeal > 0) {
-            await db.entityStats.update({
-                where: { entityId: ctx.actualTargetId },
-                data:  { currentHp: ctx.hpAfter },
+            const wasKnockedDown = ctx.targetParticipant !== null && ctx.targetParticipant.isUnconscious;
+            await db.$transaction(async tx => {
+                await tx.entityStats.update({
+                    where: { entityId: ctx.actualTargetId! },
+                    data:  { currentHp: ctx.hpAfter! },
+                });
+                if (wasKnockedDown && ctx.hpAfter! > 0) {
+                    await tx.activeCombat_Participant.update({
+                        where: { id: ctx.targetParticipant!.id },
+                        data:  { isUnconscious: false, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                    });
+                }
             });
         }
     }

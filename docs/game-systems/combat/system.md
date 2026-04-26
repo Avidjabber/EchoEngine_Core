@@ -98,14 +98,14 @@ ActiveCombat_Participant tracks per-entity combat state:
                      participants; > 1 for mid-combat summons or character joins.
   dropTableId      — snapshotted from species.dropTableId at spawn; rolled on defeat.
   isPatrolLeader   — at most one participant per combat; gates patrol leader actions.
-  inSecondWind     — entity hit 0 HP and chose to recover rather than be defeated.
-                     HP and AC are read live from EntityStats and Species — nothing
-                     is snapshotted on the participant. At combat end: if
-                     inSecondWind = true and EntityStats.currentHp < 50% of EntityStats.maxHp,
-                     a second wind consequence condition is rolled and applied.
-                     NPC entities never trigger second wind.
+  isUnconscious    — entity is at 0 HP and actively making death saving throws.
+                     Set immediately when HP hits 0 (damage or DoT). Cleared when
+                     healed above 0, stabilised (3 successes), or revived (nat 20).
+                     NPC entities skip this state and are defeated immediately.
+                     Only applies in combat types where usesDeathSaves = true.
   hasFled          — entity fled; removed from turn order, earns no XP or rep.
-  isDefeated       — entity eliminated (0 HP without second wind, or NPC at 0 HP).
+  isDefeated       — entity eliminated (3 death save failures, AI at 0 HP, or combat
+                     type with usesDeathSaves = false).
 
 MID-COMBAT JOINS
 ─────────────────

@@ -5412,7 +5412,7 @@ model CombatInitiationType {
   canResultInDeath Boolean @default(false)  // spar = false; event and boss can be fatal
   isScripted       Boolean @default(false)  // boss = true; pre-defined encounter with specific enemies
   allowsFleeing    Boolean @default(false)  // spar = false; event = true; boss = true
-  canSecondWind    Boolean @default(true)   // entity can enter second wind state at low HP
+  usesDeathSaves    Boolean @default(true)   // entity can enter second wind state at low HP
 
   activeCombats ActiveCombat[]
 }
@@ -5662,12 +5662,12 @@ model ActiveCombat {
 //   At most one participant per combat may have this set.
 //
 // HP and AC are tracked on the entity directly — the combat engine reads EntityStats and Species live.
-// inSecondWind: true when the entity has triggered second wind (hit 0 HP and chosen to recover).
-//   At combat end: if inSecondWind = true and EntityStats.currentHp < 50% of EntityStats.maxHp,
-//   a second wind consequence condition (ConditionDef.isSecondWindConsequence = true) is rolled and applied.
-//   NPC entities never trigger second wind (isAiControlled = true entities are simply defeated at 0 HP).
+// isUnconscious: true when the entity is at 0 HP and actively making death saving throws.
+//   Set immediately when HP drops to 0 (apply phase / DoT path). Cleared when healed above 0,
+//   stabilised (3 successes), or revived by a natural 20. NPC entities skip this and are defeated instantly.
+//   Only applies when the combat initiationType has usesDeathSaves = true.
 // hasFled: entity chose to flee; removed from turn order, earns no exp or rep.
-// isDefeated: entity eliminated (declined second wind, hit 0 HP while inSecondWind, or NPC at 0 HP).
+// isDefeated: entity eliminated (3 death save failures, AI at 0 HP, or combat type with no death saves).
 // Guard and taunt state are not cached here — query ActiveCombat_BehaviorEffect directly
 // via effectTypeId (JOIN CombatEffectType ON name = "guard" / "taunt").
 model ActiveCombat_Participant {
@@ -5694,7 +5694,7 @@ model ActiveCombat_Participant {
 
   dropTableId Int?  // null for player entities; snapshotted from species.dropTableId at spawn time
 
-  inSecondWind   Boolean @default(false)
+  isUnconscious   Boolean @default(false)
   hasFled        Boolean @default(false)
   isDefeated     Boolean @default(false)
 
@@ -5702,6 +5702,8 @@ model ActiveCombat_Participant {
   tempHp                        Int     @default(0)       // temporary HP buffer; absorbs damage before real HP; not restored by healing
   legendaryResistancesRemaining Int?                      // null = not a legendary creature; >0 = can spend to auto-succeed a failed save
   helpRollMod                   String? @db.VarChar(20)   // "advantage" | "disadvantage" — set by the Help action; consumed on next attack roll; cleared at turn end
+  deathSaveSuccesses            Int     @default(0)       // number of successful death saves this knockdown (reset on revive/heal above 0)
+  deathSaveFailures             Int     @default(0)       // number of failed death saves this knockdown (3 = defeated)
 
   activeCombat    ActiveCombat              @relation(fields: [activeCombatId], references: [id], onDelete: Cascade)
   entity          Entity                    @relation(fields: [entityId],       references: [id], onDelete: Cascade)

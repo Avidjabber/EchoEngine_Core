@@ -82,24 +82,14 @@ export class PlayCombatController {
         return this.service.distributeCombatXp(id);
     }
 
-    @Post(':id/second-wind')
+    @Post(':id/mark-deceased')
     @HttpCode(HttpStatus.OK)
-    acceptSecondWind(
-        @Param('id', ParseIntPipe) id:   number,
+    markDeceased(
+        @Param('id', ParseIntPipe) _id:  number,
         @Body()                    body: { entityId: number },
     ) {
         if (!body?.entityId) throw new BadRequestException('entityId is required');
-        return this.service.acceptSecondWind(id, body.entityId);
-    }
-
-    @Post(':id/decline-second-wind')
-    @HttpCode(HttpStatus.OK)
-    declineSecondWind(
-        @Param('id', ParseIntPipe) id:   number,
-        @Body()                    body: { entityId: number },
-    ) {
-        if (!body?.entityId) throw new BadRequestException('entityId is required');
-        return this.service.declineSecondWind(id, body.entityId);
+        return this.service.markDeceased(body.entityId);
     }
 
     @Post(':id/flee')

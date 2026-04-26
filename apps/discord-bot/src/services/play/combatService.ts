@@ -42,17 +42,34 @@ export interface RoundEndEvent {
     knockedDown: boolean;
 }
 
+export interface DeathSaveEvent {
+    entityId:   number;
+    entityName: string;
+    roll:       number;
+    successes:  number;
+    failures:   number;
+    result:     'success' | 'failure' | 'revived' | 'stable' | 'defeated';
+}
+
+export interface MortallyWoundedCharacter {
+    entityId:    number;
+    name:        string;
+    userId:      string | null;
+    wasDefeated: boolean;
+}
+
 export interface AdvanceTurnResult {
-    combatEnded:            boolean;
-    turnEndEvents:          RoundEndEvent[];
-    nextEntityId:           number | null;
-    nextEntityName:         string | null;
-    nextUserId:             string | null;
-    isAiControlled:         boolean;
-    isAwaitingSecondWind:   boolean;
-    allowsFleeing:          boolean;
-    round:                  number;
-    winningAllyFactionId:   number | null;
+    combatEnded:          boolean;
+    turnEndEvents:        RoundEndEvent[];
+    nextEntityId:         number | null;
+    nextEntityName:       string | null;
+    nextUserId:           string | null;
+    isAiControlled:       boolean;
+    deathSaveEvent:       DeathSaveEvent | null;
+    allowsFleeing:        boolean;
+    round:                number;
+    winningAllyFactionId: number | null;
+    mortallyWounded:      MortallyWoundedCharacter[];
 }
 
 export interface CombatTargetEntity {
@@ -175,12 +192,8 @@ export function distributeCombatXp(combatId: number) {
     return apiClient.post<XpGrant[]>(`/play/combat/${combatId}/distribute-xp`, {});
 }
 
-export function acceptSecondWind(combatId: number, entityId: number) {
-    return apiClient.post<void>(`/play/combat/${combatId}/second-wind`, { entityId });
-}
-
-export function declineSecondWind(combatId: number, entityId: number) {
-    return apiClient.post<void>(`/play/combat/${combatId}/decline-second-wind`, { entityId });
+export function markDeceased(combatId: number, entityId: number) {
+    return apiClient.post<void>(`/play/combat/${combatId}/mark-deceased`, { entityId });
 }
 
 export function flee(combatId: number, entityId: number) {
