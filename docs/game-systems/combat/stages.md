@@ -70,22 +70,24 @@ Implementation order
 
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 
-Healing actions  [ ] GROUP 1
+Healing actions  [x] GROUP 1
   If profile.restoresHealth: roll heal dice, set ctx.diceRolls / ctx.rawHeal / ctx.finalHeal.
   APPLY phase extended: if ctx.finalHeal > 0, update HP upward (capped at maxHp).
   No hit roll — healing always lands.
   Outcome kind: 'heal'.
 
-Behavior effects  [ ] GROUP 2
+Behavior effects  [x] GROUP 2
   When a profile action's actionType has an associated CombatEffectType:
   upsert ActiveCombat_BehaviorEffect for the target with roundsRemaining.
-  _processTurnStart: decrement roundsRemaining, delete rows at 0.
+  At the start of the source participant's next turn: delete rows at roundsRemaining=1,
+  decrement all others. (Inlined into advanceTurn as an atomic transaction.)
 
-Stat effects on action use  [ ] GROUP 2
+Stat effects on action use  [x] GROUP 2
   ItemEquipmentProfile_StatEffect rows: roll applicationChance; if it fires,
   create ActiveCombat_StatEffect for the target.
-  _processTurnEnd: decrement roundsRemaining on stat effects; delete at 0.
-  DoT / HoT: fire at round end, write HP, emit RoundEndEvent rows.
+  At turn end: delete stat effect rows at roundsRemaining=1 (after their final DoT/HoT
+  tick fires), decrement all others. DoT/HoT fire at round end, write HP, emit
+  RoundEndEvent rows. Defeat-by-DoT is atomic (HP + isDefeated + deleteMany).
 
 Guard redirect  [x] GROUP 3
   TARGET phase interceptor, priority 0.
@@ -103,28 +105,32 @@ Guard absorption  [ ] GROUP 3 — DEFERRED TO STAGE 3
   This represents the guard absorbing a fraction of the incoming damage.
   Resistances and immunities (priority 1) then apply to the post-absorption amount.
 
-Stat effect modifiers  [ ] GROUP 3
-  PRE_RESOLVE interceptor.
+Stat effect modifiers  [x] GROUP 3
+  PRE_RESOLVE interceptor, priority 0 (runs before runPreResolve).
   Read ActiveCombat_StatEffect rows for the actor:
-    RollMod rows → add to ctx.hitModifier / ctx.damageModifier / ctx.healModifier
-    RollAdvantage rows → affect RESOLVE dice rolling (roll twice, keep high/low)
+    StatMod rows (null context) → adjust ctx.actor.stats values in-place so that
+      runPreResolve derives the stat modifier from the buffed/debuffed stat value
+    RollMod rows → add directly to ctx.hitModifier / ctx.damageModifier / ctx.healModifier
+    RollAdvantage rows → set ctx.hitAdvantage / ctx.damageAdvantage / ctx.healAdvantage
+      (advantage and disadvantage cancel each other out per D&D 5e rules)
 
-Damage resistance / vulnerability / immunity  [ ] GROUP 3
-  APPLY interceptor, priority 0.
-  Read ActiveCombat_StatEffect rows for the target (type: damage_modifier).
-  Scale ctx.finalDamage before APPLY writes HP:
-    resistance: × 0.5
-    vulnerability: × 2.0
-    immunity: set to 0
+Damage resistance / vulnerability / immunity  [x] GROUP 3
+  APPLY interceptor, priority 1 (runs after guard absorption at priority 0).
+  Read ActiveCombat_StatEffect rows for the target's damage modifier effects.
+  Scale ctx.finalDamage and ctx.finalElementalDamage per matching damageTypeId:
+    resistance:    Math.floor(amount × modifier)  — typically 0.5
+    vulnerability: Math.floor(amount × modifier)  — typically 2.0
+    immunity:      0 (isImmune flag overrides modifier)
+  Untyped damage (null damageTypeId) bypasses all scaling.
 
-Reactions  [ ] GROUP 4
+Reactions  [x] GROUP 4
   POST_APPLY phase.
-  After a hit resolves, check if the defender has equipped reaction-category actions.
-  If so: populate ctx.pendingReaction; return to service layer.
+  After a hit resolves, check if the defender has equipped, non-suppressed,
+  non-cooldown reaction-category actions. If so: populate ctx.pendingReaction.
   Service layer returns pendingReaction to controller; bot posts reaction prompt.
-  processReaction is fully wired (currently a no-op stub).
+  processReaction is fully wired.
 
-Pre-combat effects  [ ] GROUP 4
+Pre-combat effects  [x] GROUP 4
   At startCombat: for each participant, query Entity_PreCombatEffect rows.
   Create ActiveCombat_StatEffect rows for active pre-combat buffs.
   Create cooldown rows if equipmentProfileId is set.

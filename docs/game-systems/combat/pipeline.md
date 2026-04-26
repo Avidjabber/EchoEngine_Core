@@ -70,9 +70,11 @@ This means phases VALIDATE through RESOLVE are fully deterministic given the
 same context input. They can be unit-tested by constructing a context directly
 — no database required.
 
-Interceptors must respect this discipline. An interceptor that needs additional
-data should run at DECLARE (reads) or APPLY (writes); it must not issue reads
-during PRE_RESOLVE or RESOLVE, and must not issue writes during DECLARE or TARGET.
+This discipline applies to phase runners (the runXxx functions). Interceptors
+are DB-capable at any phase — all six Stage 2 interceptors issue reads. The
+constraint on interceptors is: do not issue DB writes from an interceptor unless
+it is scoped to APPLY or END, and only for effects it owns (e.g., a future
+guard-absorption interceptor clearing its buffer after reducing ctx.finalDamage).
 
 
 ─────────────────────────────────────────────
@@ -190,7 +192,7 @@ STAGE 2 INTERCEPTORS  (STAGE_2_INTERCEPTORS array in interceptors/index.ts)
   VALIDATE    0         stun-check.interceptor.ts         Abort if actor has deniesActions effect
   VALIDATE    1         taunt-check.interceptor.ts        Abort if actor is taunted and wrong target
   TARGET      0         guard-redirect.interceptor.ts     Redirect actualTargetId to guarding entity
-  PRE_RESOLVE 0         stat-effect-modifiers.interceptor Adjust actor stats + roll mods from effects
+  PRE_RESOLVE 0         stat-effect-modifiers.interceptor.ts Adjust actor stats + roll mods from effects
   PRE_RESOLVE 1         ac-mods.interceptor.ts            Adjust targetAC from target's stat effects
   APPLY       1         damage-modifiers.interceptor.ts   Scale finalDamage/finalElementalDamage by
                                                           resistance, vulnerability, or immunity
