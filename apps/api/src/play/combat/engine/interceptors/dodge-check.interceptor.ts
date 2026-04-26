@@ -27,7 +27,9 @@ export const dodgeCheckInterceptor: CombatInterceptor = {
         ctx.hitAdvantage = ctx.hitAdvantage === 'advantage' ? null : 'disadvantage';
 
         // Dodging entity also has advantage on DEX saving throws.
-        if (ctx.profile?.savingThrowStatName?.toLowerCase() === 'dexterity') {
+        // 'dexterity' must match the ItemStat.name value and the key used in target.stats.
+        const DEX_STAT = 'dexterity';
+        if (ctx.profile?.savingThrowStatName?.toLowerCase() === DEX_STAT) {
             ctx.saveAdvantage = ctx.saveAdvantage === 'disadvantage' ? null : 'advantage';
         }
     },

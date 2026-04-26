@@ -1,11 +1,12 @@
 import type { CombatActionContext } from '../combat-action-context';
 import type { PipelineServices } from '../combat-pipeline';
+import { rollDice } from '../../../../utils/dice';
 
 // Writes the action log record, applies cooldowns, decrements item uses,
 // and applies behavior/stat effects produced by the action.
 // All writes are wrapped in a single transaction so a mid-phase failure
 // cannot leave combat state partially written.
-export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices): Promise<void> {
+export async function runEnd(ctx: CombatActionContext, { db, roller }: PipelineServices): Promise<void> {
     const { input, profile } = ctx;
     if (!profile) return;
 
@@ -32,8 +33,8 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
         })
         : [];
 
-    // Apply probability rolls outside the transaction — randomness is not a consistency concern.
-    const rolledEffects = profileStatEffects.filter(r => Math.random() <= r.applicationChance);
+    // Apply probability rolls outside the transaction — safe to read outside since it's pure randomness.
+    const rolledEffects = profileStatEffects.filter(r => rollDice(1, 100, roller)[0]! / 100 <= r.applicationChance);
 
     await db.$transaction(async tx => {
         // ── Action log ────────────────────────────────────────────────────────
@@ -104,17 +105,20 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
         // ── Behavior effect ───────────────────────────────────────────────────
         // For damage actions: save halves damage but does not skip the effect.
         // For non-damage actions: a successful save skips the effect entirely.
+        const isGuard = profile.behaviorEffectRedirectsDamage;
+        const isTaunt = profile.behaviorEffectForcesTargeting;
+        // Guards apply to the actor (self-buff); taunts apply to the target (forced targeting).
+        // Normal effects apply to the target only — no actor fallback when target is absent.
+        const affectedId = isGuard
+            ? ctx.actorParticipantId
+            : isTaunt
+                ? (ctx.targetParticipant?.id ?? ctx.actorParticipantId)
+                : ctx.targetParticipant?.id ?? null;
+
         if (profile.behaviorEffectTypeId && profile.durationRounds > 0 && ctx.actorParticipantId !== null
+            && affectedId !== null
             && (!profile.dealsDamage || ctx.isHit)
             && (profile.dealsDamage  || !ctx.savedSuccessfully)) {
-            const isGuard = profile.behaviorEffectRedirectsDamage;
-            const isTaunt = profile.behaviorEffectForcesTargeting;
-
-            const affectedId = isTaunt
-                ? (ctx.targetParticipant?.id ?? ctx.actorParticipantId)
-                : isGuard
-                    ? ctx.actorParticipantId
-                    : (ctx.targetParticipant?.id ?? ctx.actorParticipantId);
 
             const linkedId = isGuard
                 ? (ctx.targetParticipant?.id ?? null)

@@ -1,10 +1,11 @@
 import type { CombatActionContext } from '../combat-action-context';
 import type { PipelineServices } from '../combat-pipeline';
+import { rollDice } from '../../../../utils/dice';
 
 // POST_APPLY phase — after a successful hit, checks whether the defender has
 // equipped reaction actions and populates ctx.pendingReaction if so.
 // Skipped for AI-controlled defenders, AoE actions, and reaction chains.
-export async function runPostApply(ctx: CombatActionContext, { db }: PipelineServices): Promise<void> {
+export async function runPostApply(ctx: CombatActionContext, { db, roller }: PipelineServices): Promise<void> {
     if (!ctx.isHit || !ctx.profile?.dealsDamage || !ctx.targetParticipant || ctx.actualTargetId === null) return;
     if (ctx.defeated || ctx.knockedDown) return;
     if (ctx.targetParticipant.isAiControlled) return;
@@ -67,7 +68,7 @@ export async function runPostApply(ctx: CombatActionContext, { db }: PipelineSer
 
         const conStat = ctx.target?.stats.constitution ?? 10;
         const conMod  = Math.floor((conStat - 10) / 2);
-        const roll    = Math.floor(Math.random() * 20) + 1;
+        const roll    = rollDice(1, 20, roller)[0]!;
         const dc      = Math.max(10, Math.floor(totalDamage / 2));
         const total   = roll + conMod;
         const saved   = total >= dc;

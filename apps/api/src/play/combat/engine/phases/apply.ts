@@ -37,9 +37,10 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
                 });
             } else if (shouldKnockDown) {
                 // Enter death save state immediately; save rolls happen in advanceTurn.
+                // Clear concentratingOnEffectId now so a later heal + hit doesn't trigger a phantom save.
                 await tx.activeCombat_Participant.update({
                     where: { id: participant!.id },
-                    data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                    data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0, concentratingOnEffectId: null },
                 });
                 // Losing consciousness immediately breaks concentration.
                 if (ctx.targetParticipant?.concentratingOnEffectId) {
