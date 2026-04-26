@@ -26,9 +26,9 @@ What's included:
   - Item use limits (usesRemaining, dailyUsesRemaining decremented per use)
   - Action log (ActiveCombat_Action) written every action
   - XP distribution on combat end (event-combat pool + spar/fight reward rows)
-  - processReaction stub (no-op; HTTP surface exists for bot compatibility)
-  - _processTurnEnd: cooldown tick only
-  - _processTurnStart: no-op stub
+  - processReaction HTTP surface exists; fully wired in stage 2
+  - _processTurnEnd: cooldown tick only (stat effect decrement, DoT/HoT added in stage 2)
+  - _processTurnStart: behavior effect decrement (inlined into advanceTurn transaction in stage 2)
 
 What is explicitly deferred:
   - Guard redirect (stage 2)
@@ -59,9 +59,10 @@ Implementation order
     [x] Stat effects on action use
 
   Group 3 (consumers of Group 2):
-    [x] Guard redirect
+    [x] Guard redirect (TARGET phase — redirection only)
     [x] Stat effect modifiers
     [x] Damage resistance / vulnerability / immunity
+    [ ] Guard absorption (APPLY phase — deferred to stage 3)
 
   Group 4 (heaviest — requires Groups 2 and 3):
     [x] Reactions
@@ -86,13 +87,21 @@ Stat effects on action use  [ ] GROUP 2
   _processTurnEnd: decrement roundsRemaining on stat effects; delete at 0.
   DoT / HoT: fire at round end, write HP, emit RoundEndEvent rows.
 
-Guard redirect  [ ] GROUP 3
+Guard redirect  [x] GROUP 3
   TARGET phase interceptor, priority 0.
   Read ActiveCombat_BehaviorEffect for guard effects protecting input.targetEntityId.
   If found: set ctx.actualTargetId → guarding entity, ctx.wasRedirected = true,
   ctx.originalTargetName = name of original target.
-  Guard partially absorbs damage → reduce ctx.finalDamage in APPLY interceptor
-  by guard's percentModifier before HP is written.
+  Damage is fully dealt to the redirected target (guarding entity).
+  Partial absorption of that damage is a separate APPLY interceptor — see stage 3.
+
+Guard absorption  [ ] GROUP 3 — DEFERRED TO STAGE 3
+  APPLY phase interceptor, priority 0 (runs before damage-modifiers at priority 1).
+  When ctx.wasRedirected is true: read the guard effect's percentModifier from
+  ActiveCombat_BehaviorEffect. Reduce ctx.finalDamage to:
+    ctx.finalDamage = Math.floor(ctx.finalDamage * percentModifier)
+  This represents the guard absorbing a fraction of the incoming damage.
+  Resistances and immunities (priority 1) then apply to the post-absorption amount.
 
 Stat effect modifiers  [ ] GROUP 3
   PRE_RESOLVE interceptor.
@@ -122,8 +131,13 @@ Pre-combat effects  [ ] GROUP 4
 
 
 ─────────────────────────────────────────────
-STAGE 3 — SAVING THROWS, AOE, JOINS  (future)
+STAGE 3 — GUARD ABSORPTION, SAVING THROWS, AOE, JOINS  (future)
 ─────────────────────────────────────────────
+
+Guard absorption  (carried over from stage 2 — see GROUP 3 entry above)
+  APPLY phase interceptor, priority 0.
+  When ctx.wasRedirected is true: read percentModifier from the guard
+  BehaviorEffect and reduce ctx.finalDamage proportionally before APPLY writes HP.
 
 Saving throws
   RESOLVE phase extended: profiles with savingThrowStat trigger a defender roll
