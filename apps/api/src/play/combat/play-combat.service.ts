@@ -969,7 +969,7 @@ export class PlayCombatService {
         const [actorPart, combat, existingCount, actorEntity] = await Promise.all([
             this.db.activeCombat_Participant.findFirst({
                 where:  { activeCombatId: combatId, entityId: actorEntityId },
-                select: { id: true, turnOrder: true, isDefeated: true, hasFled: true, allyFactionId: true },
+                select: { id: true, turnOrder: true, isDefeated: true, hasFled: true, isUnconscious: true, allyFactionId: true },
             }),
             this.db.activeCombat.findUnique({
                 where:  { id: combatId },
@@ -985,7 +985,7 @@ export class PlayCombatService {
         ]);
 
         if (!actorPart || !combat || !actorEntity) throw new Error('Combat data could not be loaded.');
-        if (actorPart.isDefeated || actorPart.hasFled)     throw new Error('You cannot act.');
+        if (actorPart.isDefeated || actorPart.hasFled || actorPart.isUnconscious) throw new Error('You cannot act.');
         if (actorPart.turnOrder !== combat.currentTurnOrder) throw new Error('It is not this entity\'s turn.');
 
         const stun = await this.db.activeCombat_BehaviorEffect.findFirst({
@@ -1509,9 +1509,10 @@ export class PlayCombatService {
             this.db.activeCombat_Participant.findUnique({
                 where:  { id: participantId },
                 select: {
-                    entityId:       true,
-                    isAiControlled: true,
-                    isUnconscious:   true,
+                    entityId:                true,
+                    isAiControlled:          true,
+                    isUnconscious:           true,
+                    concentratingOnEffectId: true,
                     entity: { select: { name: true, stats: { select: { currentHp: true, maxHp: true } } } },
                 },
             }),
@@ -1555,16 +1556,22 @@ export class PlayCombatService {
                     // Eligible for death saves if player-controlled, combat allows it, and not already saving.
                     const canStartDeathSaves = !participant.isAiControlled && usesDeathSaves && !participant.isUnconscious;
                     if (canStartDeathSaves) {
-                        await this.db.$transaction([
-                            this.db.entityStats.update({
+                        const concentratingId = participant.concentratingOnEffectId;
+                        await this.db.$transaction(async tx => {
+                            await tx.entityStats.update({
                                 where: { entityId: participant.entityId },
                                 data:  { currentHp: 0 },
-                            }),
-                            this.db.activeCombat_Participant.update({
+                            });
+                            await tx.activeCombat_Participant.update({
                                 where: { id: participantId },
-                                data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0 },
-                            }),
-                        ]);
+                                data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0, concentratingOnEffectId: null },
+                            });
+                            if (concentratingId) {
+                                await tx.activeCombat_BehaviorEffect.delete({
+                                    where: { id: concentratingId },
+                                }).catch(() => null);
+                            }
+                        });
                         events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: false, knockedDown: true });
                     } else {
                         await this.db.$transaction([
@@ -1609,6 +1616,12 @@ export class PlayCombatService {
                 where: { entityId: participant.entityId },
                 data:  { currentHp },
             });
+            if (participant.isUnconscious && currentHp > 0) {
+                await this.db.activeCombat_Participant.update({
+                    where: { id: participantId },
+                    data:  { isUnconscious: false, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                });
+            }
         }
 
         return events;

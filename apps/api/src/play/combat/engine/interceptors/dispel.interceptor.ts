@@ -12,7 +12,8 @@ export const dispelInterceptor: CombatInterceptor = {
 
     async apply(ctx: CombatActionContext, db: PrimaryDatabaseService): Promise<void> {
         if (!ctx.profile?.behaviorEffectRemovesEffects) return;
-        if (!ctx.isHit && ctx.profile.dealsDamage) return;
+        if (ctx.profile.dealsDamage && !ctx.isHit) return;
+        if (!ctx.profile.dealsDamage && ctx.savedSuccessfully) return;
         if (ctx.targetParticipant === null) return;
 
         const targetId = ctx.targetParticipant.id;

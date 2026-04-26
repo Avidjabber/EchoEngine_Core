@@ -43,7 +43,7 @@ export async function runResolve(ctx: CombatActionContext, { roller }: PipelineS
 
         if (ctx.isHit && profile.elementalDiceCount && profile.elementalDiceSides) {
             const diceCount          = ctx.isCritical ? profile.elementalDiceCount * 2 : profile.elementalDiceCount;
-            ctx.elementalDiceRolls   = rollDice(diceCount, profile.elementalDiceSides, roller);
+            ctx.elementalDiceRolls   = rollDiceWithAdvantage(diceCount, profile.elementalDiceSides, ctx.damageAdvantage, roller);
             ctx.rawElementalDamage   = ctx.elementalDiceRolls.reduce((a, b) => a + b, 0);
             // Resistance interceptors scale finalElementalDamage in APPLY.
             ctx.finalElementalDamage = ctx.rawElementalDamage;
@@ -71,7 +71,7 @@ export async function runResolve(ctx: CombatActionContext, { roller }: PipelineS
         }
 
         // Legendary resistance: AI-controlled bosses auto-spend a charge to flip a failed save.
-        if (!ctx.savedSuccessfully && (ctx.targetParticipant?.legendaryResistancesRemaining ?? 0) > 0) {
+        if (!ctx.savedSuccessfully && ctx.targetParticipant?.isAiControlled && (ctx.targetParticipant?.legendaryResistancesRemaining ?? 0) > 0) {
             ctx.savedSuccessfully       = true;
             ctx.legendaryResistanceUsed = true;
             if (profile.dealsDamage) {
