@@ -33,12 +33,13 @@ export interface AvailableAction {
 }
 
 export interface RoundEndEvent {
-    kind:       'dot' | 'hot';
-    entityId:   number;
-    entityName: string;
-    amount:     number;
-    hpAfter:    number;
-    defeated:   boolean;
+    kind:        'dot' | 'hot';
+    entityId:    number;
+    entityName:  string;
+    amount:      number;
+    hpAfter:     number;
+    defeated:    boolean;
+    knockedDown: boolean;
 }
 
 export interface AdvanceTurnResult {

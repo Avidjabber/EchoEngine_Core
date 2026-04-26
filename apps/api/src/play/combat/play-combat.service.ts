@@ -94,12 +94,13 @@ export interface XpGrant {
 }
 
 export interface RoundEndEvent {
-    kind:       'dot' | 'hot';
-    entityId:   number;
-    entityName: string;
-    amount:     number;
-    hpAfter:    number;
-    defeated:   boolean;
+    kind:        'dot' | 'hot';
+    entityId:    number;
+    entityName:  string;
+    amount:      number;
+    hpAfter:     number;
+    defeated:    boolean;
+    knockedDown: boolean;  // true when HP hits 0 and entity is eligible for second wind
 }
 
 export interface AdvanceTurnResult {
@@ -257,10 +258,11 @@ export class PlayCombatService {
                 return { entityId: e.entityId, allyFactionId: teamIdx + 1, initiativeRoll: roll };
             }),
         );
+        const tiebreakers = new Map(participants.map(p => [p.entityId, Math.random()]));
         participants.sort((a, b) =>
             b.initiativeRoll - a.initiativeRoll ||
             (dexByEntity.get(b.entityId) ?? 10) - (dexByEntity.get(a.entityId) ?? 10) ||
-            Math.random() - 0.5,
+            tiebreakers.get(b.entityId)! - tiebreakers.get(a.entityId)!,
         );
 
         const eligibleEntityIds = participants.map(p => p.entityId);
@@ -513,13 +515,6 @@ export class PlayCombatService {
         const canSecondWind = combat.initiationType.canSecondWind;
         const allowsFleeing = combat.initiationType.allowsFleeing;
 
-        const currentIdx    = active.findIndex(p => p.entityId === currentEntityId);
-        const nextIdx       = active.length > 0 ? (currentIdx + 1) % active.length : 0;
-        const roundBoundary = active.length > 0 && nextIdx <= currentIdx;
-
-        let newRound = combat.currentRound;
-        if (roundBoundary) newRound++;
-
         const endingParticipant = active.find(p => p.entityId === currentEntityId);
         const turnEndEvents = endingParticipant
             ? await this._processTurnEnd(combatId, endingParticipant.id, canSecondWind)
@@ -547,6 +542,11 @@ export class PlayCombatService {
             orderBy: { turnOrder: 'asc' },
         });
 
+        // roundBoundary: no remaining participant has a higher turnOrder than the current one,
+        // meaning the next turn wraps back to the start of initiative — a new round.
+        const roundBoundary = freshActive.length > 0 && !freshActive.some(p => p.turnOrder > combat.currentTurnOrder);
+        const newRound      = roundBoundary ? combat.currentRound + 1 : combat.currentRound;
+
         const factions = new Set(freshActive.map(p => p.allyFactionId));
         if (factions.size < 2) {
             const winningAllyFactionId = factions.size === 1 ? [...factions][0]! : null;
@@ -564,8 +564,7 @@ export class PlayCombatService {
             return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, isAwaitingSecondWind: false, allowsFleeing, round: newRound, winningAllyFactionId };
         }
 
-        const currentTurnOrder = active.find(p => p.entityId === currentEntityId)?.turnOrder ?? 0;
-        const next             = freshActive.find(p => p.turnOrder > currentTurnOrder) ?? freshActive[0]!;
+        const next = freshActive.find(p => p.turnOrder > combat.currentTurnOrder) ?? freshActive[0]!;
 
         await this._processTurnStart(combatId, next.id);
 
@@ -850,7 +849,7 @@ export class PlayCombatService {
         };
     }
 
-    private async _processTurnEnd(_combatId: number, participantId: number, _canSecondWind: boolean): Promise<RoundEndEvent[]> {
+    private async _processTurnEnd(_combatId: number, participantId: number, canSecondWind: boolean): Promise<RoundEndEvent[]> {
         // Collect active DoT/HoT effects before decrementing so effects at roundsRemaining=1 still fire.
         const activeEffects = await this.db.activeCombat_StatEffect.findMany({
             where: { affectedParticipantId: participantId },
@@ -912,17 +911,21 @@ export class PlayCombatService {
                     data:  { currentHp: Math.max(0, currentHp) },
                 });
 
-                let defeated = false;
                 if (currentHp <= 0) {
-                    await this.db.activeCombat_Participant.update({
-                        where: { id: participantId },
-                        data:  { isDefeated: true },
-                    });
-                    defeated = true;
+                    const canUseSecondWind = !participant.isAiControlled && canSecondWind && !participant.inSecondWind;
+                    if (canUseSecondWind) {
+                        events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: false, knockedDown: true });
+                    } else {
+                        await this.db.activeCombat_Participant.update({
+                            where: { id: participantId },
+                            data:  { isDefeated: true },
+                        });
+                        events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: true, knockedDown: false });
+                    }
+                    return events;
                 }
 
-                events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: Math.max(0, currentHp), defeated });
-                if (defeated) return events;
+                events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: currentHp, defeated: false, knockedDown: false });
             }
 
             for (const hot of effect.effectDef.healOverTime) {
@@ -939,7 +942,7 @@ export class PlayCombatService {
                 }
 
                 if (actualHeal > 0) {
-                    events.push({ kind: 'hot', entityId: participant.entityId, entityName: participant.entity.name, amount: actualHeal, hpAfter: currentHp, defeated: false });
+                    events.push({ kind: 'hot', entityId: participant.entityId, entityName: participant.entity.name, amount: actualHeal, hpAfter: currentHp, defeated: false, knockedDown: false });
                 }
             }
         }

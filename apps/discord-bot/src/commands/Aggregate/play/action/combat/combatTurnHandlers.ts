@@ -180,9 +180,9 @@ async function postTurnEndEvents(
     if (events.length === 0) return;
     const lines = events.map(e => {
         if (e.kind === 'dot') {
-            return e.defeated
-                ? `-# **${e.entityName}** takes ${e.amount} damage and is defeated.`
-                : `-# **${e.entityName}** takes ${e.amount} damage (${e.hpAfter} HP remaining).`;
+            if (e.defeated)    return `-# **${e.entityName}** takes ${e.amount} damage and is defeated.`;
+            if (e.knockedDown) return `-# **${e.entityName}** takes ${e.amount} damage and is knocked down — second wind pending.`;
+            return `-# **${e.entityName}** takes ${e.amount} damage (${e.hpAfter} HP remaining).`;
         }
         return `-# **${e.entityName}** heals for ${e.amount} (${e.hpAfter} HP remaining).`;
     });
@@ -205,7 +205,7 @@ async function processAdvanceResult(
 
     await postTurnEndEvents(channel, advance.turnEndEvents);
 
-    // Stage 1: AI entities pass their turns here. Stage 3 wires the NPC_AI pipeline phase
+    // Stage 1–3: AI entities pass their turns here. Stage 4 wires the NPC_AI pipeline phase
     // to replace this loop with actual action selection.
     let current = advance;
     while (current.isAiControlled && !current.combatEnded) {

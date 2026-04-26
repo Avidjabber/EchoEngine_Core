@@ -16,6 +16,7 @@ export const statEffectModifiersInterceptor: CombatInterceptor = {
             select: {
                 effectDef: {
                     select: {
+                        statMods:      { select: { value: true, context: true, stat: { select: { name: true } } } },
                         rollMods:      { select: { value: true, rollType: { select: { name: true } } } },
                         rollAdvantages: { select: { isDisadvantage: true, rollType: { select: { name: true } } } },
                     },
@@ -26,6 +27,20 @@ export const statEffectModifiersInterceptor: CombatInterceptor = {
         let hitAdv = false,  hitDisadv = false;
         let dmgAdv = false,  dmgDisadv = false;
         let healAdv = false, healDisadv = false;
+
+        // Apply flat stat modifiers before roll modifiers so derived roll bonuses in pre-resolve
+        // pick up the adjusted stat value.
+        if (ctx.actor) {
+            for (const effect of effects) {
+                for (const mod of effect.effectDef.statMods) {
+                    if (mod.context !== null) continue; // contextual mods (Stage 3+)
+                    const key = mod.stat.name.toLowerCase();
+                    if (key in ctx.actor.stats) {
+                        ctx.actor.stats[key] = (ctx.actor.stats[key] ?? 10) + mod.value;
+                    }
+                }
+            }
+        }
 
         for (const effect of effects) {
             for (const mod of effect.effectDef.rollMods) {
