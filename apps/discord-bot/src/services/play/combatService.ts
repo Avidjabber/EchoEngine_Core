@@ -162,17 +162,18 @@ export interface ConcentrationSaveEvent {
 }
 
 export interface ActionResult {
-    actionId:               number;
-    actionLabel:            string;
-    actorName:              string;
-    targetName:             string;
-    actualTargetName:       string;
-    wasRedirected:          boolean;
-    outcome:                ActionResultOutcome;
-    appliedEffects:         string[];
-    pendingReaction?:       PendingReaction;
-    concentrationSaveEvent: ConcentrationSaveEvent | null;
-    summonedEntities:       SummonedEntity[];
+    actionId:                number;
+    actionLabel:             string;
+    actorName:               string;
+    targetName:              string;
+    actualTargetName:        string;
+    wasRedirected:           boolean;
+    outcome:                 ActionResultOutcome;
+    appliedEffects:          string[];
+    pendingReaction?:        PendingReaction;
+    legendaryResistanceUsed: boolean;
+    concentrationSaveEvent:  ConcentrationSaveEvent | null;
+    summonedEntities:        SummonedEntity[];
 }
 
 export function processAction(

@@ -41,6 +41,7 @@ export interface ProfileSnapshot {
     elementalDiceSides:      number | null;
     elementalDamageTypeId:   number | null;
     elementalDamageTypeName: string | null;
+    attackCount:      number;
     isReactionAction: boolean;
     savingThrowStatName: string | null;
     saveDC:              number;

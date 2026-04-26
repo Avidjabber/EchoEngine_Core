@@ -138,22 +138,26 @@ CONCENTRATION
 ─────────────────────────────────────────────
 
   Complexity: Medium
+  Status: IMPLEMENTED (2026-04-26)
   What: Certain powerful abilities require concentration to maintain their effect.
   While concentrating: taking damage forces a CON saving throw (DC = max(10,
   half damage taken)). On failure, the concentrating effect ends immediately.
   Starting a new concentration effect ends the previous one.
-  Currently: No concentration flag on behavior effects or stat effects; no damage-
-  triggered save mechanic outside of the existing savingThrowStat on profiles.
-  Implementation path:
-    - Add requiresConcentration Bool to CombatStatEffectDef and/or
-      CombatEffectType (behavior effects).
-    - Add concentratingOnStatEffectId / concentratingOnBehaviorEffectId to
-      ActiveCombat_Participant (at most one concentration effect active at a time).
-    - POST_APPLY interceptor (or extend APPLY): if damage > 0 and defender is
-      concentrating, trigger a CON save. DC = max(10, floor(damage / 2)).
-      On failure: delete the concentrated effect row and clear the concentrating field.
-    - On applying a concentration effect: clear any prior concentration and set
-      the new concentratingOn field.
+  Implemented:
+    - CombatEffectType.isConcentration Bool — marks a behavior effect type as
+      requiring concentration to maintain.
+    - ActiveCombat_Participant.concentratingOnEffectId Int? @unique — FK to the
+      ActiveCombat_BehaviorEffect the participant is currently maintaining. Nulled
+      automatically via ON DELETE SET NULL when the effect is deleted.
+    - end.ts: if requiresConcentration, deletes prior concentration before upsert,
+      then sets concentratingOnEffectId on the actor to the new effect ID.
+    - apply.ts: losing consciousness (knockdown) immediately deletes the concentration
+      effect and lets the FK cascade clear the field.
+    - post-apply.ts: after any damaging hit, if the target has concentratingOnEffectId,
+      rolls DC max(10, floor(totalDamage / 2)) CON save. On failure, deletes the
+      effect (cascade clears the field). Sets ctx.concentrationSaveEvent.
+    - ActionResult.concentrationSaveEvent surfaced to the bot; rendered in the
+      action result component with pass/fail text and DC.
 
 
 ─────────────────────────────────────────────
@@ -162,7 +166,7 @@ BOSS / ELITE MECHANICS
 
 LEGENDARY RESISTANCE
   Complexity: Low-Medium
-  Status: PARTIALLY IMPLEMENTED (2026-04-26)
+  Status: IMPLEMENTED (engine complete, 2026-04-26)
   What: Boss-tier creatures can choose to succeed on a failed saving throw,
   consuming one of a limited daily pool (typically 3 per long rest). Declared
   after the roll result is known.
@@ -171,10 +175,12 @@ LEGENDARY RESISTANCE
     - RESOLVE phase: AI-controlled targets auto-consume a charge when they fail a save.
       savedSuccessfully flips to true, damage is halved (standard success result).
     - END phase: decrements legendaryResistancesRemaining in the action transaction.
-    - ctx.legendaryResistanceUsed surfaced in ActionResult.
-  Deferred:
+    - ctx.legendaryResistanceUsed surfaced in ActionResult and displayed on the bot.
+    - legendaryResistancesMax Int? on Species — null = not legendary; N = charges per combat.
+    - startCombat + _spawnNpcEntity: seed legendaryResistancesRemaining from species at
+      combat start / entity spawn.
+  Deferred (v2):
     - Player-controlled boss prompt (same Discord reaction-prompt pattern).
-    - Population of legendaryResistancesRemaining from Species at combat start.
     - Long-rest reset (out-of-combat endpoint).
 
 LEGENDARY ACTIONS
@@ -203,22 +209,23 @@ ATTACK VARIATIONS
 
 MULTIATTACK
   Complexity: Medium-High
+  Status: IMPLEMENTED (engine complete, 2026-04-26)
   What: Creatures and high-level characters can make multiple separate attack rolls
   as a single Main Action. Each roll independently crits or misses, applies its own
   damage, and may trigger reactions separately. Cooldown/use tracking fires only once
   for the parent action.
-  Currently: One action = one pipeline call = one hit roll. The AoE system runs
-  multiple pipeline calls per action but against different targets, not multiple
-  rolls against the same target.
-  Implementation path:
-    - Add attackCount Int (default 1) to ItemEquipmentProfile.
-    - processAction: if attackCount > 1, loop the RESOLVE → APPLY sub-chain N times
-      within the same pipeline call. DECLARE / VALIDATE / END still run once.
-    - Each sub-attack gets its own hit roll, crit determination, and damage roll.
-    - Reactions: only the first hit triggers a reaction check (or design choice:
-      each hit independently). For simplicity a first-hit-only rule is recommended.
-    - aoeIndex semantics: null = single-target (possibly multiattack), 0+ = AoE batch.
-      These are orthogonal and can coexist.
+  Implemented:
+    - attackCount Int @default(1) on ItemEquipmentProfile (pre-existing schema field).
+    - attackCount added to ProfileSnapshot and loaded in declare.ts.
+    - processAction: pre-fetches attackCount alongside AoE scope detection. If
+      attackCount > 1, runs N full pipeline calls — first with aoeIndex: null (full
+      tracking, reactions enabled), subsequent with aoeIndex: 1 (skips cooldown/use
+      decrement, suppresses reactions via existing aoeIndex gate in post-apply.ts).
+    - Returns ActionResult[] for multiattack (same shape as AoE); returns single
+      ActionResult for attackCount = 1 (no change to callers).
+    - Each sub-attack gets its own hit roll, crit determination, damage roll, and
+      action log entry. Knockdown/defeat state is carried forward via DB reads on
+      each pipeline invocation.
 
 TWO-WEAPON FIGHTING
   Complexity: Medium

@@ -812,8 +812,9 @@ model Species {
   hpDiceCount      Int @default(2)   // number of dice rolled for HP (e.g. 2 for 2d10)
   hpDiceSides      Int @default(10)  // sides per die (e.g. 10 for 2d10)
 
-  combatRating    Float @default(1.0)   // CR used by encounter generator to fill a max-CR budget
-  combatXpReward  Int   @default(50)    // Combat discipline XP granted to each victor on defeating an entity of this species
+  combatRating             Float @default(1.0)   // CR used by encounter generator to fill a max-CR budget
+  combatXpReward           Int   @default(50)    // Combat discipline XP granted to each victor on defeating an entity of this species
+  legendaryResistancesMax  Int?                  // null = not legendary; N = charges granted at combat start (replenished each combat)
 
   dropTableId Int?
   dropTable   DropTable? @relation(fields: [dropTableId], references: [id], onDelete: SetNull)
@@ -5822,7 +5823,7 @@ model ActiveCombat_Action {
   saveRoll          Int?      // defender's raw d20 for a saving throw (null = no save triggered)
   savedSuccessfully Boolean?  // true = save succeeded and damage was halved; null = no save triggered
 
-  secondWindTriggered Boolean  @default(false)
+  knockedDown         Boolean  @default(false)
 
   wasRedirected          Boolean @default(false)  // true when this attack was intercepted by a guard effect
   originalTargetEntityId Int?                     // entity originally targeted before guard redirect; null when wasRedirected = false

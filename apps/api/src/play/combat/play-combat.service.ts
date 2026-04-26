@@ -289,6 +289,12 @@ export class PlayCombatService {
 
         const eligibleEntityIds = participants.map(p => p.entityId);
 
+        const legendaryRows = await this.db.entity.findMany({
+            where:  { id: { in: eligibleEntityIds } },
+            select: { id: true, species: { select: { legendaryResistancesMax: true } } },
+        });
+        const legendaryMaxMap = new Map(legendaryRows.map(r => [r.id, r.species?.legendaryResistancesMax ?? null]));
+
         const combat = await this.db.$transaction(async (tx) => {
             const created = await tx.activeCombat.create({
                 data: {
@@ -296,9 +302,10 @@ export class PlayCombatService {
                     initiationTypeId: initiationType.id,
                     participants: {
                         create: participants.map((p, i) => ({
-                            entityId:      p.entityId,
-                            allyFactionId: p.allyFactionId,
-                            turnOrder:     i + 1,
+                            entityId:                    p.entityId,
+                            allyFactionId:               p.allyFactionId,
+                            turnOrder:                   i + 1,
+                            legendaryResistancesRemaining: legendaryMaxMap.get(p.entityId) ?? null,
                         })),
                     },
                 },
@@ -804,11 +811,11 @@ export class PlayCombatService {
         targetEntityId: number | null,
         roundNumber:    number,
     ): Promise<ActionResult | ActionResult[]> {
-        // Detect AoE before running the pipeline, and fetch actor faction + guildId in parallel.
+        // Detect AoE and multiattack before running the pipeline, and fetch actor faction + guildId in parallel.
         const [scopeRow, actorPart] = await Promise.all([
             this.db.itemEquipmentProfile.findUnique({
                 where:  { id: profileId },
-                select: { targetScope: { select: { targetsSingle: true, targetsAllies: true, targetsEnemies: true } } },
+                select: { attackCount: true, targetScope: { select: { targetsSingle: true, targetsAllies: true, targetsEnemies: true } } },
             }),
             this.db.activeCombat_Participant.findFirst({
                 where:  { activeCombatId: combatId, entityId: actorEntityId },
@@ -860,7 +867,8 @@ export class PlayCombatService {
             return results;
         }
 
-        // Single-target path.
+        // Single-target path (also handles multiattack when attackCount > 1).
+        const attackCount = scopeRow?.attackCount ?? 1;
         const ctx = await runCombatPipeline(
             { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber, isReaction: false, aoeIndex: null },
             { db: this.db, roller: defaultRoller },
@@ -869,12 +877,24 @@ export class PlayCombatService {
         if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Action aborted');
         const result = this._toActionResult(ctx);
 
-        // Summons fire after a successful single-target action — requires a hit for damaging actions.
+        // Summons fire after the first attack — requires a hit for damaging actions.
         if (ctx.profile?.summonSpeciesId && (!ctx.profile.dealsDamage || ctx.isHit) && actorPart) {
             result.summonedEntities.push(...await this._executeSummons(ctx.profile.summonSpeciesId, ctx.profile.summonDiceCount, ctx.profile.summonDiceSides, actorPart.activeCombat.guildId, combatId, actorPart.allyFactionId, roundNumber));
         }
 
-        return result;
+        if (attackCount <= 1) return result;
+
+        // Multiattack: run additional attacks with aoeIndex: 1 (skips cooldown/use decrement, suppresses reactions).
+        const results: ActionResult[] = [result];
+        for (let i = 1; i < attackCount; i++) {
+            const extraCtx = await runCombatPipeline(
+                { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber, isReaction: false, aoeIndex: 1 },
+                { db: this.db, roller: defaultRoller },
+                COMBAT_INTERCEPTORS,
+            );
+            if (!extraCtx.aborted) results.push(this._toActionResult(extraCtx));
+        }
+        return results;
     }
 
     async processReaction(
@@ -1224,9 +1244,10 @@ export class PlayCombatService {
                 baseIntelligence: true,
                 baseWisdom:       true,
                 baseCharisma:     true,
-                hpDiceCount:      true,
-                hpDiceSides:      true,
-                dropTableId:      true,
+                hpDiceCount:              true,
+                hpDiceSides:              true,
+                dropTableId:              true,
+                legendaryResistancesMax:  true,
                 defaultLoadout:   {
                     select: {
                         itemId:    true,
@@ -1312,13 +1333,14 @@ export class PlayCombatService {
 
             await tx.activeCombat_Participant.create({
                 data: {
-                    activeCombatId: combatId,
-                    entityId:       entity.id,
+                    activeCombatId:               combatId,
+                    entityId:                     entity.id,
                     allyFactionId,
                     turnOrder,
-                    isAiControlled: true,
-                    joinedAtRound:  roundNumber,
-                    dropTableId:    species.dropTableId ?? null,
+                    isAiControlled:               true,
+                    joinedAtRound:                roundNumber,
+                    dropTableId:                  species.dropTableId ?? null,
+                    legendaryResistancesRemaining: species.legendaryResistancesMax ?? null,
                 },
             });
 

@@ -52,7 +52,7 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
                 ...(ctx.finalElementalDamage > 0 ? { elementalDamageRoll: ctx.rawElementalDamage, elementalDamageDealt: ctx.finalElementalDamage } : {}),
                 ...(ctx.wasRedirected ? { wasRedirected: true, originalTargetEntityId: ctx.input.targetEntityId }                           : {}),
                 ...(ctx.finalHeal          > 0 ? { healDealt: ctx.finalHeal }                                                             : {}),
-                ...(ctx.knockedDown        ? { secondWindTriggered: true }                                                                 : {}),
+                ...(ctx.knockedDown        ? { knockedDown: true }                                                                        : {}),
                 ...(ctx.absorbedDamage     > 0    ? { absorbedDamage: ctx.absorbedDamage }                                              : {}),
                 ...(ctx.saveRoll          !== null ? { saveRoll: ctx.saveRoll, savedSuccessfully: ctx.savedSuccessfully ?? false }        : {}),
             },

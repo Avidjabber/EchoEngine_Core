@@ -32,7 +32,7 @@ function actionSummary(action: AvailableAction): string {
 }
 
 export function buildActionResultComponents(result: ActionResult): object[] {
-    const { actorName, targetName, actualTargetName, wasRedirected, actionLabel, outcome, appliedEffects, summonedEntities, concentrationSaveEvent } = result;
+    const { actorName, targetName, actualTargetName, wasRedirected, actionLabel, outcome, appliedEffects, summonedEntities, legendaryResistanceUsed, concentrationSaveEvent } = result;
 
     const redirectNote = wasRedirected ? ` → **${actualTargetName}** *(guard)*` : '';
     const header = `**${actorName}** used **${actionLabel}** on **${targetName}**${redirectNote}`;
@@ -96,6 +96,9 @@ export function buildActionResultComponents(result: ActionResult): object[] {
     if (summonedEntities.length > 0) {
         const names = summonedEntities.map(e => `**${e.name}**`).join(', ');
         body += `\n-# ✦ Summoned: ${names}`;
+    }
+    if (legendaryResistanceUsed) {
+        body += `\n-# 👑 Legendary Resistance used — save forced to succeed.`;
     }
     if (concentrationSaveEvent) {
         const { entityName, total, dc, saved, effectName } = concentrationSaveEvent;
