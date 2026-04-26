@@ -58,6 +58,7 @@ export interface ProfileSnapshot {
     behaviorEffectRedirectsDamage: boolean;
     behaviorEffectForcesTargeting: boolean;
     behaviorEffectRemovesEffects:  boolean;
+    requiresConcentration:         boolean;
     durationRounds:                number;
     flatModifier:                  number | null;
     percentModifier:               number | null;
@@ -81,7 +82,8 @@ export interface TargetSnapshot {
 }
 
 export interface ActorParticipantSnapshot {
-    helpRollMod: 'advantage' | 'disadvantage' | null;
+    helpRollMod:            'advantage' | 'disadvantage' | null;
+    concentratingOnEffectId: number | null;
 }
 
 export interface TargetParticipantSnapshot {
@@ -89,8 +91,20 @@ export interface TargetParticipantSnapshot {
     isUnconscious:  boolean;
     isAiControlled: boolean;
     hasUsedReaction: boolean;
-    tempHp:                       number;
+    tempHp:                        number;
     legendaryResistancesRemaining: number | null;
+    concentratingOnEffectId:       number | null;
+}
+
+// ── Concentration save event set by POST_APPLY ───────────────────────────────
+
+export interface ConcentrationSaveEvent {
+    entityName: string;
+    roll:       number;  // raw d20
+    total:      number;  // roll + CON modifier
+    dc:         number;  // max(10, half of total damage)
+    saved:      boolean;
+    effectName: string;  // CombatEffectType.name of the concentration effect
 }
 
 // ── Reaction data set by POST_APPLY ──────────────────────────────────────────
@@ -170,7 +184,8 @@ export interface CombatActionContext {
     legendaryResistanceUsed: boolean;  // AI boss auto-spent a legendary resistance charge this action
 
     // POST_APPLY
-    pendingReaction: PendingReaction | null;
+    pendingReaction:        PendingReaction | null;
+    concentrationSaveEvent: ConcentrationSaveEvent | null;
 
     // END
     actionId:              number | null;

@@ -43,13 +43,40 @@ export async function runPostApply(ctx: CombatActionContext, { db }: PipelineSer
         .filter(s => s.chosenProfile && !cooldownIds.has(s.chosenProfile.id))
         .map(s => ({ profileId: s.chosenProfile!.id, storedItemId: s.id, label: s.chosenProfile!.label ?? 'Reaction' }));
 
-    if (reactionProfiles.length === 0) return;
+    if (reactionProfiles.length > 0) {
+        ctx.pendingReaction = {
+            defenderEntityId:   ctx.actualTargetId,
+            defenderEntityName: ctx.target!.name,
+            defenderUserId:     ctx.target!.userId,
+            attackerEntityId:   ctx.input.actorEntityId,
+            reactionProfiles,
+        };
+    }
 
-    ctx.pendingReaction = {
-        defenderEntityId:   ctx.actualTargetId,
-        defenderEntityName: ctx.target!.name,
-        defenderUserId:     ctx.target!.userId,
-        attackerEntityId:   ctx.input.actorEntityId,
-        reactionProfiles,
-    };
+    // ── Concentration save ────────────────────────────────────────────────────
+    // Triggered whenever a concentrating entity takes damage (before knockdown/defeat).
+    // DC = max(10, half of total damage dealt). CON modifier applied to d20 roll.
+    const concentratingOnEffectId = ctx.targetParticipant?.concentratingOnEffectId ?? null;
+    const totalDamage = ctx.finalDamage + ctx.finalElementalDamage;
+    if (concentratingOnEffectId !== null && totalDamage > 0) {
+        const effect = await db.activeCombat_BehaviorEffect.findUnique({
+            where:  { id: concentratingOnEffectId },
+            select: { effectType: { select: { name: true } } },
+        });
+        const effectName = effect?.effectType.name ?? 'concentration';
+
+        const conStat = ctx.target?.stats.constitution ?? 10;
+        const conMod  = Math.floor((conStat - 10) / 2);
+        const roll    = Math.floor(Math.random() * 20) + 1;
+        const dc      = Math.max(10, Math.floor(totalDamage / 2));
+        const total   = roll + conMod;
+        const saved   = total >= dc;
+
+        if (!saved) {
+            // Deleting the effect cascades: concentratingOnEffectId on the participant is nulled via FK.
+            await db.activeCombat_BehaviorEffect.delete({ where: { id: concentratingOnEffectId } }).catch(() => null);
+        }
+
+        ctx.concentrationSaveEvent = { entityName: ctx.target!.name, roll, total, dc, saved, effectName };
+    }
 }

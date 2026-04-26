@@ -152,17 +152,27 @@ export interface SummonedEntity {
     turnOrder:     number;
 }
 
+export interface ConcentrationSaveEvent {
+    entityName: string;
+    roll:       number;
+    total:      number;
+    dc:         number;
+    saved:      boolean;
+    effectName: string;
+}
+
 export interface ActionResult {
-    actionId:         number;
-    actionLabel:      string;
-    actorName:        string;
-    targetName:       string;
-    actualTargetName: string;
-    wasRedirected:    boolean;
-    outcome:          ActionResultOutcome;
-    appliedEffects:   string[];
-    pendingReaction?: PendingReaction;
-    summonedEntities: SummonedEntity[];
+    actionId:               number;
+    actionLabel:            string;
+    actorName:              string;
+    targetName:             string;
+    actualTargetName:       string;
+    wasRedirected:          boolean;
+    outcome:                ActionResultOutcome;
+    appliedEffects:         string[];
+    pendingReaction?:       PendingReaction;
+    concentrationSaveEvent: ConcentrationSaveEvent | null;
+    summonedEntities:       SummonedEntity[];
 }
 
 export function processAction(

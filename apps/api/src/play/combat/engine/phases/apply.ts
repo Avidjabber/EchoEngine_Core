@@ -41,6 +41,12 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
                     where: { id: participant!.id },
                     data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0 },
                 });
+                // Losing consciousness immediately breaks concentration.
+                if (ctx.targetParticipant?.concentratingOnEffectId) {
+                    await tx.activeCombat_BehaviorEffect.delete({
+                        where: { id: ctx.targetParticipant.concentratingOnEffectId },
+                    }).catch(() => null);
+                }
             }
         });
 

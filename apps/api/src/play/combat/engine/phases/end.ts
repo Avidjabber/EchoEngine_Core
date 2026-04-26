@@ -122,7 +122,16 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
                     ? ctx.actorParticipantId
                     : null;
 
-            await tx.activeCombat_BehaviorEffect.upsert({
+            // Concentration: break the actor's prior concentration before applying the new effect.
+            // This prevents two concentration effects from being active at once.
+            const priorConcentrationId = profile.requiresConcentration ? (ctx.actorParticipant?.concentratingOnEffectId ?? null) : null;
+            if (priorConcentrationId !== null) {
+                await tx.activeCombat_BehaviorEffect.delete({
+                    where: { id: priorConcentrationId },
+                }).catch(() => null);
+            }
+
+            const newEffect = await tx.activeCombat_BehaviorEffect.upsert({
                 where:  { affectedParticipantId_effectTypeId: { affectedParticipantId: affectedId, effectTypeId: profile.behaviorEffectTypeId } },
                 create: {
                     activeCombatId:        input.combatId,
@@ -141,7 +150,16 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
                     flatModifier:        profile.flatModifier,
                     percentModifier:     profile.percentModifier,
                 },
+                select: { id: true },
             });
+
+            // Concentration: link the new effect to the actor so concentration saves know what to check.
+            if (profile.requiresConcentration) {
+                await tx.activeCombat_Participant.update({
+                    where: { id: ctx.actorParticipantId },
+                    data:  { concentratingOnEffectId: newEffect.id },
+                });
+            }
 
             ctx.appliedBehaviorEffect = {
                 effectName:  profile.behaviorEffectName ?? 'Unknown',

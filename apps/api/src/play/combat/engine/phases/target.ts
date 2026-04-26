@@ -17,7 +17,7 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
         }),
         db.activeCombat_Participant.findFirst({
             where:  { activeCombatId: ctx.input.combatId, entityId: ctx.actualTargetId },
-            select: { id: true, isUnconscious: true, isAiControlled: true, hasUsedReaction: true, tempHp: true, legendaryResistancesRemaining: true },
+            select: { id: true, isUnconscious: true, isAiControlled: true, hasUsedReaction: true, tempHp: true, legendaryResistancesRemaining: true, concentratingOnEffectId: true },
         }),
         db.entity_Storage.findUnique({
             where:  { entityId: ctx.actualTargetId },
@@ -63,8 +63,9 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
             isUnconscious:    participantRow.isUnconscious,
             isAiControlled:  participantRow.isAiControlled,
             hasUsedReaction: participantRow.hasUsedReaction,
-            tempHp:                       participantRow.tempHp,
+            tempHp:                        participantRow.tempHp,
             legendaryResistancesRemaining: participantRow.legendaryResistancesRemaining,
+            concentratingOnEffectId:       participantRow.concentratingOnEffectId ?? null,
         };
     }
 }

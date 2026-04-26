@@ -83,6 +83,7 @@ function createContext(input: CombatActionInput): CombatActionContext {
         helpConsumed:        false,
         legendaryResistanceUsed: false,
         pendingReaction:        null,
+        concentrationSaveEvent: null,
         actionId:               null,
         appliedBehaviorEffect:  null,
         appliedStatEffectNames: [],

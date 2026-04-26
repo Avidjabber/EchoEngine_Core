@@ -5465,6 +5465,7 @@ model CombatEffectType {
   forcesTargeting       Boolean @default(false)
   removesEffects        Boolean @default(false)
   grantsHitDisadvantage Boolean @default(false)
+  isConcentration       Boolean @default(false)  // caster must maintain concentration; only one concentration effect active at a time per caster
 
   combatEffects        ConditionDef_CombatEffect[]
   profileBehaviors      ItemEquipmentProfile[]        @relation("ProfileBehaviorEffect")
@@ -5704,6 +5705,7 @@ model ActiveCombat_Participant {
   helpRollMod                   String? @db.VarChar(20)   // "advantage" | "disadvantage" — set by the Help action; consumed on next attack roll; cleared at turn end
   deathSaveSuccesses            Int     @default(0)       // number of successful death saves this knockdown (reset on revive/heal above 0)
   deathSaveFailures             Int     @default(0)       // number of failed death saves this knockdown (3 = defeated)
+  concentratingOnEffectId       Int?  @unique              // ID of the ActiveCombat_BehaviorEffect this participant is concentrating on; nulled automatically if the effect is deleted
 
   activeCombat    ActiveCombat              @relation(fields: [activeCombatId], references: [id], onDelete: Cascade)
   entity          Entity                    @relation(fields: [entityId],       references: [id], onDelete: Cascade)
@@ -5712,6 +5714,7 @@ model ActiveCombat_Participant {
   behaviorEffects        ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectTarget")
   linkedBehaviors        ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectLinked")
   sourcedBehaviorEffects ActiveCombat_BehaviorEffect[] @relation("BehaviorEffectSource")
+  concentratingOnEffect  ActiveCombat_BehaviorEffect?  @relation("ConcentratorLink", fields: [concentratingOnEffectId], references: [id], onDelete: SetNull)
   statEffects       ActiveCombat_StatEffect[]     @relation("StatEffectTarget")
   statEffectsCaused ActiveCombat_StatEffect[]     @relation("StatEffectSource")
 
@@ -5773,11 +5776,12 @@ model ActiveCombat_BehaviorEffect {
   flatModifier     Int?    // flat modification value; usage depends on effect type (see comment above)
   percentModifier  Float?  // fractional modification value (0.0–1.0); usage depends on effect type
 
-  activeCombat        ActiveCombat              @relation(fields: [activeCombatId],    references: [id], onDelete: Cascade)
-  effectType          CombatEffectType          @relation("ActiveBehaviorEffectType",  fields: [effectTypeId],           references: [id], onDelete: Restrict)
-  affectedParticipant ActiveCombat_Participant  @relation("BehaviorEffectTarget",      fields: [affectedParticipantId],  references: [id], onDelete: Cascade)
-  linkedParticipant   ActiveCombat_Participant? @relation("BehaviorEffectLinked",       fields: [linkedParticipantId],    references: [id], onDelete: Cascade)
-  sourceParticipant   ActiveCombat_Participant? @relation("BehaviorEffectSource",       fields: [sourceParticipantId],    references: [id], onDelete: SetNull)
+  activeCombat         ActiveCombat              @relation(fields: [activeCombatId],    references: [id], onDelete: Cascade)
+  effectType           CombatEffectType          @relation("ActiveBehaviorEffectType",  fields: [effectTypeId],           references: [id], onDelete: Restrict)
+  affectedParticipant  ActiveCombat_Participant  @relation("BehaviorEffectTarget",      fields: [affectedParticipantId],  references: [id], onDelete: Cascade)
+  linkedParticipant    ActiveCombat_Participant? @relation("BehaviorEffectLinked",       fields: [linkedParticipantId],    references: [id], onDelete: Cascade)
+  sourceParticipant    ActiveCombat_Participant? @relation("BehaviorEffectSource",       fields: [sourceParticipantId],    references: [id], onDelete: SetNull)
+  concentratingParticipant ActiveCombat_Participant? @relation("ConcentratorLink")
 
   @@unique([affectedParticipantId, effectTypeId])
   @@index([activeCombatId])

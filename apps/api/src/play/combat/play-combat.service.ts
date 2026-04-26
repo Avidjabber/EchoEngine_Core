@@ -3,7 +3,7 @@ import { PrimaryDatabaseService } from '../../database/primary.service';
 import { runCombatPipeline } from './engine/combat-pipeline';
 import { COMBAT_INTERCEPTORS } from './engine/interceptors';
 import { defaultRoller, rollDice } from '../../utils/dice';
-import type { CombatActionContext, PendingReaction } from './engine/combat-action-context';
+import type { CombatActionContext, PendingReaction, ConcentrationSaveEvent } from './engine/combat-action-context';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ export interface AvailableAction {
     isOnCooldown:   boolean;
 }
 
-export type { PendingReaction } from './engine/combat-action-context';
+export type { PendingReaction, ConcentrationSaveEvent } from './engine/combat-action-context';
 
 export type ActionResultOutcome =
     | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; tempHpDrained: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
@@ -84,6 +84,7 @@ export interface ActionResult {
     outcome:                ActionResultOutcome;
     appliedEffects:         string[];
     pendingReaction?:       PendingReaction;
+    concentrationSaveEvent: ConcentrationSaveEvent | null;
     summonedEntities:       SummonedEntity[];
 }
 
@@ -982,6 +983,7 @@ export class PlayCombatService {
                 legendaryResistanceUsed: false,
                 outcome:                 { kind: 'behavior', effectName: 'Dodge', guardedName: null, rounds: 1 },
                 appliedEffects:          [],
+                concentrationSaveEvent:  null,
                 summonedEntities:        [],
             };
         }
@@ -1038,6 +1040,7 @@ export class PlayCombatService {
             legendaryResistanceUsed: false,
             outcome:                 { kind: 'behavior', effectName: effectLabel, guardedName: null, rounds: 1 },
             appliedEffects:          [],
+            concentrationSaveEvent:  null,
             summonedEntities:        [],
         };
     }
@@ -1418,6 +1421,7 @@ export class PlayCombatService {
             outcome,
             appliedEffects,
             pendingReaction:        ctx.pendingReaction ?? undefined,
+            concentrationSaveEvent: ctx.concentrationSaveEvent ?? null,
             summonedEntities:       [],
         };
     }
