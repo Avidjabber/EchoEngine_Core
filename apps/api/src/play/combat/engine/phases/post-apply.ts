@@ -8,6 +8,7 @@ export async function runPostApply(ctx: CombatActionContext, { db }: PipelineSer
     if (!ctx.isHit || !ctx.profile?.dealsDamage || !ctx.targetParticipant || ctx.actualTargetId === null) return;
     if (ctx.defeated || ctx.knockedDown) return;
     if (ctx.targetParticipant.isAiControlled) return;
+    if (ctx.input.aoeIndex !== null) return;  // reactions are suppressed for AoE actions
 
     const suppressed = await db.activeCombat_BehaviorEffect.findFirst({
         where: {

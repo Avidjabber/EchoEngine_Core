@@ -93,6 +93,8 @@ Source type: apps/api/src/play/combat/engine/combat-action-context.ts
   input.targetEntityId   — entity ID the actor aimed at (null = self or no target)
   input.roundNumber      — current round number for log ordering
   input.isReaction       — true when this invocation is a reaction (not a main turn action)
+  input.aoeIndex         — null = single-target; 0 = first AoE target (full END, no reactions);
+                           1+ = subsequent AoE target (skip cooldown/use tracking, no reactions)
 
   DECLARE
   ────────

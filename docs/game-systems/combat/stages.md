@@ -153,11 +153,18 @@ Saving throws  [x]
   Context: saveRoll, saveTotal, savedSuccessfully set in RESOLVE.
   Halving applies to both finalDamage and finalElementalDamage before APPLY interceptors run.
 
-AoE / multi-target
-  Pipeline currently processes one target per call. Multi-target actions will
-  require either: (a) repeated pipeline runs with the same input per target,
-  or (b) a TARGET-phase that loops over all valid targets and applies RESOLVE /
-  APPLY per entity, accumulating results into a results array on the context.
+AoE / multi-target  [x]
+  Service-level orchestration (Option A): pipeline stays single-target; processAction
+  runs one pipeline call per discovered target and returns ActionResult[].
+  Detection: profile's CombatTargetScope has targetsEnemies or targetsAllies (and not
+  targetsSingle). Targets are all non-defeated, non-fled participants of the matching
+  faction(s), ordered by turnOrder.
+  input.aoeIndex tracks position in the batch:
+    null  = single-target (no change to existing behavior)
+    0     = first AoE target: full END processing, reactions suppressed
+    1+    = follow-up targets: cooldown/use tracking skipped, reactions suppressed
+  Actor-side abort on the first target (off-turn, stunned) fails the whole AoE.
+  Subsequent aborts (e.g. taunt mismatch on a specific target) skip that target only.
 
 Mid-combat joins and summons
   joinCombat endpoint: roll initiative, insert participant at correct turnOrder,

@@ -666,15 +666,60 @@ export class PlayCombatService {
         storedItemId:   number,
         targetEntityId: number | null,
         roundNumber:    number,
-    ): Promise<ActionResult> {
+    ): Promise<ActionResult | ActionResult[]> {
+        // Detect AoE before running the pipeline: check whether the profile's target
+        // scope hits multiple entities automatically (allies, enemies, or both).
+        const scopeRow = await this.db.itemEquipmentProfile.findUnique({
+            where:  { id: profileId },
+            select: { targetScope: { select: { targetsSingle: true, targetsAllies: true, targetsEnemies: true } } },
+        });
+        const scope = scopeRow?.targetScope ?? null;
+        const isAoe = scope !== null
+            && (scope.targetsAllies || scope.targetsEnemies)
+            && !scope.targetsSingle;
+
+        if (isAoe) {
+            const actorPart = await this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: actorEntityId },
+                select: { allyFactionId: true },
+            });
+            if (!actorPart) throw new Error('Actor not found in combat');
+
+            // Build faction filter: allies share allyFactionId, enemies differ.
+            const factionFilter = (scope.targetsAllies && scope.targetsEnemies)
+                ? {}
+                : scope.targetsAllies
+                ? { allyFactionId:       actorPart.allyFactionId }
+                : { allyFactionId: { not: actorPart.allyFactionId } };
+
+            const targets = await this.db.activeCombat_Participant.findMany({
+                where:   { activeCombatId: combatId, isDefeated: false, hasFled: false, ...factionFilter },
+                orderBy: { turnOrder: 'asc' },
+                select:  { entityId: true },
+            });
+
+            const results: ActionResult[] = [];
+            for (let i = 0; i < targets.length; i++) {
+                const ctx = await runCombatPipeline(
+                    { combatId, actorEntityId, profileId, storedItemId, targetEntityId: targets[i]!.entityId, roundNumber, isReaction: false, aoeIndex: i },
+                    { db: this.db, roller: defaultRoller },
+                    COMBAT_INTERCEPTORS,
+                );
+                // Actor-side abort on the first target (off-turn, stunned, etc.) fails the whole AoE.
+                if (i === 0 && ctx.aborted) throw new Error(ctx.abortReason ?? 'Action aborted');
+                if (ctx.aborted) continue;
+                results.push(this._toActionResult(ctx));
+            }
+            return results;
+        }
+
+        // Single-target path.
         const ctx = await runCombatPipeline(
-            { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber, isReaction: false },
+            { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber, isReaction: false, aoeIndex: null },
             { db: this.db, roller: defaultRoller },
             COMBAT_INTERCEPTORS,
         );
-
         if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Action aborted');
-
         return this._toActionResult(ctx);
     }
 
@@ -687,7 +732,7 @@ export class PlayCombatService {
         roundNumber:      number,
     ): Promise<ActionResult> {
         const ctx = await runCombatPipeline(
-            { combatId, actorEntityId: defenderEntityId, profileId, storedItemId, targetEntityId: attackerEntityId, roundNumber, isReaction: true },
+            { combatId, actorEntityId: defenderEntityId, profileId, storedItemId, targetEntityId: attackerEntityId, roundNumber, isReaction: true, aoeIndex: null },
             { db: this.db, roller: defaultRoller },
             COMBAT_INTERCEPTORS,
         );

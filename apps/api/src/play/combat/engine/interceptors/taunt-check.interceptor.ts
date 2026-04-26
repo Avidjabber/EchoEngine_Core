@@ -27,6 +27,14 @@ export const tauntCheckInterceptor: CombatInterceptor = {
 
         if (!taunt) return;
 
+        // AoE actions cannot be used while taunted regardless of which target is currently
+        // being processed — a taunted actor must use a single-target action against the taunter.
+        if (ctx.input.aoeIndex !== null) {
+            ctx.aborted     = true;
+            ctx.abortReason = 'You are taunted and must target the taunting entity.';
+            return;
+        }
+
         const forcedTargetEntityId = taunt.linkedParticipant?.entityId ?? null;
         if (forcedTargetEntityId !== null && ctx.input.targetEntityId !== forcedTargetEntityId) {
             ctx.aborted     = true;

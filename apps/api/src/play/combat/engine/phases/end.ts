@@ -59,25 +59,30 @@ export async function runEnd(ctx: CombatActionContext, { db }: PipelineServices)
         });
         ctx.actionId = action.id;
 
-        // ── Cooldown + item uses (independent, run in parallel) ───────────────
-        const sideWrites: Promise<unknown>[] = [
-            tx.storedItem.updateMany({
-                where: { id: input.storedItemId, usesRemaining:      { not: null } },
-                data:  { usesRemaining:      { decrement: 1 } },
-            }),
-            tx.storedItem.updateMany({
-                where: { id: input.storedItemId, dailyUsesRemaining: { not: null } },
-                data:  { dailyUsesRemaining: { decrement: 1 } },
-            }),
-        ];
-        if (profile.cooldownRounds > 0 && ctx.actorParticipantId !== null) {
-            sideWrites.push(tx.activeCombat_Participant_ActionCooldown.upsert({
-                where:  { participantId_equipmentProfileId: { participantId: ctx.actorParticipantId, equipmentProfileId: input.profileId } },
-                create: { participantId: ctx.actorParticipantId, equipmentProfileId: input.profileId, roundsRemaining: profile.cooldownRounds },
-                update: { roundsRemaining: profile.cooldownRounds },
-            }));
+        // ── Cooldown + item uses ──────────────────────────────────────────────
+        // Skipped for AoE follow-up targets (aoeIndex > 0) — these are tracked
+        // once on the first pipeline run (aoeIndex = 0 or null) only.
+        const sideWrites: Promise<unknown>[] = [];
+        if (input.aoeIndex === null || input.aoeIndex === 0) {
+            sideWrites.push(
+                tx.storedItem.updateMany({
+                    where: { id: input.storedItemId, usesRemaining:      { not: null } },
+                    data:  { usesRemaining:      { decrement: 1 } },
+                }),
+                tx.storedItem.updateMany({
+                    where: { id: input.storedItemId, dailyUsesRemaining: { not: null } },
+                    data:  { dailyUsesRemaining: { decrement: 1 } },
+                }),
+            );
+            if (profile.cooldownRounds > 0 && ctx.actorParticipantId !== null) {
+                sideWrites.push(tx.activeCombat_Participant_ActionCooldown.upsert({
+                    where:  { participantId_equipmentProfileId: { participantId: ctx.actorParticipantId, equipmentProfileId: input.profileId } },
+                    create: { participantId: ctx.actorParticipantId, equipmentProfileId: input.profileId, roundsRemaining: profile.cooldownRounds },
+                    update: { roundsRemaining: profile.cooldownRounds },
+                }));
+            }
         }
-        await Promise.all(sideWrites);
+        if (sideWrites.length > 0) await Promise.all(sideWrites);
 
         // ── Behavior effect ───────────────────────────────────────────────────
         if (profile.behaviorEffectTypeId && profile.durationRounds > 0 && ctx.actorParticipantId !== null

@@ -6,6 +6,10 @@ export interface CombatActionInput {
     targetEntityId: number | null;
     roundNumber:    number;
     isReaction:     boolean;
+    // null  = single-target action (full pipeline, reactions allowed)
+    // 0     = first target in an AoE batch (full END, no reactions)
+    // 1+    = subsequent AoE target (skip cooldown/use tracking, no reactions)
+    aoeIndex:       number | null;
 }
 
 // ── Snapshots loaded by DECLARE ───────────────────────────────────────────────
