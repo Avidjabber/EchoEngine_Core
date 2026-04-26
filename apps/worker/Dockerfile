@@ -30,4 +30,4 @@ COPY apps/worker/ ./apps/worker/
 ENV NODE_ENV=production
 WORKDIR /app/apps/worker
 
-CMD ["npx", "tsx", "src/ticker.js"]
+CMD ["npx", "tsx", "src/core/ticker.js"]
