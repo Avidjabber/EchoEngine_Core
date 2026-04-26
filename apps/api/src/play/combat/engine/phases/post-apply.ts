@@ -23,19 +23,13 @@ export async function runPostApply(ctx: CombatActionContext, { db }: PipelineSer
     });
     if (!entityStorage) return;
 
-    const [cooldowns, combatRow] = await Promise.all([
-        db.activeCombat_Participant_ActionCooldown.findMany({
-            where:  { participantId: ctx.targetParticipant.id },
-            select: { equipmentProfileId: true },
-        }),
-        db.activeCombat.findUnique({
-            where:  { id: ctx.input.combatId },
-            select: { initiationType: { select: { name: true } } },
-        }),
-    ]);
+    const cooldowns   = await db.activeCombat_Participant_ActionCooldown.findMany({
+        where:  { participantId: ctx.targetParticipant.id },
+        select: { equipmentProfileId: true },
+    });
 
     const cooldownIds = new Set(cooldowns.map(c => c.equipmentProfileId));
-    const isSpar      = combatRow?.initiationType.name === 'spar';
+    const isSpar      = ctx.combatMeta?.isSpar ?? false;
 
     const equipped = await db.storedItem.findMany({
         where: {
@@ -59,15 +53,10 @@ export async function runPostApply(ctx: CombatActionContext, { db }: PipelineSer
 
     if (reactionProfiles.length === 0) return;
 
-    const entity = await db.entity.findUnique({
-        where:  { id: ctx.actualTargetId },
-        select: { userId: true },
-    });
-
     ctx.pendingReaction = {
         defenderEntityId:   ctx.actualTargetId,
         defenderEntityName: ctx.target!.name,
-        defenderUserId:     entity?.userId ?? null,
+        defenderUserId:     ctx.target!.userId,
         attackerEntityId:   ctx.input.actorEntityId,
         reactionProfiles,
     };

@@ -13,9 +13,10 @@ export const guardRedirectInterceptor: CombatInterceptor = {
 
         const guard = await db.activeCombat_BehaviorEffect.findFirst({
             where: {
-                activeCombatId:    ctx.input.combatId,
-                effectType:        { redirectsDamage: true },
-                linkedParticipant: { entityId: ctx.input.targetEntityId },
+                activeCombatId:      ctx.input.combatId,
+                effectType:          { redirectsDamage: true },
+                linkedParticipant:   { entityId: ctx.input.targetEntityId },
+                affectedParticipant: { isDefeated: false },
             },
             select: {
                 affectedParticipant: { select: { entityId: true } },

@@ -34,7 +34,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
         }),
         db.activeCombat.findUnique({
             where:  { id: ctx.input.combatId },
-            select: { currentTurnOrder: true, initiationType: { select: { canSecondWind: true } } },
+            select: { currentTurnOrder: true, initiationType: { select: { canSecondWind: true, name: true } } },
         }),
         db.entity.findUnique({
             where:  { id: ctx.input.actorEntityId },
@@ -99,6 +99,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
         ctx.combatMeta = {
             canSecondWind:    combatRow.initiationType.canSecondWind,
             currentTurnOrder: combatRow.currentTurnOrder,
+            isSpar:           combatRow.initiationType.name === 'spar',
         };
     }
 

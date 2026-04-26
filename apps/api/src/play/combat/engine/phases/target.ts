@@ -11,6 +11,7 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
             where:  { id: ctx.actualTargetId },
             select: {
                 name:    true,
+                userId:  true,
                 species: { select: { baseAc: true } },
                 stats:   { select: { dexterity: true, currentHp: true, maxHp: true } },
             },
@@ -41,6 +42,7 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
 
     ctx.target = {
         name:      targetRow.name,
+        userId:    targetRow.userId ?? null,
         currentHp: targetRow.stats.currentHp ?? 0,
         maxHp:     targetRow.stats.maxHp     ?? 0,
         baseAc:    targetRow.species?.baseAc  ?? 10,

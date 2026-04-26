@@ -50,12 +50,14 @@ export interface ProfileSnapshot {
 export interface CombatMetaSnapshot {
     canSecondWind:    boolean;
     currentTurnOrder: number;
+    isSpar:           boolean;
 }
 
 // ── Snapshots loaded by TARGET ────────────────────────────────────────────────
 
 export interface TargetSnapshot {
     name:      string;
+    userId:    string | null;
     currentHp: number;
     maxHp:     number;
     baseAc:    number;

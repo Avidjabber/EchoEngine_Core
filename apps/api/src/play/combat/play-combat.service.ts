@@ -818,7 +818,7 @@ export class PlayCombatService {
                 kind:      'heal',
                 diceRolls: ctx.diceRolls,
                 totalHeal: ctx.finalHeal,
-                hpAfter:   ctx.hpAfter ?? 0,
+                hpAfter:   ctx.hpAfter ?? ctx.target?.currentHp ?? 0,
             };
         } else if (ctx.appliedBehaviorEffect) {
             outcome = { kind: 'behavior', ...ctx.appliedBehaviorEffect };
@@ -909,7 +909,7 @@ export class PlayCombatService {
 
                 await this.db.entityStats.update({
                     where: { entityId: participant.entityId },
-                    data:  { currentHp },
+                    data:  { currentHp: Math.max(0, currentHp) },
                 });
 
                 let defeated = false;
