@@ -162,7 +162,6 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
     if (result.success && result.value) {
         // Normalise: single-target returns ActionResult, AoE returns ActionResult[].
         const results = Array.isArray(result.value) ? result.value : [result.value];
-        const primary  = results[0]!;
 
         // Mark the category only on success so a server-side abort doesn't consume the slot.
         markTurnFlagUsed(activeCombatId, FLAG_BY_SLOT[catSlot]);
@@ -172,6 +171,25 @@ export async function handlePaCbtConfirm(interaction: ButtonInteraction): Promis
                 components: buildActionResultComponents(r) as never,
             } as never).catch(() => null);
         }
+
+        // AoE can return 0 results if all targets were target-side aborted (e.g. all unconscious).
+        if (results.length === 0) {
+            if (turnMsg) {
+                await turnMsg.edit({
+                    components: buildTurnPromptComponents(
+                        activeCombatId, entry.entityId, entry.entityName, entry.userId,
+                        entry.round, entry.usedFlags, entry.allowsFleeing,
+                    ) as never,
+                }).catch(() => null);
+            }
+            await interaction.editReply({
+                flags:      MessageFlags.IsComponentsV2,
+                components: [{ type: 17, accent_color: colors.success, components: [{ type: 10, content: `Action used — no targets were available.` }] }],
+            } as never);
+            return;
+        }
+
+        const primary = results[0]!;
 
         // AoE actions never produce reactions (suppressed server-side), so pendingReaction is
         // only meaningful on single-target results. Either way, read from primary.
