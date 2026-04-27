@@ -1,15 +1,20 @@
-var spt = 60; // Seconds per tick
+const SECONDS = 60; // Seconds per tick
 
 startTicker();
 
+var thisHour : number;
+var lastHour: number;
+
 export default async function startTicker() {
   console.log("Ticker started");
-  setInterval(tickAction, spt * 1000);
+  lastHour = new Date().getHours();
+  setInterval(checkTime, SECONDS * 1000);
 }
 
-export async function SetSPT(seconds: number) {
-  spt = seconds;
-  startTicker();
+async function checkTime() {
+  thisHour = new Date().getHours();
+  if (thisHour !== lastHour) {
+    console.log("Current hour:", thisHour);
+    lastHour = thisHour;
+  }
 }
-
-function tickAction() { console.log("Tick"); } // TODO: This will be the main function that runs every tick.
