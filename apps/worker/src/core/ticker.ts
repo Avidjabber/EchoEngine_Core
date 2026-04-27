@@ -1,17 +1,10 @@
 var spt = 60; // Seconds per tick
 
-var ticker: NodeJS.Timeout;
 startTicker();
 
 export default async function startTicker() {
   console.log("Ticker started");
-  clearInterval(ticker);
-  ticker = setInterval(tickAction, spt * 1000);
-}
-
-export async function stopTicker() {
-  clearInterval(ticker as NodeJS.Timeout);
-  console.log("Ticker stopped");
+  setInterval(tickAction, spt * 1000);
 }
 
 export async function SetSPT(seconds: number) {
