@@ -53,10 +53,9 @@ export interface DeathSaveEvent {
 }
 
 export interface MortallyWoundedCharacter {
-    entityId:    number;
-    name:        string;
-    userId:      string | null;
-    wasDefeated: boolean;
+    entityId: number;
+    name:     string;
+    userId:   string | null;
 }
 
 export interface AdvanceTurnResult {

@@ -118,10 +118,9 @@ export interface DeathSaveEvent {
 }
 
 export interface MortallyWoundedCharacter {
-    entityId:    number;
-    name:        string;
-    userId:      string | null;
-    wasDefeated: boolean;  // true = died from 3 save failures; false = still unconscious at combat end
+    entityId: number;
+    name:     string;
+    userId:   string | null;
 }
 
 export interface AdvanceTurnResult {
@@ -135,7 +134,7 @@ export interface AdvanceTurnResult {
     allowsFleeing:        boolean;
     round:                number;
     winningAllyFactionId: number | null;
-    mortallyWounded:      MortallyWoundedCharacter[];  // non-empty only when combatEnded = true and canResultInDeath = true
+    mortallyWounded:      MortallyWoundedCharacter[];  // non-empty only when combatEnded = true, canResultInDeath = true, and at least one non-AI PC failed all 3 death saves
 }
 
 export interface CombatTargetEntity {
@@ -619,8 +618,10 @@ export class PlayCombatService {
         const newRound      = roundBoundary ? combat.currentRound + 1 : combat.currentRound;
 
         const endCombat = async (active: typeof freshActive): Promise<AdvanceTurnResult> => {
-            const factions             = new Set(active.map(p => p.allyFactionId));
-            const winningAllyFactionId = factions.size === 1 ? [...factions][0]! : null;
+            // Winner is determined by which factions still have conscious participants.
+            // Unconscious participants do not keep their faction in contention.
+            const consciousFactions    = new Set(active.filter(p => !p.isUnconscious).map(p => p.allyFactionId));
+            const winningAllyFactionId = consciousFactions.size === 1 ? [...consciousFactions][0]! : null;
             const outcomeName          = winningAllyFactionId !== null ? 'win' : 'draw';
 
             const [outcome, mortallyWoundedRows] = await Promise.all([
@@ -652,16 +653,15 @@ export class PlayCombatService {
             });
 
             const mortallyWounded: MortallyWoundedCharacter[] = mortallyWoundedRows.map(r => ({
-                entityId:    r.entityId,
-                name:        r.entity.name,
-                userId:      r.entity.userId ?? null,
-                wasDefeated: true,
+                entityId: r.entityId,
+                name:     r.entity.name,
+                userId:   r.entity.userId ?? null,
             }));
 
             return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, deathSaveEvent: null, allowsFleeing, round: newRound, winningAllyFactionId, mortallyWounded };
         };
 
-        if (new Set(freshActive.map(p => p.allyFactionId)).size < 2) {
+        if (new Set(freshActive.filter(p => !p.isUnconscious).map(p => p.allyFactionId)).size < 2) {
             return endCombat(freshActive);
         }
 
@@ -780,7 +780,7 @@ export class PlayCombatService {
             if (result !== 'revived') {
                 // Turn passes to the entity after the death-saver.
                 if (result === 'defeated') {
-                    if (new Set(freshActive.map(p => p.allyFactionId)).size < 2) {
+                    if (new Set(freshActive.filter(p => !p.isUnconscious).map(p => p.allyFactionId)).size < 2) {
                         return endCombat(freshActive);
                     }
                 }
