@@ -895,7 +895,9 @@ export class PlayCombatService {
                     COMBAT_INTERCEPTORS,
                 );
                 // Actor-side abort on the first target (off-turn, stunned, etc.) fails the whole AoE.
-                if (i === 0 && ctx.aborted) throw new Error(ctx.abortReason ?? 'Action aborted');
+                // Target-side aborts (e.g. unconscious target) have ctx.target set before aborting;
+                // actor-side aborts happen before TARGET loads ctx.target, so ctx.target is null.
+                if (i === 0 && ctx.aborted && ctx.target === null) throw new Error(ctx.abortReason ?? 'Action aborted');
                 if (ctx.aborted) continue;
                 if (!firstCtx) firstCtx = ctx;
                 results.push(this._toActionResult(ctx));
@@ -1512,6 +1514,7 @@ export class PlayCombatService {
                     entityId:                true,
                     isAiControlled:          true,
                     isUnconscious:           true,
+                    deathSaveFailures:       true,
                     concentratingOnEffectId: true,
                     entity: { select: { name: true, stats: { select: { currentHp: true, maxHp: true } } } },
                 },
@@ -1554,7 +1557,8 @@ export class PlayCombatService {
 
                 if (currentHp <= 0) {
                     // Eligible for death saves if player-controlled, combat allows it, and not already saving.
-                    const canStartDeathSaves = !participant.isAiControlled && usesDeathSaves && !participant.isUnconscious;
+                    const canStartDeathSaves   = !participant.isAiControlled && usesDeathSaves && !participant.isUnconscious;
+                    const alreadyInDeathSaves  = !participant.isAiControlled && usesDeathSaves && participant.isUnconscious;
                     if (canStartDeathSaves) {
                         const concentratingId = participant.concentratingOnEffectId;
                         await this.db.$transaction(async tx => {
@@ -1573,6 +1577,30 @@ export class PlayCombatService {
                             }
                         });
                         events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: false, knockedDown: true });
+                    } else if (alreadyInDeathSaves) {
+                        // DoT while already unconscious counts as one death save failure; no HP write needed.
+                        const newFailures = Math.min(participant.deathSaveFailures + 1, 3);
+                        if (newFailures >= 3) {
+                            await this.db.$transaction([
+                                this.db.activeCombat_Participant.update({
+                                    where: { id: participantId },
+                                    data:  { isDefeated: true, deathSaveFailures: newFailures },
+                                }),
+                                this.db.activeCombat_BehaviorEffect.deleteMany({
+                                    where: { sourceParticipantId: participantId },
+                                }),
+                                this.db.activeCombat_StatEffect.deleteMany({
+                                    where: { affectedParticipantId: participantId },
+                                }),
+                            ]);
+                            events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: true, knockedDown: false });
+                        } else {
+                            await this.db.activeCombat_Participant.update({
+                                where: { id: participantId },
+                                data:  { deathSaveFailures: newFailures },
+                            });
+                            events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: false, knockedDown: false });
+                        }
                     } else {
                         await this.db.$transaction([
                             this.db.entityStats.update({

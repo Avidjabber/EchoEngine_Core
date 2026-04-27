@@ -14,17 +14,11 @@ export const dodgeCheckInterceptor: CombatInterceptor = {
         if (ctx.actualTargetId === null) return;
 
         // ctx.targetParticipant is not yet populated — TARGET interceptors run before runTarget.
-        // Look up the participant directly using the final (possibly redirected) target entity ID.
-        const participant = await db.activeCombat_Participant.findFirst({
-            where:  { activeCombatId: ctx.input.combatId, entityId: ctx.actualTargetId },
-            select: { id: true },
-        });
-        if (!participant) return;
-
+        // Use a relation filter on affectedParticipant to resolve entity → participant in one query.
         const dodge = await db.activeCombat_BehaviorEffect.findFirst({
             where: {
-                affectedParticipantId: participant.id,
-                effectType:            { grantsHitDisadvantage: true },
+                affectedParticipant: { activeCombatId: ctx.input.combatId, entityId: ctx.actualTargetId },
+                effectType:          { grantsHitDisadvantage: true },
             },
             select: { id: true },
         });
