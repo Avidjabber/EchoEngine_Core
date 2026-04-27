@@ -16,7 +16,7 @@ import { handlePaCombatAddChar, handlePaCombatSignup, handlePaCombatRemove, hand
 import { handlePaInviteAccept, handlePaInviteReject }                                                                                         from '../commands/Aggregate/play/action/combat/inviteHandlers';
 import { handlePaEpickInvitePage, handlePaEpickSignupPage, handlePaEpickInvitePick, handlePaEpickSignupPick, handlePaEpickCancel }             from '../commands/Aggregate/play/action/combat/entityPickerHandlers';
 import { handlePaTurnMain, handlePaTurnBonus, handlePaTurnItem, handlePaTurnEnd, handlePaTurnFlee, handlePaDeceasedMark, handlePaDeceasedSpare } from '../commands/Aggregate/play/action/combat/combatTurnHandlers';
-import { handlePaCbtPick, handlePaCbtTarget, handlePaCbtConfirm, handlePaCbtBack, handlePaCbtCancel }                                           from '../commands/Aggregate/play/action/combat/combatActionHandlers';
+import { handlePaCbtPick, handlePaCbtTarget, handlePaCbtConfirm, handlePaCbtBack, handlePaCbtCancel, handlePaCbtBuiltin, handlePaCbtBuiltinTarget, handlePaCbtBuiltinOk } from '../commands/Aggregate/play/action/combat/combatActionHandlers';
 import { handlePaReactUse, handlePaReactSkip }                                                                                                from '../commands/Aggregate/play/action/combat/combatReactionHandlers';
 import {
     handleEcEdit,
@@ -90,6 +90,9 @@ export const buttonHandlers: ComponentHandler[] = [
     { prefix: 'pa_cbt_confirm:',       handler: interaction => handlePaCbtConfirm(interaction as ButtonInteraction)        },
     { prefix: 'pa_cbt_back:',          handler: interaction => handlePaCbtBack(interaction as ButtonInteraction)           },
     { prefix: 'pa_cbt_cancel:',        handler: interaction => handlePaCbtCancel(interaction as ButtonInteraction)         },
+    { prefix: 'pa_cbt_builtin:',       handler: interaction => handlePaCbtBuiltin(interaction as ButtonInteraction)        },
+    { prefix: 'pa_cbt_builtin_t:',     handler: interaction => handlePaCbtBuiltinTarget(interaction as ButtonInteraction)  },
+    { prefix: 'pa_cbt_builtin_ok:',    handler: interaction => handlePaCbtBuiltinOk(interaction as ButtonInteraction)      },
     { prefix: 'pa_react_use:',         handler: interaction => handlePaReactUse(interaction as ButtonInteraction)          },
     { prefix: 'pa_react_skip:',        handler: interaction => handlePaReactSkip(interaction as ButtonInteraction)         },
     { prefix: 'den_list_done',    handler: interaction => handleDenListDone(interaction as ButtonInteraction) },

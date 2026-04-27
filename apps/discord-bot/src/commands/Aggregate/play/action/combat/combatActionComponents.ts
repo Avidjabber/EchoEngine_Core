@@ -141,7 +141,9 @@ export function buildActionPickerComponents(
                 type:      2,
                 style:     a.isOnCooldown ? 2 : 1,
                 label:     (a.actionLabel ?? a.itemName).slice(0, 80),
-                custom_id: `pa_cbt_pick:${activeCombatId}:${entityId}:${a.profileId}:${a.storedItemId}:${catSlot}`,
+                custom_id: a.builtinAction
+                    ? `pa_cbt_builtin:${activeCombatId}:${entityId}:${a.builtinAction}:${catSlot}`
+                    : `pa_cbt_pick:${activeCombatId}:${entityId}:${a.profileId}:${a.storedItemId}:${catSlot}`,
                 disabled:  a.isOnCooldown,
             })),
         });
@@ -216,6 +218,63 @@ export function buildTargetPickerComponents(
             backRow,
         ],
     }];
+}
+
+export function buildBuiltinTargetPickerComponents(
+    activeCombatId:     number,
+    entityId:           number,
+    builtinAction:      'dodge' | 'help',
+    catSlot:            number,
+    targets:            CombatParticipantInfo[],
+    actorAllyFactionId: number,
+): object[] {
+    const rows: object[] = [];
+    for (let i = 0; i < targets.length; i += 4) {
+        const slice = targets.slice(i, i + 4);
+        rows.push({
+            type: 1,
+            components: slice.map(t => ({
+                type:      2,
+                style:     t.allyFactionId !== actorAllyFactionId ? 4 : 2,
+                label:     t.name.slice(0, 80),
+                custom_id: `pa_cbt_builtin_t:${activeCombatId}:${entityId}:${builtinAction}:${catSlot}:${t.entityId}`,
+            })),
+        });
+    }
+    const backRow = {
+        type: 1,
+        components: [
+            { type: 2, style: 2, label: '← Back',  custom_id: `pa_cbt_back:${activeCombatId}:${entityId}:${catSlot}` },
+            { type: 2, style: 4, label: 'Cancel',  custom_id: `pa_cbt_cancel:${activeCombatId}` },
+        ],
+    };
+    return [{
+        type:         17,
+        accent_color: colors.info,
+        components:   [{ type: 10, content: `**Help** — choose a target:` }, { type: 14 }, ...rows, backRow],
+    }];
+}
+
+export function buildBuiltinConfirmComponents(
+    activeCombatId: number,
+    entityId:       number,
+    builtinAction:  'dodge' | 'help',
+    catSlot:        number,
+    targetEntityId: number,
+    targetName:     string,
+): object[] {
+    const content = builtinAction === 'dodge'
+        ? `**Dodge**\nConfirm?`
+        : `**Help → ${targetName}**\nConfirm?`;
+    const confirmRow = {
+        type: 1,
+        components: [
+            { type: 2, style: 1, label: 'Confirm', custom_id: `pa_cbt_builtin_ok:${activeCombatId}:${entityId}:${builtinAction}:${catSlot}:${targetEntityId}` },
+            { type: 2, style: 2, label: '← Back',  custom_id: `pa_cbt_back:${activeCombatId}:${entityId}:${catSlot}` },
+            { type: 2, style: 4, label: 'Cancel',  custom_id: `pa_cbt_cancel:${activeCombatId}` },
+        ],
+    };
+    return [{ type: 17, accent_color: colors.info, components: [{ type: 10, content }, { type: 14 }, confirmRow] }];
 }
 
 export function buildActionConfirmComponents(

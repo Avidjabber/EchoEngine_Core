@@ -2,7 +2,7 @@ import { ButtonInteraction, MessageFlags, TextChannel, ThreadChannel } from 'dis
 import { colors } from '../../../../../core/colors';
 import { messages } from '@echoengine/shared';
 import {
-    fetchAvailableActions, fetchParticipants, processAction,
+    fetchAvailableActions, fetchParticipants, processAction, processBuiltinAction,
     type AvailableAction, type CombatParticipantInfo,
 } from '../../../../../services/play/combatService';
 import {
@@ -10,6 +10,8 @@ import {
     buildTargetPickerComponents,
     buildActionConfirmComponents,
     buildActionResultComponents,
+    buildBuiltinTargetPickerComponents,
+    buildBuiltinConfirmComponents,
 } from './combatActionComponents';
 import { getTurnEntry, markTurnFlagUsed, TURN_FLAG_MAIN, TURN_FLAG_BONUS, TURN_FLAG_ITEM } from './combatTurnState';
 import { buildTurnPromptComponents, buildTurnAwaitingReactionComponents } from './combatTurnComponents';
@@ -74,7 +76,6 @@ export async function handlePaCbtPick(interaction: ButtonInteraction): Promise<v
 
     const eligible = allParts.filter(p => {
         if (p.isDefeated || p.hasFled) return false;
-        if (p.currentHp !== null && p.currentHp <= 0) return false;
         const isSelf  = p.entityId === entityId;
         const isAlly  = p.allyFactionId === actor.allyFactionId;
         if (!scope) return true;
@@ -263,4 +264,118 @@ export async function handlePaCbtBack(interaction: ButtonInteraction): Promise<v
 export async function handlePaCbtCancel(interaction: ButtonInteraction): Promise<void> {
     await interaction.deferUpdate();
     await interaction.deleteReply().catch(() => null);
+}
+
+// customId: pa_cbt_builtin:{activeCombatId}:{entityId}:{builtinAction}:{catSlot}
+export async function handlePaCbtBuiltin(interaction: ButtonInteraction): Promise<void> {
+    const parts          = interaction.customId.split(':');
+    const activeCombatId = parseInt(parts[1], 10);
+    const entityId       = parseInt(parts[2], 10);
+    const builtinAction  = parts[3] as 'dodge' | 'help';
+    const catSlot        = parseInt(parts[4], 10) as 0 | 1 | 2;
+
+    await interaction.deferUpdate();
+
+    const entry = getTurnEntry(activeCombatId);
+    if (!entry || entry.userId !== interaction.user.id) return;
+
+    if (builtinAction === 'dodge') {
+        await interaction.editReply({
+            flags:      MessageFlags.IsComponentsV2,
+            components: buildBuiltinConfirmComponents(activeCombatId, entityId, 'dodge', catSlot, entityId, entry.entityName) as never,
+        });
+        return;
+    }
+
+    // Help: show target picker (includes unconscious entities so you can assist with death saves)
+    const participantsResult = await fetchParticipants(activeCombatId);
+    if (!participantsResult.success) { await errEphemeral(interaction, messages.errorGeneric); return; }
+
+    const allParts = participantsResult.value ?? [];
+    const actor    = allParts.find(p => p.entityId === entityId);
+    if (!actor) { await errEphemeral(interaction, messages.errorGeneric); return; }
+
+    const eligible = allParts.filter(p => !p.isDefeated && !p.hasFled && p.entityId !== entityId);
+
+    await interaction.editReply({
+        flags:      MessageFlags.IsComponentsV2,
+        components: buildBuiltinTargetPickerComponents(activeCombatId, entityId, 'help', catSlot, eligible, actor.allyFactionId) as never,
+    });
+}
+
+// customId: pa_cbt_builtin_t:{activeCombatId}:{entityId}:{builtinAction}:{catSlot}:{targetEntityId}
+export async function handlePaCbtBuiltinTarget(interaction: ButtonInteraction): Promise<void> {
+    const parts          = interaction.customId.split(':');
+    const activeCombatId = parseInt(parts[1], 10);
+    const entityId       = parseInt(parts[2], 10);
+    const builtinAction  = parts[3] as 'dodge' | 'help';
+    const catSlot        = parseInt(parts[4], 10) as 0 | 1 | 2;
+    const targetEntityId = parseInt(parts[5], 10);
+
+    await interaction.deferUpdate();
+
+    const entry = getTurnEntry(activeCombatId);
+    if (!entry || entry.userId !== interaction.user.id) return;
+
+    const participantsResult = await fetchParticipants(activeCombatId);
+    if (!participantsResult.success) { await errEphemeral(interaction, messages.errorGeneric); return; }
+
+    const target = (participantsResult.value ?? []).find(p => p.entityId === targetEntityId);
+    if (!target) { await errEphemeral(interaction, 'That target is no longer available.'); return; }
+
+    await interaction.editReply({
+        flags:      MessageFlags.IsComponentsV2,
+        components: buildBuiltinConfirmComponents(activeCombatId, entityId, builtinAction, catSlot, targetEntityId, target.name) as never,
+    });
+}
+
+// customId: pa_cbt_builtin_ok:{activeCombatId}:{entityId}:{builtinAction}:{catSlot}:{targetEntityId}
+export async function handlePaCbtBuiltinOk(interaction: ButtonInteraction): Promise<void> {
+    const parts          = interaction.customId.split(':');
+    const activeCombatId = parseInt(parts[1], 10);
+    const entityId       = parseInt(parts[2], 10);
+    const builtinAction  = parts[3] as 'dodge' | 'help';
+    const catSlot        = parseInt(parts[4], 10) as 0 | 1 | 2;
+    const targetEntityId = parseInt(parts[5], 10);
+
+    await interaction.deferUpdate();
+
+    const entry = getTurnEntry(activeCombatId);
+    if (!entry || entry.userId !== interaction.user.id) return;
+
+    const targetId = builtinAction === 'dodge' ? null : targetEntityId;
+    const result   = await processBuiltinAction(activeCombatId, entityId, builtinAction, targetId, entry.round);
+    const channel  = interaction.channel as TextChannel | ThreadChannel;
+    const turnMsg  = await channel.messages.fetch(entry.turnPromptMessageId).catch(() => null);
+
+    if (result.success && result.value) {
+        markTurnFlagUsed(activeCombatId, FLAG_BY_SLOT[catSlot]);
+        await channel.send({
+            components: buildActionResultComponents(result.value) as never,
+        } as never).catch(() => null);
+        if (turnMsg) {
+            await turnMsg.edit({
+                components: buildTurnPromptComponents(
+                    activeCombatId, entry.entityId, entry.entityName, entry.userId,
+                    entry.round, entry.usedFlags, entry.allowsFleeing,
+                ) as never,
+            }).catch(() => null);
+        }
+        const label = result.value.actionLabel;
+        const tgt   = result.value.targetName !== result.value.actorName ? ` → **${result.value.targetName}**` : '';
+        await interaction.editReply({
+            flags:      MessageFlags.IsComponentsV2,
+            components: [{ type: 17, accent_color: colors.success, components: [{ type: 10, content: `**${label}**${tgt} — done!` }] }],
+        } as never);
+    } else {
+        if (turnMsg) {
+            await turnMsg.edit({
+                components: buildTurnPromptComponents(
+                    activeCombatId, entry.entityId, entry.entityName, entry.userId,
+                    entry.round, entry.usedFlags, entry.allowsFleeing,
+                ) as never,
+            }).catch(() => null);
+        }
+        await errEphemeral(interaction, messages.errorGeneric);
+    }
 }

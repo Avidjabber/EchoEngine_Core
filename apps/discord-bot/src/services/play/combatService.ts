@@ -13,8 +13,9 @@ export interface CombatParticipantInfo {
 }
 
 export interface AvailableAction {
-    profileId:    number;
-    storedItemId: number;
+    profileId:     number | null;
+    storedItemId:  number | null;
+    builtinAction: 'dodge' | 'help' | null;
     itemName:     string;
     actionLabel:  string | null;
     targetScope: {
@@ -131,8 +132,8 @@ export function advanceTurn(combatId: number, currentEntityId: number) {
 }
 
 export type ActionResultOutcome =
-    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
-    | { kind: 'miss';     hitRoll: number; targetAC: number }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; tempHpDrained: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'miss';     hitRoll: number; targetAC: number; isFumble: boolean }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
     | { kind: 'no_op' };
@@ -209,6 +210,18 @@ export function markDeceased(combatId: number, entityId: number) {
 
 export function flee(combatId: number, entityId: number) {
     return apiClient.post<{ allowed: boolean }>(`/play/combat/${combatId}/flee`, { entityId });
+}
+
+export function processBuiltinAction(
+    combatId:       number,
+    actorEntityId:  number,
+    action:         'dodge' | 'help',
+    targetEntityId: number | null,
+    roundNumber:    number,
+) {
+    return apiClient.post<ActionResult>(`/play/combat/${combatId}/process-builtin-action`, {
+        actorEntityId, action, targetEntityId, roundNumber,
+    });
 }
 
 export function processReaction(combatId: number, defenderEntityId: number, profileId: number, storedItemId: number, attackerEntityId: number, roundNumber: number) {

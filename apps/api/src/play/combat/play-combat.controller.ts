@@ -64,6 +64,21 @@ export class PlayCombatController {
         return this.service.advanceTurn(id, body.currentEntityId);
     }
 
+    @Post(':id/process-builtin-action')
+    @HttpCode(HttpStatus.OK)
+    processBuiltinAction(
+        @Param('id', ParseIntPipe) id:   number,
+        @Body()                    body: { actorEntityId: number; action: 'dodge' | 'help'; targetEntityId: number | null; roundNumber: number },
+    ) {
+        if (!body?.actorEntityId || !body?.action || body?.roundNumber === undefined) {
+            throw new BadRequestException('actorEntityId, action, and roundNumber are required');
+        }
+        if (body.action !== 'dodge' && body.action !== 'help') {
+            throw new BadRequestException('action must be "dodge" or "help"');
+        }
+        return this.service.processBuiltinAction(id, body.actorEntityId, body.action, body.targetEntityId ?? null, body.roundNumber);
+    }
+
     @Post(':id/process-action')
     @HttpCode(HttpStatus.OK)
     processAction(
