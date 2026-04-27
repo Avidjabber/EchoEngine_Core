@@ -58,8 +58,14 @@ export const statEffectModifiersInterceptor: CombatInterceptor = {
             }
         }
 
-        // Advantage and disadvantage cancel each other out (D&D 5e rule).
-        ctx.hitAdvantage    = hitAdv  === hitDisadv  ? null : hitAdv  ? 'advantage' : 'disadvantage';
+        // hitAdvantage may already carry a value from dodge-check (TARGET/1) or help-check
+        // (PRE_RESOLVE/-1). Preserve their contributions when merging stat-effect sources.
+        // damageAdvantage and healAdvantage are only set here, so no prior state to preserve.
+        const priorHitAdv    = ctx.hitAdvantage === 'advantage';
+        const priorHitDisadv = ctx.hitAdvantage === 'disadvantage';
+        ctx.hitAdvantage    = (hitAdv || priorHitAdv) === (hitDisadv || priorHitDisadv)
+            ? null
+            : (hitAdv || priorHitAdv) ? 'advantage' : 'disadvantage';
         ctx.damageAdvantage = dmgAdv  === dmgDisadv  ? null : dmgAdv  ? 'advantage' : 'disadvantage';
         ctx.healAdvantage   = healAdv === healDisadv ? null : healAdv ? 'advantage' : 'disadvantage';
     },
