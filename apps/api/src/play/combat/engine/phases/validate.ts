@@ -9,6 +9,12 @@ export async function runValidate(ctx: CombatActionContext, _svc: PipelineServic
         return;
     }
 
+    if (ctx.actorParticipant?.isUnconscious) {
+        ctx.aborted     = true;
+        ctx.abortReason = 'You are unconscious and cannot act.';
+        return;
+    }
+
     // Both flags must be true for this to be a genuine reaction; any other combination
     // requires turn-order and category enforcement.
     if (!(ctx.profile.isReactionAction && ctx.input.isReaction)) {

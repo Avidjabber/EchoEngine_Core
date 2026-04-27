@@ -32,7 +32,7 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
                     data:  { isDefeated: true },
                 });
                 await tx.activeCombat_BehaviorEffect.deleteMany({
-                    where: { sourceParticipantId: participant!.id },
+                    where: { OR: [{ sourceParticipantId: participant!.id }, { linkedParticipantId: participant!.id }] },
                 });
                 await tx.activeCombat_StatEffect.deleteMany({
                     where: { affectedParticipantId: participant!.id },

@@ -83,7 +83,8 @@ export interface TargetSnapshot {
 }
 
 export interface ActorParticipantSnapshot {
-    helpRollMod:            'advantage' | 'disadvantage' | null;
+    isUnconscious:           boolean;
+    helpRollMod:             'advantage' | 'disadvantage' | null;
     concentratingOnEffectId: number | null;
 }
 

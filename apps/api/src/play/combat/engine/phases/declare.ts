@@ -64,7 +64,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
         }),
         db.activeCombat_Participant.findFirst({
             where:  { activeCombatId: ctx.input.combatId, entityId: ctx.input.actorEntityId },
-            select: { id: true, turnOrder: true, helpRollMod: true, concentratingOnEffectId: true },
+            select: { id: true, turnOrder: true, isUnconscious: true, helpRollMod: true, concentratingOnEffectId: true },
         }),
     ]);
 
@@ -126,6 +126,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
         ctx.actorTurnOrder     = actorParticipantRow.turnOrder;
         ctx.actorParticipantId = actorParticipantRow.id;
         ctx.actorParticipant   = {
+            isUnconscious:           actorParticipantRow.isUnconscious,
             helpRollMod:             (actorParticipantRow.helpRollMod as 'advantage' | 'disadvantage' | null) ?? null,
             concentratingOnEffectId: actorParticipantRow.concentratingOnEffectId ?? null,
         };

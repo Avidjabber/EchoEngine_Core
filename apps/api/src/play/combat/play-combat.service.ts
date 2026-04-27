@@ -713,7 +713,7 @@ export class PlayCombatService {
                             where: { id: next.id },
                             data:  { isDefeated: true, deathSaveFailures: newFailures },
                         }),
-                        this.db.activeCombat_BehaviorEffect.deleteMany({ where: { sourceParticipantId: next.id } }),
+                        this.db.activeCombat_BehaviorEffect.deleteMany({ where: { OR: [{ sourceParticipantId: next.id }, { linkedParticipantId: next.id }] } }),
                         this.db.activeCombat_StatEffect.deleteMany({ where: { affectedParticipantId: next.id } }),
                     ]);
                     freshActive = freshActive.filter(p => p.id !== next.id);
@@ -727,12 +727,18 @@ export class PlayCombatService {
             } else if (roll >= 10) {
                 newSuccesses = next.deathSaveSuccesses + 1;
                 if (newSuccesses >= 3) {
-                    // Stable: no longer rolling saves; remains at 0 HP until healed.
+                    // Third success: revive at 1 HP. Turn passes — entity acts again next round.
                     result = 'stable';
-                    await this.db.activeCombat_Participant.update({
-                        where: { id: next.id },
-                        data:  { isUnconscious: false, deathSaveSuccesses: newSuccesses },
-                    });
+                    await this.db.$transaction([
+                        this.db.entityStats.update({
+                            where: { entityId: next.entityId },
+                            data:  { currentHp: 1 },
+                        }),
+                        this.db.activeCombat_Participant.update({
+                            where: { id: next.id },
+                            data:  { isUnconscious: false, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                        }),
+                    ]);
                 } else {
                     result = 'success';
                     await this.db.activeCombat_Participant.update({
@@ -749,7 +755,7 @@ export class PlayCombatService {
                             where: { id: next.id },
                             data:  { isDefeated: true, deathSaveFailures: newFailures },
                         }),
-                        this.db.activeCombat_BehaviorEffect.deleteMany({ where: { sourceParticipantId: next.id } }),
+                        this.db.activeCombat_BehaviorEffect.deleteMany({ where: { OR: [{ sourceParticipantId: next.id }, { linkedParticipantId: next.id }] } }),
                         this.db.activeCombat_StatEffect.deleteMany({ where: { affectedParticipantId: next.id } }),
                     ]);
                     freshActive = freshActive.filter(p => p.id !== next.id);
@@ -841,9 +847,10 @@ export class PlayCombatService {
         if (!combat?.initiationType.allowsFleeing) return { allowed: false };
         const participant = await this.db.activeCombat_Participant.findUnique({
             where:  { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
-            select: { id: true },
+            select: { id: true, isUnconscious: true, isDefeated: true, hasFled: true },
         });
         if (!participant) return { allowed: false };
+        if (participant.isUnconscious || participant.isDefeated || participant.hasFled) return { allowed: false };
         await this.db.$transaction([
             this.db.activeCombat_Participant.update({
                 where: { id: participant.id },
@@ -1601,7 +1608,7 @@ export class PlayCombatService {
                                     data:  { isDefeated: true, deathSaveFailures: newFailures },
                                 }),
                                 this.db.activeCombat_BehaviorEffect.deleteMany({
-                                    where: { sourceParticipantId: participantId },
+                                    where: { OR: [{ sourceParticipantId: participantId }, { linkedParticipantId: participantId }] },
                                 }),
                                 this.db.activeCombat_StatEffect.deleteMany({
                                     where: { affectedParticipantId: participantId },
@@ -1626,7 +1633,7 @@ export class PlayCombatService {
                                 data:  { isDefeated: true },
                             }),
                             this.db.activeCombat_BehaviorEffect.deleteMany({
-                                where: { sourceParticipantId: participantId },
+                                where: { OR: [{ sourceParticipantId: participantId }, { linkedParticipantId: participantId }] },
                             }),
                             this.db.activeCombat_StatEffect.deleteMany({
                                 where: { affectedParticipantId: participantId },

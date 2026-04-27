@@ -188,7 +188,7 @@ async function postDeathSaveResult(
             text = `🎲 **${event.entityName}** rolled a **natural 20** on their death save — they spring back up at 1 HP!`;
             break;
         case 'stable':
-            text = `🎲 **${event.entityName}** rolled **${event.roll}** — third success. They stabilise and are no longer in danger.`;
+            text = `🎲 **${event.entityName}** rolled **${event.roll}** — third success. They revive at 1 HP!`;
             break;
         case 'defeated':
             text = `🎲 **${event.entityName}** rolled **${event.roll}**${event.roll === 1 ? ' (natural 1 — two failures)' : ''} — ${event.failures >= 3 ? 'three failures. They have succumbed to their wounds.' : 'defeated.'}`;
@@ -201,8 +201,8 @@ async function postDeathSaveResult(
             break;
     }
     const accentColor = event.result === 'revived' ? colors.special
+        : event.result === 'stable'   ? colors.special
         : event.result === 'defeated' ? colors.error
-        : event.result === 'stable'   ? colors.info
         : event.result === 'success'  ? colors.success
         : colors.warning;
     await channel.send({

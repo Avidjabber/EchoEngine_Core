@@ -105,6 +105,8 @@ export async function runEnd(ctx: CombatActionContext, { db, roller }: PipelineS
         // ── Behavior effect ───────────────────────────────────────────────────
         // For damage actions: save halves damage but does not skip the effect.
         // For non-damage actions: a successful save skips the effect entirely.
+        // Skip entirely if the target was just defeated — effects on a dead participant are orphaned.
+        if (ctx.defeated) return;
         const isGuard = profile.behaviorEffectRedirectsDamage;
         const isTaunt = profile.behaviorEffectForcesTargeting;
         // Guards apply to the actor (self-buff); taunts apply to the target (forced targeting).
