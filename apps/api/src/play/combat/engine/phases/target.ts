@@ -67,5 +67,11 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
             legendaryResistancesRemaining: participantRow.legendaryResistancesRemaining,
             concentratingOnEffectId:       participantRow.concentratingOnEffectId ?? null,
         };
+
+        if (participantRow.isUnconscious && ctx.profile?.dealsDamage) {
+            ctx.aborted     = true;
+            ctx.abortReason = 'You cannot target an unconscious entity with a damaging action.';
+            return;
+        }
     }
 }

@@ -1708,6 +1708,7 @@ export class PlayCombatService {
             const threshold = meta.isStatProgression
                 ? meta.baseXp
                 : Math.floor(meta.baseXp * Math.pow(nextLevel, 1.5));
+            if (threshold <= 0) break;
             if (currentXp < threshold) break;
             currentXp -= threshold;
             level++;

@@ -17,7 +17,9 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
         // With death saves enabled, defeat only comes from 3 failures (rolled in advanceTurn).
         const shouldDefeat    = newHp <= 0 && participant !== null
             && (participant.isAiControlled || !usesDeathSaves);
-        const shouldKnockDown = newHp <= 0 && participant !== null && !shouldDefeat;
+        // Only knock down if not already unconscious — hitting an entity already in death saves
+        // should not reset their success/failure counters; advanceTurn handles that via the save roll.
+        const shouldKnockDown = newHp <= 0 && participant !== null && !shouldDefeat && !participant.isUnconscious;
 
         await db.$transaction(async tx => {
             await tx.entityStats.update({
