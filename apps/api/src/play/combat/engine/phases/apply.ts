@@ -44,12 +44,11 @@ export async function runApply(ctx: CombatActionContext, { db }: PipelineService
                     where: { id: participant!.id },
                     data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0, concentratingOnEffectId: null },
                 });
-                // Losing consciousness immediately breaks concentration.
-                if (ctx.targetParticipant?.concentratingOnEffectId) {
-                    await tx.activeCombat_BehaviorEffect.delete({
-                        where: { id: ctx.targetParticipant.concentratingOnEffectId },
-                    }).catch(() => null);
-                }
+                // Going unconscious ends all behavior effects this entity was sourcing (guard, taunt,
+                // dodge, concentration) and any guard effect that was protecting this entity as the ward.
+                await tx.activeCombat_BehaviorEffect.deleteMany({
+                    where: { OR: [{ sourceParticipantId: participant!.id }, { linkedParticipantId: participant!.id }] },
+                });
             }
         });
 

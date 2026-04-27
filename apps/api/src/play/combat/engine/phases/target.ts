@@ -68,9 +68,9 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
             concentratingOnEffectId:       participantRow.concentratingOnEffectId ?? null,
         };
 
-        if (participantRow.isUnconscious && ctx.profile?.dealsDamage) {
+        if (participantRow.isUnconscious && !ctx.profile?.restoresHealth) {
             ctx.aborted     = true;
-            ctx.abortReason = 'You cannot target an unconscious entity with a damaging action.';
+            ctx.abortReason = 'You cannot target a downed entity with this action.';
             return;
         }
     }

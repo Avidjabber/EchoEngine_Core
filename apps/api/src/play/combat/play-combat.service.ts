@@ -600,6 +600,7 @@ export class PlayCombatService {
                 isUnconscious:         true,
                 deathSaveSuccesses:   true,
                 deathSaveFailures:    true,
+                helpRollMod:          true,
                 controllerUserId:     true,
                 entity: {
                     select: {
@@ -671,9 +672,18 @@ export class PlayCombatService {
         // their "turn" is consumed by a death save roll. The actual acting turn then
         // passes to the entity after them (unless they roll a natural 20 and revive).
         let deathSaveEvent: DeathSaveEvent | null = null;
+        let deathSaverParticipantId: number | null = null;
 
         if (next.isUnconscious && !next.isAiControlled) {
-            const roll        = rollDice(1, 20, defaultRoller)[0]!;
+            deathSaverParticipantId = next.id;
+            const helpMod = (next.helpRollMod as 'advantage' | 'disadvantage' | null) ?? null;
+            let roll: number;
+            if (helpMod === null) {
+                roll = rollDice(1, 20, defaultRoller)[0]!;
+            } else {
+                const [a, b] = rollDice(2, 20, defaultRoller) as [number, number];
+                roll = helpMod === 'advantage' ? Math.max(a, b) : Math.min(a, b);
+            }
             let newSuccesses  = next.deathSaveSuccesses;
             let newFailures   = next.deathSaveFailures;
             let result: DeathSaveEvent['result'];
@@ -777,6 +787,11 @@ export class PlayCombatService {
             // Clear unconsumed Help roll mod on the participant whose turn just ended.
             ...(endingParticipant ? [this.db.activeCombat_Participant.updateMany({
                 where: { id: endingParticipant.id, helpRollMod: { not: null } },
+                data:  { helpRollMod: null },
+            })] : []),
+            // Clear Help roll mod consumed by the death save (always use exactly once).
+            ...(deathSaverParticipantId !== null ? [this.db.activeCombat_Participant.updateMany({
+                where: { id: deathSaverParticipantId, helpRollMod: { not: null } },
                 data:  { helpRollMod: null },
             })] : []),
             this.db.activeCombat_BehaviorEffect.deleteMany({
@@ -1560,7 +1575,6 @@ export class PlayCombatService {
                     const canStartDeathSaves   = !participant.isAiControlled && usesDeathSaves && !participant.isUnconscious;
                     const alreadyInDeathSaves  = !participant.isAiControlled && usesDeathSaves && participant.isUnconscious;
                     if (canStartDeathSaves) {
-                        const concentratingId = participant.concentratingOnEffectId;
                         await this.db.$transaction(async tx => {
                             await tx.entityStats.update({
                                 where: { entityId: participant.entityId },
@@ -1570,11 +1584,11 @@ export class PlayCombatService {
                                 where: { id: participantId },
                                 data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0, concentratingOnEffectId: null },
                             });
-                            if (concentratingId) {
-                                await tx.activeCombat_BehaviorEffect.delete({
-                                    where: { id: concentratingId },
-                                }).catch(() => null);
-                            }
+                            // Going unconscious ends all behavior effects this entity was sourcing
+                            // (guard, taunt, dodge, concentration) and any guard protecting this entity.
+                            await tx.activeCombat_BehaviorEffect.deleteMany({
+                                where: { OR: [{ sourceParticipantId: participantId }, { linkedParticipantId: participantId }] },
+                            });
                         });
                         events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: false, knockedDown: true });
                     } else if (alreadyInDeathSaves) {

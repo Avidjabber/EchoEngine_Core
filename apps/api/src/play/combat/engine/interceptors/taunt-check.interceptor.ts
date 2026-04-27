@@ -18,7 +18,7 @@ export const tauntCheckInterceptor: CombatInterceptor = {
             where: {
                 affectedParticipantId: ctx.actorParticipantId,
                 effectType:            { forcesTargeting: true },
-                linkedParticipant:     { isDefeated: false, hasFled: false },
+                linkedParticipant:     { isDefeated: false, hasFled: false, isUnconscious: false },
             },
             select: {
                 linkedParticipant: { select: { entityId: true } },

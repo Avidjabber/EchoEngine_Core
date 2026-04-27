@@ -15,7 +15,7 @@ export const guardRedirectInterceptor: CombatInterceptor = {
                 activeCombatId:      ctx.input.combatId,
                 effectType:          { redirectsDamage: true },
                 linkedParticipant:   { entityId: ctx.input.targetEntityId },
-                affectedParticipant: { isDefeated: false, hasFled: false },
+                affectedParticipant: { isDefeated: false, hasFled: false, isUnconscious: false },
             },
             orderBy: { id: 'asc' },
             select: {
