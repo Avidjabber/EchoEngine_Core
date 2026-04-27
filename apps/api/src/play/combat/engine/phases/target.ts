@@ -17,7 +17,7 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
         }),
         db.activeCombat_Participant.findFirst({
             where:  { activeCombatId: ctx.input.combatId, entityId: ctx.actualTargetId },
-            select: { id: true, isUnconscious: true, isAiControlled: true, hasUsedReaction: true, tempHp: true, legendaryResistancesRemaining: true, concentratingOnEffectId: true },
+            select: { id: true, isUnconscious: true, isAiControlled: true, hasUsedReaction: true, tempHp: true, legendaryResistancesRemaining: true, concentratingOnEffectId: true, hasFled: true, isDefeated: true },
         }),
         db.entity_Storage.findUnique({
             where:  { entityId: ctx.actualTargetId },
@@ -67,6 +67,14 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
             legendaryResistancesRemaining: participantRow.legendaryResistancesRemaining,
             concentratingOnEffectId:       participantRow.concentratingOnEffectId ?? null,
         };
+
+        if (participantRow.hasFled || participantRow.isDefeated) {
+            ctx.aborted     = true;
+            ctx.abortReason = participantRow.hasFled
+                ? 'That entity has fled the combat.'
+                : 'That entity has already been defeated.';
+            return;
+        }
 
         if (participantRow.isUnconscious && !ctx.profile?.restoresHealth) {
             ctx.aborted     = true;

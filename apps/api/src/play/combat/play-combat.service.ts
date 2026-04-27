@@ -850,7 +850,7 @@ export class PlayCombatService {
                 data:  { hasFled: true },
             }),
             this.db.activeCombat_BehaviorEffect.deleteMany({
-                where: { sourceParticipantId: participant.id },
+                where: { OR: [{ sourceParticipantId: participant.id }, { linkedParticipantId: participant.id }] },
             }),
             this.db.activeCombat_StatEffect.deleteMany({
                 where: { affectedParticipantId: participant.id },
