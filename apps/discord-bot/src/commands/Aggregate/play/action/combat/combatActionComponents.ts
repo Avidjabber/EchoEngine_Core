@@ -7,8 +7,17 @@ const CATEGORY_LABEL: Record<'main' | 'bonus' | 'item', string> = {
     item:  'Item Interaction',
 };
 
+function scopeLabel(scope: AvailableAction['targetScope']): string {
+    if (!scope) return '';
+    if (scope.targetsSelf) return 'Self';
+    if (scope.targetsSingle) return 'Single';
+    return 'Team';
+}
+
 function actionSummary(action: AvailableAction): string {
     const parts: string[] = [];
+    const scope = scopeLabel(action.targetScope);
+    if (scope) parts.push(`🎯 ${scope}`);
     if (action.damageDice) {
         const typeLabel = action.damageTypeName ? ` ${action.damageTypeName}` : '';
         parts.push(`⚔ ${action.damageDice}${typeLabel}`);
@@ -23,7 +32,7 @@ function actionSummary(action: AvailableAction): string {
 }
 
 export function buildActionResultComponents(result: ActionResult): object[] {
-    const { actorName, targetName, actualTargetName, wasRedirected, actionLabel, outcome } = result;
+    const { actorName, targetName, actualTargetName, wasRedirected, actionLabel, outcome, appliedEffects, summonedEntities, legendaryResistanceUsed, concentrationSaveEvent } = result;
 
     const redirectNote = wasRedirected ? ` → **${actualTargetName}** *(guard)*` : '';
     const header = `**${actorName}** used **${actionLabel}** on **${targetName}**${redirectNote}`;
@@ -49,10 +58,19 @@ export function buildActionResultComponents(result: ActionResult): object[] {
         const totalLine      = hasElemental ? `\n**${totalDamage} total damage**` : '';
 
         body = `${hitLine}\n${primaryLine}${elementalLine}${totalLine}\n${actualTargetName} now at **${outcome.hpAfter} HP**`;
+
+        if (outcome.absorbedDamage > 0) {
+            body += `\n-# 🛡 ${outcome.absorbedDamage} damage absorbed by guard`;
+        }
+        if (outcome.saveRoll !== null) {
+            body += outcome.savedSuccessfully
+                ? `\n-# 🎲 Save: ${outcome.saveTotal} — succeeded (half damage)`
+                : `\n-# 🎲 Save: ${outcome.saveTotal} — failed`;
+        }
         if (outcome.defeated) {
             body += `\n-# 💀 ${actualTargetName} has been eliminated.`;
         } else if (outcome.knockedDown) {
-            body += `\n-# 🟡 ${actualTargetName} is knocked down — awaiting second wind decision.`;
+            body += `\n-# 🟡 ${actualTargetName} falls unconscious — death saves begin on their next turn.`;
         }
         accentColor = colors.error;
     } else if (outcome.kind === 'miss') {
@@ -70,6 +88,23 @@ export function buildActionResultComponents(result: ActionResult): object[] {
     } else {
         body = `${actorName} used ${actionLabel}.`;
         accentColor = colors.info;
+    }
+
+    if (appliedEffects.length > 0) {
+        body += `\n-# ✦ ${appliedEffects.join(', ')}`;
+    }
+    if (summonedEntities.length > 0) {
+        const names = summonedEntities.map(e => `**${e.name}**`).join(', ');
+        body += `\n-# ✦ Summoned: ${names}`;
+    }
+    if (legendaryResistanceUsed) {
+        body += `\n-# 👑 Legendary Resistance used — save forced to succeed.`;
+    }
+    if (concentrationSaveEvent) {
+        const { entityName, total, dc, saved, effectName } = concentrationSaveEvent;
+        body += saved
+            ? `\n-# 🧠 ${entityName} concentration save: DC ${dc} — rolled ${total} — Maintained!`
+            : `\n-# 🧠 ${entityName} concentration save: DC ${dc} — rolled ${total} — **Broken!** (${effectName} ends)`;
     }
 
     return [{
@@ -106,7 +141,9 @@ export function buildActionPickerComponents(
                 type:      2,
                 style:     a.isOnCooldown ? 2 : 1,
                 label:     (a.actionLabel ?? a.itemName).slice(0, 80),
-                custom_id: `pa_cbt_pick:${activeCombatId}:${entityId}:${a.profileId}:${a.storedItemId}:${catSlot}`,
+                custom_id: a.builtinAction
+                    ? `pa_cbt_builtin:${activeCombatId}:${entityId}:${a.builtinAction}:${catSlot}`
+                    : `pa_cbt_pick:${activeCombatId}:${entityId}:${a.profileId}:${a.storedItemId}:${catSlot}`,
                 disabled:  a.isOnCooldown,
             })),
         });
@@ -181,6 +218,63 @@ export function buildTargetPickerComponents(
             backRow,
         ],
     }];
+}
+
+export function buildBuiltinTargetPickerComponents(
+    activeCombatId:     number,
+    entityId:           number,
+    builtinAction:      'dodge' | 'help',
+    catSlot:            number,
+    targets:            CombatParticipantInfo[],
+    actorAllyFactionId: number,
+): object[] {
+    const rows: object[] = [];
+    for (let i = 0; i < targets.length; i += 4) {
+        const slice = targets.slice(i, i + 4);
+        rows.push({
+            type: 1,
+            components: slice.map(t => ({
+                type:      2,
+                style:     t.allyFactionId !== actorAllyFactionId ? 4 : 2,
+                label:     t.name.slice(0, 80),
+                custom_id: `pa_cbt_builtin_t:${activeCombatId}:${entityId}:${builtinAction}:${catSlot}:${t.entityId}`,
+            })),
+        });
+    }
+    const backRow = {
+        type: 1,
+        components: [
+            { type: 2, style: 2, label: '← Back',  custom_id: `pa_cbt_back:${activeCombatId}:${entityId}:${catSlot}` },
+            { type: 2, style: 4, label: 'Cancel',  custom_id: `pa_cbt_cancel:${activeCombatId}` },
+        ],
+    };
+    return [{
+        type:         17,
+        accent_color: colors.info,
+        components:   [{ type: 10, content: `**Help** — choose a target:` }, { type: 14 }, ...rows, backRow],
+    }];
+}
+
+export function buildBuiltinConfirmComponents(
+    activeCombatId: number,
+    entityId:       number,
+    builtinAction:  'dodge' | 'help',
+    catSlot:        number,
+    targetEntityId: number,
+    targetName:     string,
+): object[] {
+    const content = builtinAction === 'dodge'
+        ? `**Dodge**\nConfirm?`
+        : `**Help → ${targetName}**\nConfirm?`;
+    const confirmRow = {
+        type: 1,
+        components: [
+            { type: 2, style: 1, label: 'Confirm', custom_id: `pa_cbt_builtin_ok:${activeCombatId}:${entityId}:${builtinAction}:${catSlot}:${targetEntityId}` },
+            { type: 2, style: 2, label: '← Back',  custom_id: `pa_cbt_back:${activeCombatId}:${entityId}:${catSlot}` },
+            { type: 2, style: 4, label: 'Cancel',  custom_id: `pa_cbt_cancel:${activeCombatId}` },
+        ],
+    };
+    return [{ type: 17, accent_color: colors.info, components: [{ type: 10, content }, { type: 14 }, confirmRow] }];
 }
 
 export function buildActionConfirmComponents(

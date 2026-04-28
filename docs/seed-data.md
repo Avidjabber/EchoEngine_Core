@@ -637,8 +637,9 @@ CombatTargetScope                       [ DONE ]
 ──────────────────────────────────────────────
 CombatInitiationType                    [ DONE ]
 ──────────────────────────────────────────────
-  name   canResultInDeath  isScripted  allowsFleeing  canSecondWind
-  spar   false             false       false          true
+  name   canResultInDeath  isScripted  allowsFleeing  usesDeathSaves
+  spar   false             false       false          false
+  fight  true              false       false          true
   event  true              false       true           true
   boss   true              true        true           true
 

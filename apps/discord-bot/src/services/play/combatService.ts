@@ -13,8 +13,9 @@ export interface CombatParticipantInfo {
 }
 
 export interface AvailableAction {
-    profileId:    number;
-    storedItemId: number;
+    profileId:     number | null;
+    storedItemId:  number | null;
+    builtinAction: 'dodge' | 'help' | null;
     itemName:     string;
     actionLabel:  string | null;
     targetScope: {
@@ -33,25 +34,42 @@ export interface AvailableAction {
 }
 
 export interface RoundEndEvent {
-    kind:       'dot' | 'hot';
+    kind:        'dot' | 'hot';
+    entityId:    number;
+    entityName:  string;
+    amount:      number;
+    hpAfter:     number;
+    defeated:    boolean;
+    knockedDown: boolean;
+}
+
+export interface DeathSaveEvent {
     entityId:   number;
     entityName: string;
-    amount:     number;
-    hpAfter:    number;
-    defeated:   boolean;
+    roll:       number;
+    successes:  number;
+    failures:   number;
+    result:     'success' | 'failure' | 'revived' | 'stable' | 'defeated';
+}
+
+export interface MortallyWoundedCharacter {
+    entityId: number;
+    name:     string;
+    userId:   string | null;
 }
 
 export interface AdvanceTurnResult {
-    combatEnded:            boolean;
-    turnEndEvents:          RoundEndEvent[];
-    nextEntityId:           number | null;
-    nextEntityName:         string | null;
-    nextUserId:             string | null;
-    isAiControlled:         boolean;
-    isAwaitingSecondWind:   boolean;
-    allowsFleeing:          boolean;
-    round:                  number;
-    winningAllyFactionId:   number | null;
+    combatEnded:          boolean;
+    turnEndEvents:        RoundEndEvent[];
+    nextEntityId:         number | null;
+    nextEntityName:       string | null;
+    nextUserId:           string | null;
+    isAiControlled:       boolean;
+    deathSaveEvent:       DeathSaveEvent | null;
+    allowsFleeing:        boolean;
+    round:                number;
+    winningAllyFactionId: number | null;
+    mortallyWounded:      MortallyWoundedCharacter[];
 }
 
 export interface CombatTargetEntity {
@@ -113,8 +131,8 @@ export function advanceTurn(combatId: number, currentEntityId: number) {
 }
 
 export type ActionResultOutcome =
-    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
-    | { kind: 'miss';     hitRoll: number; targetAC: number }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; tempHpDrained: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'miss';     hitRoll: number; targetAC: number; isFumble: boolean }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
     | { kind: 'no_op' };
@@ -127,15 +145,35 @@ export interface PendingReaction {
     reactionProfiles:   Array<{ profileId: number; storedItemId: number; label: string }>;
 }
 
+export interface SummonedEntity {
+    entityId:      number;
+    name:          string;
+    allyFactionId: number;
+    turnOrder:     number;
+}
+
+export interface ConcentrationSaveEvent {
+    entityName: string;
+    roll:       number;
+    total:      number;
+    dc:         number;
+    saved:      boolean;
+    effectName: string;
+}
+
 export interface ActionResult {
-    actionId:         number;
-    actionLabel:      string;
-    actorName:        string;
-    targetName:       string;
-    actualTargetName: string;
-    wasRedirected:    boolean;
-    outcome:          ActionResultOutcome;
-    pendingReaction?: PendingReaction;
+    actionId:                number;
+    actionLabel:             string;
+    actorName:               string;
+    targetName:              string;
+    actualTargetName:        string;
+    wasRedirected:           boolean;
+    outcome:                 ActionResultOutcome;
+    appliedEffects:          string[];
+    pendingReaction?:        PendingReaction;
+    legendaryResistanceUsed: boolean;
+    concentrationSaveEvent:  ConcentrationSaveEvent | null;
+    summonedEntities:        SummonedEntity[];
 }
 
 export function processAction(
@@ -146,7 +184,7 @@ export function processAction(
     targetEntityId: number | null,
     roundNumber:    number,
 ) {
-    return apiClient.post<ActionResult>(`/play/combat/${combatId}/process-action`, {
+    return apiClient.post<ActionResult | ActionResult[]>(`/play/combat/${combatId}/process-action`, {
         actorEntityId, profileId, storedItemId, targetEntityId, roundNumber,
     });
 }
@@ -165,16 +203,24 @@ export function distributeCombatXp(combatId: number) {
     return apiClient.post<XpGrant[]>(`/play/combat/${combatId}/distribute-xp`, {});
 }
 
-export function acceptSecondWind(combatId: number, entityId: number) {
-    return apiClient.post<void>(`/play/combat/${combatId}/second-wind`, { entityId });
-}
-
-export function declineSecondWind(combatId: number, entityId: number) {
-    return apiClient.post<void>(`/play/combat/${combatId}/decline-second-wind`, { entityId });
+export function markDeceased(combatId: number, entityId: number) {
+    return apiClient.post<void>(`/play/combat/${combatId}/mark-deceased`, { entityId });
 }
 
 export function flee(combatId: number, entityId: number) {
     return apiClient.post<{ allowed: boolean }>(`/play/combat/${combatId}/flee`, { entityId });
+}
+
+export function processBuiltinAction(
+    combatId:       number,
+    actorEntityId:  number,
+    action:         'dodge' | 'help',
+    targetEntityId: number | null,
+    roundNumber:    number,
+) {
+    return apiClient.post<ActionResult>(`/play/combat/${combatId}/process-builtin-action`, {
+        actorEntityId, action, targetEntityId, roundNumber,
+    });
 }
 
 export function processReaction(combatId: number, defenderEntityId: number, profileId: number, storedItemId: number, attackerEntityId: number, roundNumber: number) {

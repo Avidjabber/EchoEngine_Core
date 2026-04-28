@@ -2,7 +2,6 @@ import type { CombatActionContext } from '../combat-action-context';
 import type { PipelineServices } from '../combat-pipeline';
 
 // Loads target data from DB and calculates AC.
-// Stage 2+ will add guard-redirect logic here before the data load.
 export async function runTarget(ctx: CombatActionContext, { db }: PipelineServices): Promise<void> {
     if (ctx.actualTargetId === null) return;
 
@@ -11,13 +10,14 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
             where:  { id: ctx.actualTargetId },
             select: {
                 name:    true,
+                userId:  true,
                 species: { select: { baseAc: true } },
-                stats:   { select: { dexterity: true, currentHp: true, maxHp: true } },
+                stats:   { select: { strength: true, dexterity: true, constitution: true, intelligence: true, wisdom: true, charisma: true, currentHp: true, maxHp: true } },
             },
         }),
         db.activeCombat_Participant.findFirst({
             where:  { activeCombatId: ctx.input.combatId, entityId: ctx.actualTargetId },
-            select: { id: true, inSecondWind: true, isAiControlled: true },
+            select: { id: true, isUnconscious: true, isAiControlled: true, hasUsedReaction: true, tempHp: true, legendaryResistancesRemaining: true, concentratingOnEffectId: true, hasFled: true, isDefeated: true },
         }),
         db.entity_Storage.findUnique({
             where:  { entityId: ctx.actualTargetId },
@@ -36,22 +36,50 @@ export async function runTarget(ctx: CombatActionContext, { db }: PipelineServic
         equippedAcBonus = equipped.reduce((sum, i) => sum + (i.chosenProfile?.acModifier ?? 0), 0);
     }
 
-    const dexMod = Math.floor(((targetRow.stats.dexterity ?? 10) - 10) / 2);
-    ctx.targetAC = (targetRow.species?.baseAc ?? 10) + dexMod + equippedAcBonus;
+    const dex    = targetRow.stats.dexterity ?? 10;
+    const dexMod = Math.floor((dex - 10) / 2);
+    ctx.targetAC        = (targetRow.species?.baseAc ?? 10) + dexMod + equippedAcBonus;
+    ctx.targetStorageId = entityStorageRow?.storageId ?? null;
 
     ctx.target = {
         name:      targetRow.name,
+        userId:    targetRow.userId ?? null,
         currentHp: targetRow.stats.currentHp ?? 0,
         maxHp:     targetRow.stats.maxHp     ?? 0,
         baseAc:    targetRow.species?.baseAc  ?? 10,
-        dexterity: targetRow.stats.dexterity  ?? 10,
+        stats: {
+            strength:     targetRow.stats.strength     ?? 10,
+            dexterity:    dex,
+            constitution: targetRow.stats.constitution ?? 10,
+            intelligence: targetRow.stats.intelligence ?? 10,
+            wisdom:       targetRow.stats.wisdom       ?? 10,
+            charisma:     targetRow.stats.charisma     ?? 10,
+        },
     };
 
     if (participantRow) {
         ctx.targetParticipant = {
-            id:             participantRow.id,
-            inSecondWind:   participantRow.inSecondWind,
-            isAiControlled: participantRow.isAiControlled,
+            id:              participantRow.id,
+            isUnconscious:    participantRow.isUnconscious,
+            isAiControlled:  participantRow.isAiControlled,
+            hasUsedReaction: participantRow.hasUsedReaction,
+            tempHp:                        participantRow.tempHp,
+            legendaryResistancesRemaining: participantRow.legendaryResistancesRemaining,
+            concentratingOnEffectId:       participantRow.concentratingOnEffectId ?? null,
         };
+
+        if (participantRow.hasFled || participantRow.isDefeated) {
+            ctx.aborted     = true;
+            ctx.abortReason = participantRow.hasFled
+                ? 'That entity has fled the combat.'
+                : 'That entity has already been defeated.';
+            return;
+        }
+
+        if (participantRow.isUnconscious && !ctx.profile?.restoresHealth) {
+            ctx.aborted     = true;
+            ctx.abortReason = 'You cannot target a downed entity with this action.';
+            return;
+        }
     }
 }

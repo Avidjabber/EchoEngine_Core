@@ -9,17 +9,23 @@ export function buildReactionPromptComponents(
 ): object[] {
     const ping = defenderUserId ? `<@${defenderUserId}>` : `**${defenderEntityName}**`;
 
-    const buttons: object[] = reactionProfiles.map(p => ({
-        type:      2,
-        style:     1,
-        label:     p.label.slice(0, 80),
-        custom_id: `pa_react_use:${activeCombatId}:${defenderEntityId}:${p.profileId}:${p.storedItemId}`,
-    }));
-    buttons.push({
-        type:      2,
-        style:     2,
-        label:     'Skip',
-        custom_id: `pa_react_skip:${activeCombatId}:${defenderEntityId}`,
+    // Split reaction buttons into rows of 4 to stay within Discord's 5-button-per-row limit.
+    // Skip is always placed on its own final row.
+    const rows: object[] = [];
+    for (let i = 0; i < reactionProfiles.length; i += 4) {
+        rows.push({
+            type: 1,
+            components: reactionProfiles.slice(i, i + 4).map(p => ({
+                type:      2,
+                style:     1,
+                label:     p.label.slice(0, 80),
+                custom_id: `pa_react_use:${activeCombatId}:${defenderEntityId}:${p.profileId}:${p.storedItemId}`,
+            })),
+        });
+    }
+    rows.push({
+        type:       1,
+        components: [{ type: 2, style: 2, label: 'Skip', custom_id: `pa_react_skip:${activeCombatId}:${defenderEntityId}` }],
     });
 
     return [{
@@ -28,7 +34,7 @@ export function buildReactionPromptComponents(
         components: [
             { type: 10, content: `${ping} — **${defenderEntityName}** can react!` },
             { type: 14 },
-            { type: 1, components: buttons },
+            ...rows,
         ],
     }];
 }
