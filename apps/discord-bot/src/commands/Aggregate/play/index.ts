@@ -56,6 +56,8 @@ async function handleActionCategory(
     });
 }
 
+export const publicSubcommands = new Set(['combat', 'scouting', 'healing', 'crafting', 'farming']);
+
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const group = interaction.options.getSubcommandGroup();
     const sub   = interaction.options.getSubcommand();
