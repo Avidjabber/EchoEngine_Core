@@ -1,6 +1,6 @@
 COMBAT SYSTEM — DESIGN REFERENCE
 ==================================
-Last updated: 2026-04-06
+Last updated: 2026-04-28
 
 This file is the authoritative reference for how combat works in EchoPaw.
 Read this before touching combat resolution, encounter definitions, NPC AI,
@@ -291,12 +291,18 @@ Used to reconstruct the Discord message narrative after each turn resolves.
   equipmentProfileId       — which item profile was used
   actionCategoryId         — Main Action or Bonus Action
   targetEntityId           — null for self-targeted or AoE actions
-  hitRoll / hitModifier / hit            — attack roll, modifier applied, and whether it connected
-  damageRoll / damageModifier / damageDealt — damage roll, modifier applied, and final damage
+  hitRoll / hitModifier / hit / isCritical / isFumble — attack roll, modifier, and outcome flags
+  damageRoll / damageModifier / damageDealt — primary damage roll, modifier, and final damage
+  elementalDamageRoll / elementalDamageDealt — elemental damage roll and final elemental damage;
+                                               null if the action has no elemental component
   healDealt                               — HP restored (heal actions)
-  reflectedDamage                         — damage returned to the attacker via a reflect effect; null if none
-  absorbedDamage                          — damage intercepted by an absorb buffer before reaching HP; null if none
-  secondWindTriggered                     — true if this action caused a second wind
+  wasRedirected / originalTargetEntityId  — set when a guard effect redirected the attack;
+                                            originalTargetEntityId is who the actor aimed at
+  absorbedDamage                          — damage intercepted by guard absorption; null if none
+  knockedDown                             — true if this action caused the target to enter
+                                            death save state (isUnconscious set to true)
+  saveRoll / savedSuccessfully            — defender's saving throw d20 and outcome;
+                                            null when no save was triggered
 
 
 ─────────────────────────────────────────────

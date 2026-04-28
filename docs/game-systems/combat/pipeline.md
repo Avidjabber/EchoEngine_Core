@@ -1,6 +1,6 @@
 COMBAT ACTION PIPELINE — IMPLEMENTATION REFERENCE
 ==================================================
-Last updated: 2026-04-25
+Last updated: 2026-04-28
 
 This file documents the internal architecture of the combat action pipeline.
 Read this before adding new action types, implementing interceptors, or extending
@@ -36,11 +36,15 @@ Source entry point: apps/api/src/play/combat/engine/combat-pipeline.ts
   TARGET       Load target data from DB; compute target AC.
   PRE_RESOLVE  Pure computation — derive hit, damage, and heal modifiers.
   RESOLVE      Roll dice — determine hit/miss, damage, or heal total.
-  APPLY        Write HP change to DB; set defeat / second wind flags.
-  POST_APPLY   Reaction detection — queries DB to check if defender has
-               equipped, non-suppressed, non-cooldown reaction profiles;
-               populates ctx.pendingReaction if so. Skipped for AI defenders,
-               defeated targets, and knocked-down targets.
+  APPLY        Write HP change to DB; set defeat / death-save flags.
+  POST_APPLY   Concentration save + reaction detection. If the target is
+               concentrating on an effect and took damage, rolls a CON save
+               (DC = max(10, half total damage)); on failure, deletes the
+               effect. Then queries DB to check if the defender has equipped,
+               non-cooldown reaction profiles; populates ctx.pendingReaction
+               if so. Skipped entirely for AI defenders, defeated targets,
+               and knocked-down targets. Reactions are additionally suppressed
+               for AoE actions and reaction chains.
   END          Write action log, upsert cooldowns, decrement item uses,
                apply behavior effects and stat effects.
   NPC_AI       No-op in stages 1–3. Stage 4: AI action selection for the
@@ -62,16 +66,18 @@ The pipeline enforces a hard load/write discipline:
                     uses, behavior/stat effects).
   Pure phases:      VALIDATE, PRE_RESOLVE, RESOLVE — no DB access.
 
-  Exception — POST_APPLY reads DB: it queries ActiveCombat_BehaviorEffect
-  (suppression check) and StoredItem (equipped reaction profiles). It does
-  not write. Stage 3 saving throws may add further reads here.
+  Exception — POST_APPLY reads and conditionally writes DB: it reads
+  ActiveCombat_BehaviorEffect for the concentrating effect name, then
+  deletes that effect when the concentration save fails. It also reads
+  ActiveCombat_Participant_ActionCooldown and StoredItem to find available
+  reaction profiles. It does not write action-log or HP state.
 
 This means phases VALIDATE through RESOLVE are fully deterministic given the
 same context input. They can be unit-tested by constructing a context directly
 — no database required.
 
 This discipline applies to phase runners (the runXxx functions). Interceptors
-are DB-capable at any phase — all six Stage 2 interceptors issue reads. The
+are DB-capable at any phase — most COMBAT_INTERCEPTORS issue reads. The
 constraint on interceptors is: do not issue DB writes from an interceptor unless
 it is scoped to APPLY or END, and only for effects it owns (e.g., a future
 guard-absorption interceptor clearing its buffer after reducing ctx.finalDamage).
@@ -99,6 +105,8 @@ Source type: apps/api/src/play/combat/engine/combat-action-context.ts
   DECLARE
   ────────
   actor              — ActorSnapshot: entity name + all six stats
+  actorParticipant   — ActorParticipantSnapshot: isUnconscious, helpRollMod,
+                       concentratingOnEffectId; null if not found
   profile            — ProfileSnapshot: label, dice, bonuses, actionCategoryId,
                        dealsDamage, restoresHealth, isReactionAction, behavior
                        effect fields, elemental damage fields, saving throw fields,
@@ -118,10 +126,14 @@ Source type: apps/api/src/play/combat/engine/combat-action-context.ts
   actualTargetId     — entity ID of the real target (may differ from input after redirect)
   wasRedirected      — true if a guard effect changed the target
   originalTargetName — name of input.targetEntityId when redirected; null otherwise
-  target             — TargetSnapshot: name, userId, currentHp, maxHp, baseAc, dexterity
-  targetParticipant  — TargetParticipantSnapshot: id, isUnconscious, isAiControlled
-  targetAC           — final computed AC (baseAc + dex modifier + equipped AC bonus items)
-                       Stage 2 ac-mods interceptor may further adjust this.
+  target             — TargetSnapshot: name, userId, currentHp, maxHp, baseAc,
+                       stats (all six base stats as Record<string, number>)
+  targetParticipant  — TargetParticipantSnapshot: id, isUnconscious, isAiControlled,
+                       hasUsedReaction, tempHp, legendaryResistancesRemaining,
+                       concentratingOnEffectId
+  targetAC           — final computed AC (baseAc + dex modifier + equipped AC bonus items);
+                       ac-mods interceptor may further adjust this.
+  targetStorageId    — target's storage ID, cached from TARGET to avoid a re-fetch in POST_APPLY
 
   PRE_RESOLVE
   ────────────
@@ -131,6 +143,10 @@ Source type: apps/api/src/play/combat/engine/combat-action-context.ts
   hitAdvantage       — 'advantage' | 'disadvantage' | null (cancel each other out)
   damageAdvantage    — 'advantage' | 'disadvantage' | null
   healAdvantage      — 'advantage' | 'disadvantage' | null
+  saveAdvantage      — 'advantage' | 'disadvantage' | null (e.g., dodge grants DEX save advantage)
+  primaryDamageMultiplier   — resistance/vulnerability/immunity multiplier precomputed by
+                              ac-mods interceptor; applied to finalDamage in APPLY
+  elementalDamageMultiplier — same as above but for finalElementalDamage
 
   RESOLVE
   ────────
@@ -155,13 +171,24 @@ Source type: apps/api/src/play/combat/engine/combat-action-context.ts
   APPLY
   ──────
   hpAfter            — target's HP after damage/heal is applied
-  knockedDown        — true if target hit 0 HP and second wind is being offered
+  knockedDown        — true if target hit 0 HP and entered death save state (isUnconscious set)
   defeated           — true if target is eliminated (isDefeated set on participant)
+  absorbedDamage     — damage intercepted by guard absorption (guard absorbed this fraction
+                       before the ward's real HP was touched)
+  tempHpDrained      — temp HP drained from the target's buffer before real HP was touched
+  helpConsumed       — actor had a Help advantage/disadvantage that was applied this action;
+                       END clears the helpRollMod field on the participant
+  legendaryResistanceUsed — AI boss auto-spent a legendary resistance charge this action
+                            to flip a failed saving throw to a success
 
   POST_APPLY
   ───────────
-  pendingReaction    — populated when reaction detection fires; null if no reactions
-                       available or defender is AI / suppressed / defeated / knocked down
+  pendingReaction        — populated when reaction detection fires; null if no reactions
+                           available or defender is AI / defeated / knocked down /
+                           already used reaction this round
+  concentrationSaveEvent — set when a concentrating target was hit and a CON save was
+                           rolled; contains roll, total, DC, saved flag, and effect name;
+                           null if no concentration check triggered
 
   END
   ────
@@ -196,14 +223,25 @@ COMBAT INTERCEPTORS  (COMBAT_INTERCEPTORS array in interceptors/index.ts)
   Phase       Priority  File                              Purpose
   ─────────── ────────  ───────────────────────────────── ──────────────────────────────────
   VALIDATE    0         stun-check.interceptor.ts         Abort if actor has deniesActions effect
-  VALIDATE    1         taunt-check.interceptor.ts        Abort if actor is taunted and wrong target
+  VALIDATE    1         taunt-check.interceptor.ts        Abort if actor is taunted and not targeting
+                                                          the taunter (or using an AoE action)
   TARGET      0         guard-redirect.interceptor.ts     Redirect actualTargetId to guarding entity
-  PRE_RESOLVE 0         stat-effect-modifiers.interceptor.ts Adjust actor stats + roll mods from effects
-  PRE_RESOLVE 1         ac-mods.interceptor.ts            Adjust targetAC from target's stat effects
+  TARGET      1         dodge-check.interceptor.ts        Apply hit disadvantage if target is dodging;
+                                                          set saveAdvantage for DEX saves vs a dodging target
+  PRE_RESOLVE -1        help-check.interceptor.ts         Apply Help advantage/disadvantage to hitAdvantage
+  PRE_RESOLVE 0         stat-effect-modifiers.interceptor.ts Adjust actor stats + roll mods from active
+                                                          stat effects
+  PRE_RESOLVE 1         ac-mods.interceptor.ts            Adjust targetAC from target's stat effects;
+                                                          precompute primaryDamageMultiplier /
+                                                          elementalDamageMultiplier
+  APPLY       -1        temp-hp.interceptor.ts            Drain target's temp HP buffer before real HP
+                                                          is touched; reduces finalDamage proportionally
   APPLY       0         guard-absorption.interceptor.ts   Scale finalDamage/finalElementalDamage by
                                                           guard's percentModifier when redirected
-  APPLY       1         damage-modifiers.interceptor.ts   Scale finalDamage/finalElementalDamage by
-                                                          resistance, vulnerability, or immunity
+  APPLY       1         damage-modifiers.interceptor.ts   Apply precomputed multipliers for resistance,
+                                                          vulnerability, or immunity
+  APPLY       2         dispel.interceptor.ts             Delete all stat + behavior effects from target
+                                                          when profile.behaviorEffectRemovesEffects is set
 
 NPC_AI is not an interceptor target — it is a full phase. It is always last and
 always runs (as a no-op) even in stages 1–3. This ensures the phase slot is reserved
@@ -224,18 +262,25 @@ On abort the current context (with aborted = true) is returned immediately.
 The service layer (processAction) checks ctx.aborted and throws an error:
   if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Action aborted')
 
-Stage 1 abort triggers (validate.ts):
-  — profile is null (item profile not found)
+VALIDATE phase abort triggers (validate.ts):
+  — profile, actor, combatMeta, or actorParticipantId not loaded (data not found)
+  — actor is unconscious (actorParticipant.isUnconscious = true)
   — profile.actionCategoryId is null (misconfigured profile; reaction profiles exempt)
-  — actor is null (entity not found)
-  — combatMeta is null (combat not found)
   — actor's turnOrder does not match combat's currentTurnOrder (out of turn; reactions exempt)
   — profile.dealsDamage is true but targetEntityId is null
-  — non-guard behavior effect profile has no target
+  — profile.restoresHealth is true but targetEntityId is null
+  — non-guard behavior effect profile has no target (behaviorEffectTypeId set,
+    redirectsDamage false, targetEntityId null)
 
-Stage 2 abort triggers (interceptors):
-  — actor has an active deniesActions behavior effect (stun-check)
-  — actor is taunted and targetEntityId is not the taunter's entity (taunt-check)
+TARGET phase abort triggers (target.ts):
+  — target participant has hasFled = true
+  — target participant has isDefeated = true
+  — target is unconscious and the action is not a healing action
+
+Interceptor abort triggers:
+  — actor has an active deniesActions behavior effect (stun-check, VALIDATE/0)
+  — actor is taunted and using an AoE action, or targeting a non-taunter
+    (taunt-check, VALIDATE/1)
 
 
 ─────────────────────────────────────────────
@@ -275,19 +320,24 @@ handle advantage/disadvantage by rolling twice and picking the higher or lower r
       target.ts       — TARGET: DB reads for target entity, participant, AC
       pre-resolve.ts  — PRE_RESOLVE: pure modifier computation from actor stats
       resolve.ts      — RESOLVE: dice rolls, hit/miss, critical/fumble, elemental damage
-      apply.ts        — APPLY: HP update (damage or heal), defeat / second wind DB writes
-      post-apply.ts   — POST_APPLY: reaction detection for non-AI, non-suppressed defenders
+      apply.ts        — APPLY: HP update (damage or heal), defeat / death-save DB writes
+      post-apply.ts   — POST_APPLY: concentration saves + reaction detection
       end.ts          — END: action log, cooldowns, item uses, behavior/stat effects
       npc-ai.ts       — NPC_AI: no-op in stages 1–3; AI action selection in stage 4
 
     interceptors/
-      index.ts                          — STAGE_2_INTERCEPTORS array
+      index.ts                          — COMBAT_INTERCEPTORS array
       stun-check.interceptor.ts         — VALIDATE/0: deniesActions check
       taunt-check.interceptor.ts        — VALIDATE/1: forcesTargeting enforcement
       guard-redirect.interceptor.ts     — TARGET/0: redirect to guarding entity
+      dodge-check.interceptor.ts        — TARGET/1: hit disadvantage + DEX save advantage vs dodge
+      help-check.interceptor.ts         — PRE_RESOLVE/-1: Help advantage/disadvantage application
       stat-effect-modifiers.interceptor.ts — PRE_RESOLVE/0: actor stat and roll mods
-      ac-mods.interceptor.ts            — PRE_RESOLVE/1: target AC mods from stat effects
-      damage-modifiers.interceptor.ts   — APPLY/1: resistance / vulnerability / immunity
+      ac-mods.interceptor.ts            — PRE_RESOLVE/1: target AC mods; precompute damage multipliers
+      temp-hp.interceptor.ts            — APPLY/-1: drain temp HP buffer before real HP
+      guard-absorption.interceptor.ts   — APPLY/0: guard percentModifier scaling when redirected
+      damage-modifiers.interceptor.ts   — APPLY/1: apply precomputed resistance/vulnerability/immunity
+      dispel.interceptor.ts             — APPLY/2: clear all effects when removesEffects is set
 
   apps/api/src/play/combat/
     play-combat.service.ts    — service; wires pipeline into processAction / processReaction
