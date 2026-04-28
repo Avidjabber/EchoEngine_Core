@@ -2,6 +2,15 @@ COMBAT SYSTEM — DESIGN REFERENCE
 ==================================
 Last updated: 2026-04-28
 
+Start here for the design context, then read pipeline.md for the engine
+implementation and service.md for the service layer and turn loop.
+
+  pipeline.md          — engine phases, context fields, interceptors
+  service.md           — service layer, turn loop, HTTP surface
+  stages.md            — staged development history
+  missing-mechanics.md — unimplemented D&D 5.5e features
+
+
 This file is the authoritative reference for how combat works in EchoPaw.
 Read this before touching combat resolution, encounter definitions, NPC AI,
 or XP reward logic tied to combat.

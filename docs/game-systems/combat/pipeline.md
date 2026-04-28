@@ -2,6 +2,14 @@ COMBAT ACTION PIPELINE — IMPLEMENTATION REFERENCE
 ==================================================
 Last updated: 2026-04-28
 
+Read system.md first for design context. See service.md for the layer that wraps
+this engine — the turn loop, reaction roundtrip, builtin actions, and combat end.
+
+  system.md  — design reference (schema, behavior effects, stat effects)
+  service.md — service layer, turn loop, HTTP surface
+  stages.md  — development stage history
+
+
 This file documents the internal architecture of the combat action pipeline.
 Read this before adding new action types, implementing interceptors, or extending
 any phase with new logic.
@@ -79,8 +87,8 @@ same context input. They can be unit-tested by constructing a context directly
 This discipline applies to phase runners (the runXxx functions). Interceptors
 are DB-capable at any phase — most COMBAT_INTERCEPTORS issue reads. The
 constraint on interceptors is: do not issue DB writes from an interceptor unless
-it is scoped to APPLY or END, and only for effects it owns (e.g., a future
-guard-absorption interceptor clearing its buffer after reducing ctx.finalDamage).
+it is scoped to APPLY or END, and only for the state that interceptor owns
+(e.g., temp-hp draining the participant's buffer, dispel clearing effects).
 
 
 ─────────────────────────────────────────────

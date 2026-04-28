@@ -2,6 +2,14 @@ COMBAT PIPELINE — STAGE ROADMAP
 ================================
 Last updated: 2026-04-25
 
+Historical record of what shipped in each stage. For current implementation
+details see pipeline.md and service.md.
+
+  system.md   — design reference
+  pipeline.md — engine phases, context, interceptors
+  service.md  — service layer, turn loop, HTTP surface
+
+
 The combat action pipeline is built in stages. Each stage leaves a fully
 working combat loop — no rewrites, only additions. New capabilities are added
 as interceptors or by filling in currently no-op phases.

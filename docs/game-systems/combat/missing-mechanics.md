@@ -2,6 +2,14 @@ COMBAT SYSTEM — MISSING D&D 5.5E MECHANICS
 ==========================================
 Last updated: 2026-04-26
 
+Assumes familiarity with system.md and pipeline.md. See service.md for the
+service layer and how implemented mechanics connect to the turn loop.
+
+  system.md   — design reference (schema, behavior effects, stat effects)
+  pipeline.md — engine phases, context, interceptors
+  service.md  — service layer, turn loop, HTTP surface
+
+
 This file tracks D&D 5.5e (2024 PHB) mechanics not yet implemented in the
 EchoEngine combat system. Each entry notes what is missing, which system
 layer it affects, and an estimated implementation complexity.
