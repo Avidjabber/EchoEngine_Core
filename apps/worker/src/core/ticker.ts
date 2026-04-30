@@ -1,20 +1,14 @@
-const SECONDS = 60; // Seconds per tick
 
-startTicker();
+import cron from 'node-cron';
 
-var thisHour : number;
-var lastHour: number;
+// Run a task every hour
+cron.schedule('0 * * * *', () => {
+  console.log('Task is running every hour');
+});
 
-export default async function startTicker() {
-  console.log("Ticker started");
-  lastHour = new Date().getHours();
-  setInterval(checkTime, SECONDS * 1000);
-}
+// Run a task every second
+cron.schedule('0 * * * * *', () => {
+  console.log('Task is running every second');
+});
 
-async function checkTime() {
-  thisHour = new Date().getHours();
-  if (thisHour !== lastHour) {
-    console.log("Current hour:", thisHour);
-    lastHour = thisHour;
-  }
-}
+
