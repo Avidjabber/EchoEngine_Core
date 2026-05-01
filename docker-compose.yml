@@ -43,3 +43,20 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # ── Worker ───────────────────────────────────────────────────────────────
+  worker:
+    build:
+        context: .
+        dockerfile: apps/worker/Dockerfile
+    restart: on-failure:2
+    env_file:
+      - apps/worker/.env
+    environment:
+      NODE_ENV: production
+      API_BASE_URL: http://api:3000
+    networks:
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy
