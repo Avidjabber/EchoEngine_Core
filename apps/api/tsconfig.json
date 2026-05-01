@@ -3,12 +3,10 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "rootDir": "./src",
     "outDir": "./dist",
-    "baseUrl": "./",
     "incremental": true,
     "paths": {
       "@prisma/primary": ["./src/generated/prisma-primary/client"],
