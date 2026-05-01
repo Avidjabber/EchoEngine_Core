@@ -56,6 +56,7 @@ export class ServerRepository {
         craftingEnabled?:    boolean;
         progressionEnabled?: boolean;
         socialEnabled?:      boolean;
+        timezoneOffset?:     number;
     }) {
         return this.db.guildSettings.update({
             where: { guildId },

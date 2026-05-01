@@ -24,6 +24,7 @@ const GUILD_SETTINGS_DEFAULTS = {
     craftingEnabled:    true,
     progressionEnabled: true,
     socialEnabled:      true,
+    timezoneOffset:     0,
 } as const;
 
 @Injectable()

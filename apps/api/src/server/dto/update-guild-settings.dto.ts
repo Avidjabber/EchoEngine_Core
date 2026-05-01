@@ -92,4 +92,10 @@ export class UpdateGuildSettingsDto {
     @IsOptional()
     @IsBoolean()
     declare socialEnabled?: boolean;
+
+    @IsOptional()
+    @IsInt()
+    @Min(-12)
+    @Max(12)
+    declare timezoneOffset?: number;
 }

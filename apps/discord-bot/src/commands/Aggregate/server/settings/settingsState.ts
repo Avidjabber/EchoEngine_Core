@@ -17,6 +17,7 @@ export interface GuildSettingsState {
     craftingEnabled:    boolean;
     progressionEnabled: boolean;
     socialEnabled:      boolean;
+    timezoneOffset:     number;
 }
 
 const TTL_MS = 20 * 60 * 1000;

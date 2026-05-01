@@ -2,6 +2,13 @@ import { colors } from '../../../../core/colors';
 import { SettingsNumberKey } from '../../../../services/server/settingsService';
 import { GuildSettingsState } from './settingsState';
 
+export const UTC_OFFSETS = [-12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+
+export function formatOffset(offset: number): string {
+    if (offset === 0) return 'UTC+0';
+    return offset > 0 ? `UTC+${offset}` : `UTC${offset}`;
+}
+
 export interface NumberFieldDef {
     key:         SettingsNumberKey;
     label:       string;
@@ -53,7 +60,34 @@ function formatValue(key: SettingsNumberKey, state: GuildSettingsState): string 
     return value === null || value === undefined ? 'None' : String(value);
 }
 
-export function buildGuildSettingsComponents(state: GuildSettingsState, guildName: string): object[] {
+export function buildGuildSettingsComponents(state: GuildSettingsState, guildName: string, timezoneEditing = false): object[] {
+    const timezoneSection = timezoneEditing
+        ? {
+            type:       1,  // ActionRow
+            components: [{
+                type:        3,  // StringSelect
+                custom_id:   'gs_tz_select',
+                placeholder: 'Select a UTC offset...',
+                options:     UTC_OFFSETS.map(offset => ({
+                    label:   formatOffset(offset),
+                    value:   String(offset),
+                    default: offset === state.timezoneOffset,
+                })),
+            }],
+        }
+        : {
+            type:       9,  // Section
+            components: [
+                { type: 10, content: `**Timezone** — ${formatOffset(state.timezoneOffset)}\n-# Your server's UTC offset, used to align the daily tick with local midnight.` },
+            ],
+            accessory: {
+                type:      2,
+                label:     'Update',
+                style:     2,  // Secondary
+                custom_id: 'gs_tz_btn',
+            },
+        };
+
     const numberSections = SETTINGS_NUMBER_FIELDS.map(({ key, label, description }) => ({
         type:       9,  // Section
         components: [
@@ -74,6 +108,7 @@ export function buildGuildSettingsComponents(state: GuildSettingsState, guildNam
             components:   [
                 { type: 10, content: `## ${guildName} Settings` },
                 { type: 14, divider: true },
+                timezoneSection,
                 ...numberSections,
             ],
         },
