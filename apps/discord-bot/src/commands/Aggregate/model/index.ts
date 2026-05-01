@@ -10,6 +10,10 @@ import { execute as weatherStateUpload }       from './weatherstates/upload';
 import { execute as weatherStateTemplate }     from './weatherstates/template';
 import { execute as weatherStateDownload }     from './weatherstates/download';
 import { execute as weatherStateReset }        from './weatherstates/reset';
+import { execute as weatherPatternUpload }     from './weatherpatterns/upload';
+import { execute as weatherPatternTemplate }   from './weatherpatterns/template';
+import { execute as weatherPatternDownload }   from './weatherpatterns/download';
+import { execute as weatherPatternReset }      from './weatherpatterns/reset';
 
 export const data = new SlashCommandBuilder()
     .setName('model')
@@ -108,6 +112,37 @@ export const data = new SlashCommandBuilder()
                     .setName('reset')
                     .setDescription('Delete all weather state definitions for this guild'),
             ),
+    )
+    .addSubcommandGroup(group =>
+        group
+            .setName('weatherpattern')
+            .setDescription('Manage guild weather pattern definitions')
+            .addSubcommand(sub =>
+                sub
+                    .setName('upload')
+                    .setDescription('Upload a weather pattern pack from an .xlsx file')
+                    .addAttachmentOption(opt =>
+                        opt
+                            .setName('file')
+                            .setDescription('The .xlsx pack file to upload')
+                            .setRequired(true),
+                    ),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('template')
+                    .setDescription('Download a blank .xlsx template for weather pattern packs'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('download')
+                    .setDescription('Download this guild\'s current weather pattern config as an .xlsx file'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('reset')
+                    .setDescription('Delete all weather pattern definitions for this guild'),
+            ),
     );
 
 export const publicSubcommands = new Set(['upload', 'template', 'download', 'reset']);
@@ -129,4 +164,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (group === 'weatherstate' && sub === 'template') return weatherStateTemplate(interaction);
     if (group === 'weatherstate' && sub === 'download') return weatherStateDownload(interaction);
     if (group === 'weatherstate' && sub === 'reset')    return weatherStateReset(interaction);
+
+    if (group === 'weatherpattern' && sub === 'upload')   return weatherPatternUpload(interaction);
+    if (group === 'weatherpattern' && sub === 'template') return weatherPatternTemplate(interaction);
+    if (group === 'weatherpattern' && sub === 'download') return weatherPatternDownload(interaction);
+    if (group === 'weatherpattern' && sub === 'reset')    return weatherPatternReset(interaction);
 }
