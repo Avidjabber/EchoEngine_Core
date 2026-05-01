@@ -134,30 +134,35 @@ export function buildTurnEndedComponents(entityName: string): object[] {
     }];
 }
 
-export function buildSecondWindComponents(
+export function buildDeceasedPromptComponents(
     activeCombatId: number,
     entityId:       number,
     entityName:     string,
-    userId:         string | undefined,
-    round:          number,
+    userId:         string | null,
 ): object[] {
-    const ping = userId ? `<@${userId}>` : `**${entityName}**`;
+    const ping = userId ? ` (<@${userId}>)` : '';
     return [{
         type:         17,
-        accent_color: colors.warning,
+        accent_color: colors.error,
         components: [
-            { type: 10, content: `${ping} — **${entityName}** has been knocked down!\nAccept **Second Wind** to recover full HP and continue — but if you fall again, you will be eliminated.` },
+            { type: 10, content: `**${entityName}**${ping} died from their wounds. Should they be marked as permanently deceased?\n-# Only server administrators can respond.` },
             { type: 14 },
             {
                 type: 1,
                 components: [
-                    { type: 2, style: 1, label: 'Accept Second Wind', custom_id: `pa_sw_accept:${activeCombatId}:${entityId}` },
-                    { type: 2, style: 4, label: 'Decline',            custom_id: `pa_sw_decline:${activeCombatId}:${entityId}` },
+                    { type: 2, style: 4, label: 'Mark as Deceased', custom_id: `pa_deceased_mark:${activeCombatId}:${entityId}` },
+                    { type: 2, style: 2, label: 'Spare',            custom_id: `pa_deceased_spare:${activeCombatId}:${entityId}` },
                 ],
             },
-            { type: 10, content: `-# Round ${round}` },
         ],
     }];
+}
+
+export function buildDeceasedResolvedComponents(entityName: string, wasMarked: boolean): object[] {
+    const text = wasMarked
+        ? `-# **${entityName}** has been marked as permanently deceased.`
+        : `-# **${entityName}** has been spared.`;
+    return [{ type: 17, accent_color: wasMarked ? colors.error : colors.info, components: [{ type: 10, content: text }] }];
 }
 
 export function buildCombatOutcomeComponents(

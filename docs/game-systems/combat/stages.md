@@ -2,6 +2,14 @@ COMBAT PIPELINE — STAGE ROADMAP
 ================================
 Last updated: 2026-04-25
 
+Historical record of what shipped in each stage. For current implementation
+details see pipeline.md and service.md.
+
+  system.md   — design reference
+  pipeline.md — engine phases, context, interceptors
+  service.md  — service layer, turn loop, HTTP surface
+
+
 The combat action pipeline is built in stages. Each stage leaves a fully
 working combat loop — no rewrites, only additions. New capabilities are added
 as interceptors or by filling in currently no-op phases.
@@ -26,9 +34,9 @@ What's included:
   - Item use limits (usesRemaining, dailyUsesRemaining decremented per use)
   - Action log (ActiveCombat_Action) written every action
   - XP distribution on combat end (event-combat pool + spar/fight reward rows)
-  - processReaction stub (no-op; HTTP surface exists for bot compatibility)
-  - _processTurnEnd: cooldown tick only
-  - _processTurnStart: no-op stub
+  - processReaction HTTP surface exists; fully wired in stage 2
+  - _processTurnEnd: cooldown tick only (stat effect decrement, DoT/HoT added in stage 2)
+  - _processTurnStart: behavior effect decrement (inlined into advanceTurn transaction in stage 2)
 
 What is explicitly deferred:
   - Guard redirect (stage 2)
@@ -37,72 +45,168 @@ What is explicitly deferred:
   - Behavior effects — guard, taunt, parry, absorb, reflect, stun (stage 2)
   - Stat effects — hit mods, damage mods, AC mods, DoT, HoT, advantage (stage 2)
   - Reactions (stage 2)
-  - Saving throws (stage 3+)
-  - AoE / multi-target (stage 3+)
-  - NPC AI action selection (stage 3+; NPC_AI phase stub exists but is a no-op)
-  - Mid-combat joins and summons (stage 3+)
+  - Saving throws (stage 3)
+  - AoE / multi-target (stage 3)
+  - Mid-combat joins and summons (stage 3)
   - Pre-combat effects (Entity_PreCombatEffect → ActiveCombat_StatEffect, stage 2+)
+  - NPC AI action selection (stage 4; NPC_AI phase stub exists but is a no-op)
 
 
 ─────────────────────────────────────────────
-STAGE 2 — EFFECTS AND REACTIONS  (planned)
+STAGE 2 — EFFECTS AND REACTIONS  ✓ COMPLETE
 ─────────────────────────────────────────────
 
 Adds the full effect layer and the reaction system.
 
-Guard redirect (TARGET phase interceptor, priority 0)
+Implementation order
+  Group 1 (self-contained, no prerequisites):
+    [x] Healing actions
+
+  Group 2 (effect infrastructure — unlocks Groups 3 and 4):
+    [x] Behavior effects
+    [x] Stat effects on action use
+
+  Group 3 (consumers of Group 2):
+    [x] Guard redirect (TARGET phase — redirection only)
+    [x] Stat effect modifiers
+    [x] Damage resistance / vulnerability / immunity
+    [x] Guard absorption (APPLY phase — deferred to stage 3, now complete)
+
+  Group 4 (heaviest — requires Groups 2 and 3):
+    [x] Reactions
+    [x] Pre-combat effects
+
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+Healing actions  [x] GROUP 1
+  If profile.restoresHealth: roll heal dice, set ctx.diceRolls / ctx.rawHeal / ctx.finalHeal.
+  APPLY phase extended: if ctx.finalHeal > 0, update HP upward (capped at maxHp).
+  No hit roll — healing always lands.
+  Outcome kind: 'heal'.
+
+Behavior effects  [x] GROUP 2
+  When a profile action's actionType has an associated CombatEffectType:
+  upsert ActiveCombat_BehaviorEffect for the target with roundsRemaining.
+  At the start of the source participant's next turn: delete rows at roundsRemaining=1,
+  decrement all others. (Inlined into advanceTurn as an atomic transaction.)
+
+Stat effects on action use  [x] GROUP 2
+  ItemEquipmentProfile_StatEffect rows: roll applicationChance; if it fires,
+  create ActiveCombat_StatEffect for the target.
+  At turn end: delete stat effect rows at roundsRemaining=1 (after their final DoT/HoT
+  tick fires), decrement all others. DoT/HoT fire at round end, write HP, emit
+  RoundEndEvent rows. Defeat-by-DoT is atomic (HP + isDefeated + deleteMany).
+
+Guard redirect  [x] GROUP 3
+  TARGET phase interceptor, priority 0.
   Read ActiveCombat_BehaviorEffect for guard effects protecting input.targetEntityId.
   If found: set ctx.actualTargetId → guarding entity, ctx.wasRedirected = true,
   ctx.originalTargetName = name of original target.
-  Guard partially absorbs damage → reduce ctx.finalDamage in APPLY interceptor
-  by guard's percentModifier before HP is written.
+  Damage is fully dealt to the redirected target (guarding entity).
+  Partial absorption of that damage is a separate APPLY interceptor — see stage 3.
 
-Stat effect modifiers (PRE_RESOLVE interceptor)
+Guard absorption  [x] GROUP 3 — implemented in stage 3
+  APPLY phase interceptor, priority 0 (runs before damage-modifiers at priority 1).
+  When ctx.wasRedirected is true: read the guard effect's percentModifier from
+  ActiveCombat_BehaviorEffect. Reduce ctx.finalDamage to:
+    ctx.finalDamage = Math.floor(ctx.finalDamage * percentModifier)
+  This represents the guard absorbing a fraction of the incoming damage.
+  Resistances and immunities (priority 1) then apply to the post-absorption amount.
+  ctx.absorbedDamage records the difference and is written to the action log.
+
+Stat effect modifiers  [x] GROUP 3
+  PRE_RESOLVE interceptor, priority 0 (runs before runPreResolve).
   Read ActiveCombat_StatEffect rows for the actor:
-    RollMod rows → add to ctx.hitModifier / ctx.damageModifier / ctx.healModifier
-    RollAdvantage rows → affect RESOLVE dice rolling (roll twice, keep high/low)
+    StatMod rows (null context) → adjust ctx.actor.stats values in-place so that
+      runPreResolve derives the stat modifier from the buffed/debuffed stat value
+    RollMod rows → add directly to ctx.hitModifier / ctx.damageModifier / ctx.healModifier
+    RollAdvantage rows → set ctx.hitAdvantage / ctx.damageAdvantage / ctx.healAdvantage
+      (advantage and disadvantage cancel each other out per D&D 5e rules)
 
-Damage resistance / vulnerability / immunity (APPLY interceptor, priority 0)
-  Read ActiveCombat_StatEffect rows for the target (type: damage_modifier).
-  Scale ctx.finalDamage before APPLY writes HP:
-    resistance: × 0.5
-    vulnerability: × 2.0
-    immunity: set to 0
+Damage resistance / vulnerability / immunity  [x] GROUP 3
+  APPLY interceptor, priority 1 (runs after guard absorption at priority 0).
+  Read ActiveCombat_StatEffect rows for the target's damage modifier effects.
+  Scale ctx.finalDamage and ctx.finalElementalDamage per matching damageTypeId:
+    resistance:    Math.floor(amount × modifier)  — typically 0.5
+    vulnerability: Math.floor(amount × modifier)  — typically 2.0
+    immunity:      0 (isImmune flag overrides modifier)
+  Untyped damage (null damageTypeId) bypasses all scaling.
 
-Healing actions (RESOLVE phase extension)
-  If profile.restoresHealth: roll heal dice, set ctx.diceRolls / ctx.rawHeal / ctx.finalHeal.
-  APPLY phase extended: if ctx.finalHeal > 0, update HP upward (capped at maxHp).
-
-Behavior effects (END phase extension or new phase)
-  When a profile action's actionType has an associated CombatEffectType:
-  upsert ActiveCombat_BehaviorEffect for the target with roundsRemaining.
-  _processTurnStart: decrement roundsRemaining, delete rows at 0.
-
-Stat effects on action use (END phase extension)
-  ItemEquipmentProfile_StatEffect rows: roll applicationChance; if it fires,
-  create ActiveCombat_StatEffect for the target.
-  _processTurnEnd: decrement roundsRemaining on stat effects; delete at 0.
-  DoT / HoT: fire at round end, write HP, emit RoundEndEvent rows.
-
-Reactions (POST_APPLY phase)
-  After a hit resolves, check if the defender has equipped reaction-category actions.
-  If so: populate ctx.pendingReaction; return to service layer.
+Reactions  [x] GROUP 4
+  POST_APPLY phase.
+  After a hit resolves, check if the defender has equipped, non-suppressed,
+  non-cooldown reaction-category actions. If so: populate ctx.pendingReaction.
   Service layer returns pendingReaction to controller; bot posts reaction prompt.
-  processReaction is fully wired (currently a no-op stub).
+  processReaction is fully wired.
 
-Pre-combat effects (combat start)
+Pre-combat effects  [x] GROUP 4
   At startCombat: for each participant, query Entity_PreCombatEffect rows.
   Create ActiveCombat_StatEffect rows for active pre-combat buffs.
   Create cooldown rows if equipmentProfileId is set.
 
 
 ─────────────────────────────────────────────
-STAGE 3 — NPC AI, SAVING THROWS, AOE  (future)
+STAGE 3 — GUARD ABSORPTION, SAVING THROWS, AOE, JOINS
+─────────────────────────────────────────────
+
+Guard absorption  [x]
+  See GROUP 3 in Stage 2 above for full notes. The interceptor was planned in Stage 2
+  and implemented here in Stage 3.
+
+Saving throws  [x]
+  RESOLVE phase extended: profiles with savingThrowStat trigger a defender roll
+  (d20 + stat modifier) vs. saveDC. On save: damage halved or effect skipped.
+  Schema: savingThrowStatId + saveDC on ItemEquipmentProfile;
+          saveRoll + savedSuccessfully on ActiveCombat_Action.
+  Context: saveRoll, saveTotal, savedSuccessfully set in RESOLVE.
+  Trigger: fires on a hit for damage actions; fires unconditionally for non-damage
+  actions (e.g. a stun with no attack roll still uses a save to determine outcome).
+  Halving applies to both finalDamage and finalElementalDamage before APPLY interceptors run.
+  Effect-skipping (end.ts): for non-damage actions only — a successful save prevents
+  behavior effects and stat effects from being applied. For damage actions, a successful
+  save only halves damage; effects (if any) still apply.
+
+AoE / multi-target  [x]
+  Service-level orchestration (Option A): pipeline stays single-target; processAction
+  runs one pipeline call per discovered target and returns ActionResult[].
+  Detection: profile's CombatTargetScope has targetsEnemies or targetsAllies (and not
+  targetsSingle). Targets are all non-defeated, non-fled participants of the matching
+  faction(s), ordered by turnOrder.
+  input.aoeIndex tracks position in the batch:
+    null  = single-target (no change to existing behavior)
+    0     = first AoE target: full END processing, reactions suppressed
+    1+    = follow-up targets: cooldown/use tracking skipped, reactions suppressed
+  Actor-side abort on the first target (off-turn, stunned) fails the whole AoE.
+  Subsequent aborts (e.g. taunt mismatch on a specific target) skip that target only.
+  AoE + guard redirect: if guard entity A protects enemy B, an AoE targeting all
+  enemies will hit A twice — once as the redirect target for B, and once directly as
+  a target in its own right. This is a known accepted edge case for Stage 3.
+
+Mid-combat joins and summons  [x]
+  joinCombat(combatId, entityId, allyFactionId) — public service method + POST /:id/join
+  controller endpoint. Appends new participant at maxTurnOrder + 1 (no initiative re-sort
+  since historical rolls are not stored). Seeds pre-combat stat effects for the joiner.
+  Returns SummonedEntity { entityId, name, allyFactionId, turnOrder }.
+
+  Summon — triggered after a successful action when profile.summonSpeciesId is set.
+  _spawnNpcEntity creates: Entity (NPC type, Active status, given species), EntityStats
+  (base stats from species; HP = floor(count*sides/2) + CON mod), Storage + Entity_Storage,
+  StoredItems from SpeciesDefaultLoadout (autoEquip items get isEquipped + chosenProfileId),
+  ActiveCombat_Participant (isAiControlled = true, appended at maxTurnOrder + 1 inside the
+  transaction). Calls _seedPreCombatEffects after the transaction.
+  _executeSummons rolls summonDiceCount d summonDiceSides to determine spawn count (defaults
+  to 1 if dice fields are null), then calls _spawnNpcEntity once per entity.
+  summonedEntities: SummonedEntity[] is returned on ActionResult; populated after the pipeline
+  completes. AoE summons attach to results[0].summonedEntities.
+
+
+─────────────────────────────────────────────
+STAGE 4 — NPC AI  (future)
 ─────────────────────────────────────────────
 
 NPC AI (NPC_AI phase — final phase in the pipeline)
-  NPC_AI is a dedicated pipeline phase, always the last to run. In stage 1 it is
-  a no-op stub (npc-ai.ts). In stage 3 it reads the next participant's
+  NPC_AI is a dedicated pipeline phase, always the last to run. In stages 1–3 it
+  is a no-op stub (npc-ai.ts). In stage 4 it reads the next participant's
   isAiControlled flag and, if true:
     1. Reads SpeciesCombatBehavior weights (attackWeight, buffWeight, debuffWeight,
        healWeight) and normalises them into a probability distribution.
@@ -112,19 +216,3 @@ NPC AI (NPC_AI phase — final phase in the pipeline)
     4. Executes the chosen action via a recursive runCombatPipeline call.
   advanceTurn no longer skips AI turns in the bot loop — the NPC_AI phase handles
   them inline as part of the same pipeline run.
-
-Saving throws
-  RESOLVE phase extended: profiles with savingThrowStat trigger a defender roll
-  (d20 + stat modifier) vs. saveDC. On save: damage halved or effect skipped.
-
-AoE / multi-target
-  Pipeline currently processes one target per call. Multi-target actions will
-  require either: (a) repeated pipeline runs with the same input per target,
-  or (b) a TARGET-phase that loops over all valid targets and applies RESOLVE /
-  APPLY per entity, accumulating results into a results array on the context.
-
-Mid-combat joins and summons
-  joinCombat endpoint: roll initiative, insert participant at correct turnOrder,
-  increment all higher turnOrder values.
-  Summon: triggered from an action's summonSpeciesId, spawns entity + loadout,
-  calls join logic.

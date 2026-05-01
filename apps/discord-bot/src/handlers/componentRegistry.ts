@@ -15,8 +15,8 @@ import { handlePaActionBack, handlePaActionPick }                               
 import { handlePaCombatAddChar, handlePaCombatSignup, handlePaCombatRemove, handlePaCombatAddTeam, handlePaCombatCancel, handlePaCombatStart } from '../commands/Aggregate/play/action/combat/setupHandlers';
 import { handlePaInviteAccept, handlePaInviteReject }                                                                                         from '../commands/Aggregate/play/action/combat/inviteHandlers';
 import { handlePaEpickInvitePage, handlePaEpickSignupPage, handlePaEpickInvitePick, handlePaEpickSignupPick, handlePaEpickCancel }             from '../commands/Aggregate/play/action/combat/entityPickerHandlers';
-import { handlePaTurnMain, handlePaTurnBonus, handlePaTurnItem, handlePaTurnEnd, handlePaTurnFlee, handlePaSwAccept, handlePaSwDecline }        from '../commands/Aggregate/play/action/combat/combatTurnHandlers';
-import { handlePaCbtPick, handlePaCbtTarget, handlePaCbtConfirm, handlePaCbtBack, handlePaCbtCancel }                                           from '../commands/Aggregate/play/action/combat/combatActionHandlers';
+import { handlePaTurnMain, handlePaTurnBonus, handlePaTurnItem, handlePaTurnEnd, handlePaTurnFlee, handlePaDeceasedMark, handlePaDeceasedSpare } from '../commands/Aggregate/play/action/combat/combatTurnHandlers';
+import { handlePaCbtPick, handlePaCbtTarget, handlePaCbtConfirm, handlePaCbtBack, handlePaCbtCancel, handlePaCbtBuiltin, handlePaCbtBuiltinTarget, handlePaCbtBuiltinOk } from '../commands/Aggregate/play/action/combat/combatActionHandlers';
 import { handlePaReactUse, handlePaReactSkip }                                                                                                from '../commands/Aggregate/play/action/combat/combatReactionHandlers';
 import {
     handleEcEdit,
@@ -82,14 +82,17 @@ export const buttonHandlers: ComponentHandler[] = [
     { prefix: 'pa_turn_bonus:',        handler: interaction => handlePaTurnBonus(interaction as ButtonInteraction)         },
     { prefix: 'pa_turn_item:',         handler: interaction => handlePaTurnItem(interaction as ButtonInteraction)          },
     { prefix: 'pa_turn_end:',          handler: interaction => handlePaTurnEnd(interaction as ButtonInteraction)           },
-    { prefix: 'pa_turn_flee:',         handler: interaction => handlePaTurnFlee(interaction as ButtonInteraction)          },
-    { prefix: 'pa_sw_accept:',         handler: interaction => handlePaSwAccept(interaction as ButtonInteraction)          },
-    { prefix: 'pa_sw_decline:',        handler: interaction => handlePaSwDecline(interaction as ButtonInteraction)         },
+    { prefix: 'pa_turn_flee:',          handler: interaction => handlePaTurnFlee(interaction as ButtonInteraction)          },
+    { prefix: 'pa_deceased_mark:',     handler: interaction => handlePaDeceasedMark(interaction as ButtonInteraction)      },
+    { prefix: 'pa_deceased_spare:',    handler: interaction => handlePaDeceasedSpare(interaction as ButtonInteraction)     },
     { prefix: 'pa_cbt_pick:',          handler: interaction => handlePaCbtPick(interaction as ButtonInteraction)           },
     { prefix: 'pa_cbt_target:',        handler: interaction => handlePaCbtTarget(interaction as ButtonInteraction)         },
     { prefix: 'pa_cbt_confirm:',       handler: interaction => handlePaCbtConfirm(interaction as ButtonInteraction)        },
     { prefix: 'pa_cbt_back:',          handler: interaction => handlePaCbtBack(interaction as ButtonInteraction)           },
     { prefix: 'pa_cbt_cancel:',        handler: interaction => handlePaCbtCancel(interaction as ButtonInteraction)         },
+    { prefix: 'pa_cbt_builtin:',       handler: interaction => handlePaCbtBuiltin(interaction as ButtonInteraction)        },
+    { prefix: 'pa_cbt_builtin_t:',     handler: interaction => handlePaCbtBuiltinTarget(interaction as ButtonInteraction)  },
+    { prefix: 'pa_cbt_builtin_ok:',    handler: interaction => handlePaCbtBuiltinOk(interaction as ButtonInteraction)      },
     { prefix: 'pa_react_use:',         handler: interaction => handlePaReactUse(interaction as ButtonInteraction)          },
     { prefix: 'pa_react_skip:',        handler: interaction => handlePaReactSkip(interaction as ButtonInteraction)         },
     { prefix: 'den_list_done',    handler: interaction => handleDenListDone(interaction as ButtonInteraction) },

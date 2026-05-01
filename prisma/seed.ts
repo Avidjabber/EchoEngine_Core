@@ -441,10 +441,10 @@ async function main() {
     await prisma.combatInitiationType.createMany({
       skipDuplicates: true,
       data: [
-        { name: 'spar',  canResultInDeath: false, isScripted: false, allowsFleeing: false, canSecondWind: false },
-        { name: 'fight', canResultInDeath: true,  isScripted: false, allowsFleeing: false, canSecondWind: true  },
-        { name: 'event', canResultInDeath: true,  isScripted: false, allowsFleeing: true,  canSecondWind: true  },
-        { name: 'boss',  canResultInDeath: true,  isScripted: true,  allowsFleeing: true,  canSecondWind: true  },
+        { name: 'spar',  canResultInDeath: false, isScripted: false, allowsFleeing: false, usesDeathSaves: false },
+        { name: 'fight', canResultInDeath: true,  isScripted: false, allowsFleeing: false, usesDeathSaves: true  },
+        { name: 'event', canResultInDeath: true,  isScripted: false, allowsFleeing: true,  usesDeathSaves: true  },
+        { name: 'boss',  canResultInDeath: true,  isScripted: true,  allowsFleeing: true,  usesDeathSaves: true  },
       ],
     })
 
@@ -484,21 +484,15 @@ async function main() {
     await prisma.combatEffectType.createMany({
       skipDuplicates: true,
       data: [
-        { name: 'hit_mod',      modifiesRoll: true,  modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'damage_mod',   modifiesRoll: true,  modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'stat_mod',     modifiesRoll: false, modifiesStat: true,  deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'action_denial',modifiesRoll: false, modifiesStat: false, deniesActions: true,  modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'ac_mod',       modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: true,  redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'guard',        modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: true,  forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'taunt',        modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: true,  isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'parry',        modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: true,  absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'absorb',       modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: true,  grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'dodge_stance', modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: true,  enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'counterattack',modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: true,  absorbsDamage: false, grantsEvasion: false, enablesCounterattack: true,  suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'suppress',     modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: true,  removesEffects: false, preventedAsTarget: false, reflectsDamage: false },
-        { name: 'dispel',       modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: true,  preventedAsTarget: false, reflectsDamage: false },
-        { name: 'untargetable', modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: true,  reflectsDamage: false },
-        { name: 'reflect',      modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, isReactive: false, absorbsDamage: false, grantsEvasion: false, enablesCounterattack: false, suppressesReactive: false, removesEffects: false, preventedAsTarget: false, reflectsDamage: true  },
+        { name: 'hit_mod',      modifiesRoll: true,  modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, removesEffects: false, grantsHitDisadvantage: false },
+        { name: 'damage_mod',   modifiesRoll: true,  modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, removesEffects: false, grantsHitDisadvantage: false },
+        { name: 'stat_mod',     modifiesRoll: false, modifiesStat: true,  deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, removesEffects: false, grantsHitDisadvantage: false },
+        { name: 'action_denial',modifiesRoll: false, modifiesStat: false, deniesActions: true,  modifiesAC: false, redirectsDamage: false, forcesTargeting: false, removesEffects: false, grantsHitDisadvantage: false },
+        { name: 'ac_mod',       modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: true,  redirectsDamage: false, forcesTargeting: false, removesEffects: false, grantsHitDisadvantage: false },
+        { name: 'guard',        modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: true,  forcesTargeting: false, removesEffects: false, grantsHitDisadvantage: false },
+        { name: 'taunt',        modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: true,  removesEffects: false, grantsHitDisadvantage: false },
+        { name: 'dispel',       modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, removesEffects: true,  grantsHitDisadvantage: false },
+        { name: 'dodge',        modifiesRoll: false, modifiesStat: false, deniesActions: false, modifiesAC: false, redirectsDamage: false, forcesTargeting: false, removesEffects: false, grantsHitDisadvantage: true  },
       ],
     })
 
@@ -509,6 +503,7 @@ async function main() {
         { name: 'hit'    },
         { name: 'damage' },
         { name: 'heal'   },
+        { name: 'save'   },
       ],
     })
 

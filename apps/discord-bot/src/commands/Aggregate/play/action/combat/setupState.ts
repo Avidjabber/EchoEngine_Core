@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 
-export const MAX_TEAMS           = 5;
-export const MAX_ENTITIES_PER_TEAM = 10;
+export const MAX_TEAMS           = 3;
+export const MAX_ENTITIES_PER_TEAM = 5;
 
 export interface SetupEntity {
     entityId:   number;

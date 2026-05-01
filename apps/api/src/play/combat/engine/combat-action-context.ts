@@ -5,6 +5,11 @@ export interface CombatActionInput {
     storedItemId:   number;
     targetEntityId: number | null;
     roundNumber:    number;
+    isReaction:     boolean;
+    // null  = single-target action (full pipeline, reactions allowed)
+    // 0     = first target in an AoE batch (full END, no reactions)
+    // 1+    = subsequent AoE target (skip cooldown/use tracking, no reactions)
+    aoeIndex:       number | null;
 }
 
 // ── Snapshots loaded by DECLARE ───────────────────────────────────────────────
@@ -30,31 +35,78 @@ export interface ProfileSnapshot {
     hitStatName:      string | null;
     damageStatName:   string | null;
     healStatName:     string | null;
+    damageTypeId:            number | null;
     damageTypeName:          string | null;
     elementalDiceCount:      number | null;
     elementalDiceSides:      number | null;
+    elementalDamageTypeId:   number | null;
     elementalDamageTypeName: string | null;
+    attackCount:      number;
+    isReactionAction: boolean;
+    savingThrowStatName: string | null;
+    saveDC:              number;
+    summonSpeciesId: number | null;
+    summonDiceCount: number | null;
+    summonDiceSides: number | null;
+    // Target scope — available to interceptors that need to inspect action targeting
+    targetsSelf:    boolean;
+    targetsSingle:  boolean;
+    targetsAllies:  boolean;
+    targetsEnemies: boolean;
+    // Behavior effect fields
+    behaviorEffectTypeId:          number | null;
+    behaviorEffectName:            string | null;
+    behaviorEffectRedirectsDamage: boolean;
+    behaviorEffectForcesTargeting: boolean;
+    behaviorEffectRemovesEffects:  boolean;
+    requiresConcentration:         boolean;
+    durationRounds:                number;
+    flatModifier:                  number | null;
+    percentModifier:               number | null;
 }
 
 export interface CombatMetaSnapshot {
-    canSecondWind:    boolean;
+    usesDeathSaves:   boolean;
     currentTurnOrder: number;
+    isSpar:           boolean;
 }
 
 // ── Snapshots loaded by TARGET ────────────────────────────────────────────────
 
 export interface TargetSnapshot {
     name:      string;
+    userId:    string | null;
     currentHp: number;
     maxHp:     number;
     baseAc:    number;
-    dexterity: number;
+    stats:     Record<string, number>;
+}
+
+export interface ActorParticipantSnapshot {
+    isUnconscious:           boolean;
+    helpRollMod:             'advantage' | 'disadvantage' | null;
+    concentratingOnEffectId: number | null;
 }
 
 export interface TargetParticipantSnapshot {
     id:             number;
-    inSecondWind:   boolean;
+    isUnconscious:  boolean;
     isAiControlled: boolean;
+    hasUsedReaction: boolean;
+    tempHp:                        number;
+    legendaryResistancesRemaining: number | null;
+    concentratingOnEffectId:       number | null;
+}
+
+// ── Concentration save event set by POST_APPLY ───────────────────────────────
+
+export interface ConcentrationSaveEvent {
+    entityName: string;
+    roll:       number;  // raw d20
+    total:      number;  // roll + CON modifier
+    dc:         number;  // max(10, half of total damage)
+    saved:      boolean;
+    effectName: string;  // CombatEffectType.name of the concentration effect
 }
 
 // ── Reaction data set by POST_APPLY ──────────────────────────────────────────
@@ -74,10 +126,12 @@ export interface CombatActionContext {
 
     // DECLARE
     actor:               ActorSnapshot | null;
+    actorParticipant:    ActorParticipantSnapshot | null;
     profile:             ProfileSnapshot | null;
     combatMeta:          CombatMetaSnapshot | null;
     existingActionCount: number;
     actorTurnOrder:      number | null;
+    actorParticipantId:  number | null;
 
     // VALIDATE
     aborted:     boolean;
@@ -88,13 +142,20 @@ export interface CombatActionContext {
     wasRedirected:      boolean;
     originalTargetName: string | null;  // name of input target when redirected
     target:             TargetSnapshot | null;
-    targetParticipant:  TargetParticipantSnapshot | null;
-    targetAC:           number;
+    targetParticipant:     TargetParticipantSnapshot | null;
+    targetAC:              number;
+    targetStorageId:       number | null;  // cached from TARGET to avoid re-fetch in POST_APPLY
 
     // PRE_RESOLVE
-    hitModifier:    number;
-    damageModifier: number;
-    healModifier:   number;
+    hitModifier:     number;
+    damageModifier:  number;
+    healModifier:    number;
+    hitAdvantage:    'advantage' | 'disadvantage' | null;
+    damageAdvantage: 'advantage' | 'disadvantage' | null;
+    healAdvantage:   'advantage' | 'disadvantage' | null;
+    saveAdvantage:   'advantage' | 'disadvantage' | null;
+    primaryDamageMultiplier:   number;  // precomputed from target stat effects; applied to finalDamage in APPLY
+    elementalDamageMultiplier: number;  // precomputed from target stat effects; applied to finalElementalDamage in APPLY
 
     // RESOLVE
     hitRoll:     number | null;  // raw d20 result (stored in action log)
@@ -109,16 +170,27 @@ export interface CombatActionContext {
     finalHeal:   number;
     elementalDiceRolls:   number[];
     rawElementalDamage:   number;
-    finalElementalDamage: number; // no modifier in stage 1; resistance interceptors scale this in stage 2
+    finalElementalDamage: number; // resistance interceptors scale this in APPLY
+    saveRoll:          number | null;   // defender's raw d20 (null = no save triggered)
+    saveTotal:         number | null;   // saveRoll + stat modifier
+    savedSuccessfully: boolean | null;  // true = save succeeded and damage was halved
 
     // APPLY
-    hpAfter:     number | null;
-    knockedDown: boolean;
-    defeated:    boolean;
+    hpAfter:         number | null;
+    knockedDown:     boolean;
+    defeated:        boolean;
+    absorbedDamage:  number;  // damage intercepted by guard absorption (guard entity took this instead)
+    tempHpDrained:   number;  // temp HP consumed before real HP was touched
+    helpConsumed:    boolean;  // actor had a Help advantage/disadvantage that was applied this action
+
+    legendaryResistanceUsed: boolean;  // AI boss auto-spent a legendary resistance charge this action
 
     // POST_APPLY
-    pendingReaction: PendingReaction | null;
+    pendingReaction:        PendingReaction | null;
+    concentrationSaveEvent: ConcentrationSaveEvent | null;
 
     // END
-    actionId: number | null;
+    actionId:              number | null;
+    appliedBehaviorEffect: { effectName: string; guardedName: string | null; rounds: number } | null;
+    appliedStatEffectNames: string[];
 }

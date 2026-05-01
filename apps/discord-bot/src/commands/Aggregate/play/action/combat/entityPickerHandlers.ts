@@ -1,7 +1,7 @@
 import { ButtonInteraction, MessageFlags, TextChannel } from 'discord.js';
 import { colors } from '../../../../../core/colors';
 import { messages } from '@echoengine/shared';
-import { getSetup, addEntityToTeam, addPendingInvite, isEntityInAnyTeam } from './setupState';
+import { getSetup, addEntityToTeam, addPendingInvite, isEntityInAnyTeam, MAX_ENTITIES_PER_TEAM } from './setupState';
 import { getCachedPickerEntities, invalidatePickerCache } from './entityPickerCache';
 import { buildEntityPickerComponents } from './entityPickerComponents';
 import { buildTeamComponents, buildControlComponents } from './setupComponents';
@@ -70,6 +70,15 @@ export async function handlePaEpickInvitePick(interaction: ButtonInteraction): P
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
             components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: `**${entity.name}** is already in this session.` }] }],
+        } as never);
+        return;
+    }
+
+    const targetTeam = setup.teams[teamIndex];
+    if (!targetTeam || targetTeam.entities.length >= MAX_ENTITIES_PER_TEAM) {
+        await interaction.editReply({
+            flags:      MessageFlags.IsComponentsV2,
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: 'That team is full — remove someone first.' }] }],
         } as never);
         return;
     }

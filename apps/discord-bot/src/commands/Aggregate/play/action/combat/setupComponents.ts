@@ -1,5 +1,5 @@
 import { colors } from '../../../../../core/colors';
-import { MAX_ENTITIES_PER_TEAM } from './setupState';
+import { MAX_ENTITIES_PER_TEAM, MAX_TEAMS } from './setupState';
 import type { SetupTeam, CombatSetup } from './setupState';
 
 const LABEL = { spar: 'SPAR', fight: 'FIGHT' } as const;
@@ -48,7 +48,7 @@ export function buildTeamComponents(setup: CombatSetup, team: SetupTeam): object
 }
 
 export function buildControlComponents(setup: CombatSetup): object[] {
-    const canAddTeam   = setup.teams.length < 5;
+    const canAddTeam   = setup.teams.length < MAX_TEAMS;
     const canStart     = setup.teams.length >= 2 && setup.teams.every(t => t.entities.length > 0);
     const pendingCount = setup.pendingInvites.length;
 

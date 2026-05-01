@@ -456,6 +456,7 @@ CREATE TABLE "Species" (
     "hpDiceSides" INTEGER NOT NULL DEFAULT 10,
     "combatRating" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
     "combatXpReward" INTEGER NOT NULL DEFAULT 50,
+    "legendaryResistancesMax" INTEGER,
     "dropTableId" INTEGER,
 
     CONSTRAINT "Species_pkey" PRIMARY KEY ("id")
@@ -801,6 +802,26 @@ CREATE TABLE "Entity_SkillTreeNode" (
     "nodeId" INTEGER NOT NULL,
 
     CONSTRAINT "Entity_SkillTreeNode_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SkillTreeNode_ProfileOverride" (
+    "nodeId" INTEGER NOT NULL,
+    "originalProfileId" INTEGER NOT NULL,
+    "replacementProfileId" INTEGER NOT NULL,
+
+    CONSTRAINT "SkillTreeNode_ProfileOverride_pkey" PRIMARY KEY ("nodeId")
+);
+
+-- CreateTable
+CREATE TABLE "Entity_ProfileOverride" (
+    "id" SERIAL NOT NULL,
+    "entityId" INTEGER NOT NULL,
+    "originalProfileId" INTEGER NOT NULL,
+    "replacementProfileId" INTEGER NOT NULL,
+    "sourceNodeId" INTEGER NOT NULL,
+
+    CONSTRAINT "Entity_ProfileOverride_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -1270,6 +1291,8 @@ CREATE TABLE "ItemEquipmentProfile" (
     "cooldownRounds" INTEGER NOT NULL DEFAULT 0,
     "durationRounds" INTEGER NOT NULL DEFAULT 0,
     "behaviorEffectTypeId" INTEGER,
+    "flatModifier" INTEGER,
+    "percentModifier" DOUBLE PRECISION,
     "isReactionAction" BOOLEAN NOT NULL DEFAULT false,
     "requiresVerbal" BOOLEAN NOT NULL DEFAULT false,
     "requiresSomatic" BOOLEAN NOT NULL DEFAULT false,
@@ -1281,12 +1304,15 @@ CREATE TABLE "ItemEquipmentProfile" (
     "hitBonus" INTEGER NOT NULL DEFAULT 0,
     "damageBonus" INTEGER NOT NULL DEFAULT 0,
     "healBonus" INTEGER NOT NULL DEFAULT 0,
+    "savingThrowStatId" INTEGER,
+    "saveDC" INTEGER NOT NULL DEFAULT 0,
     "triggersEventDefId" INTEGER,
     "triggerDC" INTEGER NOT NULL DEFAULT 1,
     "outOfCombatMaxTargets" INTEGER,
     "summonSpeciesId" INTEGER,
     "summonDiceCount" INTEGER,
     "summonDiceSides" INTEGER,
+    "attackCount" INTEGER NOT NULL DEFAULT 1,
 
     CONSTRAINT "ItemEquipmentProfile_pkey" PRIMARY KEY ("id")
 );
@@ -2686,7 +2712,7 @@ CREATE TABLE "CombatInitiationType" (
     "canResultInDeath" BOOLEAN NOT NULL DEFAULT false,
     "isScripted" BOOLEAN NOT NULL DEFAULT false,
     "allowsFleeing" BOOLEAN NOT NULL DEFAULT false,
-    "canSecondWind" BOOLEAN NOT NULL DEFAULT true,
+    "usesDeathSaves" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "CombatInitiationType_pkey" PRIMARY KEY ("id")
 );
@@ -2713,15 +2739,9 @@ CREATE TABLE "CombatEffectType" (
     "modifiesAC" BOOLEAN NOT NULL DEFAULT false,
     "redirectsDamage" BOOLEAN NOT NULL DEFAULT false,
     "forcesTargeting" BOOLEAN NOT NULL DEFAULT false,
-    "isReactive" BOOLEAN NOT NULL DEFAULT false,
-    "absorbsDamage" BOOLEAN NOT NULL DEFAULT false,
-    "grantsEvasion" BOOLEAN NOT NULL DEFAULT false,
-    "enablesCounterattack" BOOLEAN NOT NULL DEFAULT false,
-    "suppressesReactive" BOOLEAN NOT NULL DEFAULT false,
     "removesEffects" BOOLEAN NOT NULL DEFAULT false,
-    "preventedAsTarget" BOOLEAN NOT NULL DEFAULT false,
-    "reflectsDamage" BOOLEAN NOT NULL DEFAULT false,
-    "hasReactAction" BOOLEAN NOT NULL DEFAULT false,
+    "grantsHitDisadvantage" BOOLEAN NOT NULL DEFAULT false,
+    "isConcentration" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "CombatEffectType_pkey" PRIMARY KEY ("id")
 );
@@ -2819,9 +2839,16 @@ CREATE TABLE "ActiveCombat_Participant" (
     "controllerUserId" VARCHAR(50),
     "joinedAtRound" INTEGER NOT NULL DEFAULT 1,
     "dropTableId" INTEGER,
-    "inSecondWind" BOOLEAN NOT NULL DEFAULT false,
+    "isUnconscious" BOOLEAN NOT NULL DEFAULT false,
     "hasFled" BOOLEAN NOT NULL DEFAULT false,
     "isDefeated" BOOLEAN NOT NULL DEFAULT false,
+    "hasUsedReaction" BOOLEAN NOT NULL DEFAULT false,
+    "tempHp" INTEGER NOT NULL DEFAULT 0,
+    "legendaryResistancesRemaining" INTEGER,
+    "helpRollMod" VARCHAR(20),
+    "deathSaveSuccesses" INTEGER NOT NULL DEFAULT 0,
+    "deathSaveFailures" INTEGER NOT NULL DEFAULT 0,
+    "concentratingOnEffectId" INTEGER,
 
     CONSTRAINT "ActiveCombat_Participant_pkey" PRIMARY KEY ("id")
 );
@@ -2859,20 +2886,26 @@ CREATE TABLE "ActiveCombat_Action" (
     "turnIndex" INTEGER NOT NULL,
     "actorEntityId" INTEGER NOT NULL,
     "actionCategoryId" INTEGER,
-    "equipmentProfileId" INTEGER NOT NULL,
+    "equipmentProfileId" INTEGER,
     "targetEntityId" INTEGER,
     "hitRoll" INTEGER,
     "hitModifier" INTEGER,
     "hit" BOOLEAN,
     "isCritical" BOOLEAN NOT NULL DEFAULT false,
+    "isFumble" BOOLEAN NOT NULL DEFAULT false,
     "damageRoll" INTEGER,
     "damageModifier" INTEGER,
     "damageDealt" INTEGER,
     "elementalDamageDealt" INTEGER,
+    "elementalDamageRoll" INTEGER,
     "healDealt" INTEGER,
     "reflectedDamage" INTEGER,
     "absorbedDamage" INTEGER,
-    "secondWindTriggered" BOOLEAN NOT NULL DEFAULT false,
+    "saveRoll" INTEGER,
+    "savedSuccessfully" BOOLEAN,
+    "knockedDown" BOOLEAN NOT NULL DEFAULT false,
+    "wasRedirected" BOOLEAN NOT NULL DEFAULT false,
+    "originalTargetEntityId" INTEGER,
     "occurredAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ActiveCombat_Action_pkey" PRIMARY KEY ("id")
@@ -3641,6 +3674,21 @@ CREATE INDEX "Entity_SkillTreeNode_entityId_idx" ON "Entity_SkillTreeNode"("enti
 CREATE UNIQUE INDEX "Entity_SkillTreeNode_entityId_nodeId_key" ON "Entity_SkillTreeNode"("entityId", "nodeId");
 
 -- CreateIndex
+CREATE INDEX "SkillTreeNode_ProfileOverride_originalProfileId_idx" ON "SkillTreeNode_ProfileOverride"("originalProfileId");
+
+-- CreateIndex
+CREATE INDEX "SkillTreeNode_ProfileOverride_replacementProfileId_idx" ON "SkillTreeNode_ProfileOverride"("replacementProfileId");
+
+-- CreateIndex
+CREATE INDEX "Entity_ProfileOverride_entityId_idx" ON "Entity_ProfileOverride"("entityId");
+
+-- CreateIndex
+CREATE INDEX "Entity_ProfileOverride_sourceNodeId_idx" ON "Entity_ProfileOverride"("sourceNodeId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Entity_ProfileOverride_entityId_originalProfileId_key" ON "Entity_ProfileOverride"("entityId", "originalProfileId");
+
+-- CreateIndex
 CREATE INDEX "AbilityDef_guildId_idx" ON "AbilityDef"("guildId");
 
 -- CreateIndex
@@ -3873,6 +3921,9 @@ CREATE INDEX "ItemEquipmentProfile_damageStatId_idx" ON "ItemEquipmentProfile"("
 
 -- CreateIndex
 CREATE INDEX "ItemEquipmentProfile_healStatId_idx" ON "ItemEquipmentProfile"("healStatId");
+
+-- CreateIndex
+CREATE INDEX "ItemEquipmentProfile_savingThrowStatId_idx" ON "ItemEquipmentProfile"("savingThrowStatId");
 
 -- CreateIndex
 CREATE INDEX "ItemEquipmentProfile_Condition_equipmentProfileId_idx" ON "ItemEquipmentProfile_Condition"("equipmentProfileId");
@@ -4592,6 +4643,9 @@ CREATE INDEX "ActiveCombat_initiationTypeId_idx" ON "ActiveCombat"("initiationTy
 CREATE INDEX "ActiveCombat_outcomeId_idx" ON "ActiveCombat"("outcomeId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "ActiveCombat_Participant_concentratingOnEffectId_key" ON "ActiveCombat_Participant"("concentratingOnEffectId");
+
+-- CreateIndex
 CREATE INDEX "ActiveCombat_Participant_activeCombatId_idx" ON "ActiveCombat_Participant"("activeCombatId");
 
 -- CreateIndex
@@ -4641,6 +4695,9 @@ CREATE INDEX "ActiveCombat_Action_actorEntityId_idx" ON "ActiveCombat_Action"("a
 
 -- CreateIndex
 CREATE INDEX "ActiveCombat_Action_targetEntityId_idx" ON "ActiveCombat_Action"("targetEntityId");
+
+-- CreateIndex
+CREATE INDEX "ActiveCombat_Action_originalTargetEntityId_idx" ON "ActiveCombat_Action"("originalTargetEntityId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ActiveCombat_Action_activeCombatId_roundNumber_turnIndex_key" ON "ActiveCombat_Action"("activeCombatId", "roundNumber", "turnIndex");
@@ -5123,6 +5180,27 @@ ALTER TABLE "Entity_SkillTreeNode" ADD CONSTRAINT "Entity_SkillTreeNode_entityId
 ALTER TABLE "Entity_SkillTreeNode" ADD CONSTRAINT "Entity_SkillTreeNode_nodeId_fkey" FOREIGN KEY ("nodeId") REFERENCES "SkillTreeNode"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "SkillTreeNode_ProfileOverride" ADD CONSTRAINT "SkillTreeNode_ProfileOverride_nodeId_fkey" FOREIGN KEY ("nodeId") REFERENCES "SkillTreeNode"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SkillTreeNode_ProfileOverride" ADD CONSTRAINT "SkillTreeNode_ProfileOverride_originalProfileId_fkey" FOREIGN KEY ("originalProfileId") REFERENCES "ItemEquipmentProfile"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SkillTreeNode_ProfileOverride" ADD CONSTRAINT "SkillTreeNode_ProfileOverride_replacementProfileId_fkey" FOREIGN KEY ("replacementProfileId") REFERENCES "ItemEquipmentProfile"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_ProfileOverride" ADD CONSTRAINT "Entity_ProfileOverride_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_ProfileOverride" ADD CONSTRAINT "Entity_ProfileOverride_originalProfileId_fkey" FOREIGN KEY ("originalProfileId") REFERENCES "ItemEquipmentProfile"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_ProfileOverride" ADD CONSTRAINT "Entity_ProfileOverride_replacementProfileId_fkey" FOREIGN KEY ("replacementProfileId") REFERENCES "ItemEquipmentProfile"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Entity_ProfileOverride" ADD CONSTRAINT "Entity_ProfileOverride_sourceNodeId_fkey" FOREIGN KEY ("sourceNodeId") REFERENCES "SkillTreeNode"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Entity_Ability" ADD CONSTRAINT "Entity_Ability_entityId_fkey" FOREIGN KEY ("entityId") REFERENCES "Entity"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -5385,6 +5463,9 @@ ALTER TABLE "ItemEquipmentProfile" ADD CONSTRAINT "ItemEquipmentProfile_damageSt
 
 -- AddForeignKey
 ALTER TABLE "ItemEquipmentProfile" ADD CONSTRAINT "ItemEquipmentProfile_healStatId_fkey" FOREIGN KEY ("healStatId") REFERENCES "Stat"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ItemEquipmentProfile" ADD CONSTRAINT "ItemEquipmentProfile_savingThrowStatId_fkey" FOREIGN KEY ("savingThrowStatId") REFERENCES "Stat"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ItemEquipmentProfile" ADD CONSTRAINT "ItemEquipmentProfile_triggersEventDefId_fkey" FOREIGN KEY ("triggersEventDefId") REFERENCES "EventDef"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -6197,6 +6278,9 @@ ALTER TABLE "ActiveCombat_Participant" ADD CONSTRAINT "ActiveCombat_Participant_
 ALTER TABLE "ActiveCombat_Participant" ADD CONSTRAINT "ActiveCombat_Participant_dropTableId_fkey" FOREIGN KEY ("dropTableId") REFERENCES "DropTable"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "ActiveCombat_Participant" ADD CONSTRAINT "ActiveCombat_Participant_concentratingOnEffectId_fkey" FOREIGN KEY ("concentratingOnEffectId") REFERENCES "ActiveCombat_BehaviorEffect"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ActiveCombat_Participant_ActionCooldown" ADD CONSTRAINT "ActiveCombat_Participant_ActionCooldown_participantId_fkey" FOREIGN KEY ("participantId") REFERENCES "ActiveCombat_Participant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -6231,6 +6315,9 @@ ALTER TABLE "ActiveCombat_Action" ADD CONSTRAINT "ActiveCombat_Action_actorEntit
 
 -- AddForeignKey
 ALTER TABLE "ActiveCombat_Action" ADD CONSTRAINT "ActiveCombat_Action_targetEntityId_fkey" FOREIGN KEY ("targetEntityId") REFERENCES "Entity"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ActiveCombat_Action" ADD CONSTRAINT "ActiveCombat_Action_originalTargetEntityId_fkey" FOREIGN KEY ("originalTargetEntityId") REFERENCES "Entity"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "CombatEncounterDef" ADD CONSTRAINT "CombatEncounterDef_speciesId_fkey" FOREIGN KEY ("speciesId") REFERENCES "Species"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

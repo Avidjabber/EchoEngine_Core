@@ -20,16 +20,28 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
                 hitStat:             { select: { name: true } },
                 damageStat:          { select: { name: true } },
                 healStat:            { select: { name: true } },
+                savingThrowStat:     { select: { name: true } },
+                saveDC:              true,
+                summonSpeciesId:     true,
+                summonDiceCount:     true,
+                summonDiceSides:     true,
                 actionType:          { select: { dealsDamage: true, restoresHealth: true } },
-                damageType:          { select: { name: true } },
+                damageType:          { select: { id: true, name: true } },
                 elementalDiceCount:  true,
                 elementalDiceSides:  true,
-                elementalDamageType: { select: { name: true } },
+                elementalDamageType: { select: { id: true, name: true } },
+                attackCount:         true,
+                isReactionAction:    true,
+                durationRounds:      true,
+                flatModifier:        true,
+                percentModifier:     true,
+                behaviorEffectType:  { select: { id: true, name: true, redirectsDamage: true, forcesTargeting: true, removesEffects: true, isConcentration: true } },
+                targetScope:         { select: { targetsSelf: true, targetsSingle: true, targetsAllies: true, targetsEnemies: true } },
             },
         }),
         db.activeCombat.findUnique({
             where:  { id: ctx.input.combatId },
-            select: { currentTurnOrder: true, initiationType: { select: { canSecondWind: true } } },
+            select: { currentTurnOrder: true, initiationType: { select: { usesDeathSaves: true, name: true } } },
         }),
         db.entity.findUnique({
             where:  { id: ctx.input.actorEntityId },
@@ -52,7 +64,7 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
         }),
         db.activeCombat_Participant.findFirst({
             where:  { activeCombatId: ctx.input.combatId, entityId: ctx.input.actorEntityId },
-            select: { turnOrder: true },
+            select: { id: true, turnOrder: true, isUnconscious: true, helpRollMod: true, concentratingOnEffectId: true },
         }),
     ]);
 
@@ -68,27 +80,56 @@ export async function runDeclare(ctx: CombatActionContext, { db }: PipelineServi
             damageDiceSides:  profileRow.damageDiceSides,
             healDiceCount:    profileRow.healDiceCount,
             healDiceSides:    profileRow.healDiceSides,
+            attackCount:             profileRow.attackCount,
+            isReactionAction:        profileRow.isReactionAction,
             dealsDamage:             profileRow.actionType?.dealsDamage    ?? false,
             restoresHealth:          profileRow.actionType?.restoresHealth ?? false,
-            hitStatName:             profileRow.hitStat?.name    ?? null,
-            damageStatName:          profileRow.damageStat?.name ?? null,
-            healStatName:            profileRow.healStat?.name   ?? null,
+            hitStatName:             profileRow.hitStat?.name          ?? null,
+            damageStatName:          profileRow.damageStat?.name       ?? null,
+            healStatName:            profileRow.healStat?.name         ?? null,
+            savingThrowStatName:     profileRow.savingThrowStat?.name  ?? null,
+            saveDC:                  profileRow.saveDC,
+            summonSpeciesId:         profileRow.summonSpeciesId ?? null,
+            summonDiceCount:         profileRow.summonDiceCount ?? null,
+            summonDiceSides:         profileRow.summonDiceSides ?? null,
+            targetsSelf:             profileRow.targetScope?.targetsSelf    ?? false,
+            targetsSingle:           profileRow.targetScope?.targetsSingle  ?? false,
+            targetsAllies:           profileRow.targetScope?.targetsAllies  ?? false,
+            targetsEnemies:          profileRow.targetScope?.targetsEnemies ?? false,
+            damageTypeId:            profileRow.damageType?.id            ?? null,
             damageTypeName:          profileRow.damageType?.name          ?? null,
             elementalDiceCount:      profileRow.elementalDiceCount        ?? null,
             elementalDiceSides:      profileRow.elementalDiceSides        ?? null,
+            elementalDamageTypeId:   profileRow.elementalDamageType?.id   ?? null,
             elementalDamageTypeName: profileRow.elementalDamageType?.name ?? null,
+            behaviorEffectTypeId:          profileRow.behaviorEffectType?.id             ?? null,
+            behaviorEffectName:            profileRow.behaviorEffectType?.name           ?? null,
+            behaviorEffectRedirectsDamage: profileRow.behaviorEffectType?.redirectsDamage ?? false,
+            behaviorEffectForcesTargeting: profileRow.behaviorEffectType?.forcesTargeting ?? false,
+            behaviorEffectRemovesEffects:  profileRow.behaviorEffectType?.removesEffects  ?? false,
+            requiresConcentration:         profileRow.behaviorEffectType?.isConcentration ?? false,
+            durationRounds:                profileRow.durationRounds,
+            flatModifier:                  profileRow.flatModifier   ?? null,
+            percentModifier:               profileRow.percentModifier ?? null,
         };
     }
 
     if (combatRow) {
         ctx.combatMeta = {
-            canSecondWind:    combatRow.initiationType.canSecondWind,
+            usesDeathSaves:    combatRow.initiationType.usesDeathSaves,
             currentTurnOrder: combatRow.currentTurnOrder,
+            isSpar:           combatRow.initiationType.name === 'spar',
         };
     }
 
     if (actorParticipantRow) {
-        ctx.actorTurnOrder = actorParticipantRow.turnOrder;
+        ctx.actorTurnOrder     = actorParticipantRow.turnOrder;
+        ctx.actorParticipantId = actorParticipantRow.id;
+        ctx.actorParticipant   = {
+            isUnconscious:           actorParticipantRow.isUnconscious,
+            helpRollMod:             (actorParticipantRow.helpRollMod as 'advantage' | 'disadvantage' | null) ?? null,
+            concentratingOnEffectId: actorParticipantRow.concentratingOnEffectId ?? null,
+        };
     }
 
     if (actorRow) {

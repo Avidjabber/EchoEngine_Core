@@ -64,6 +64,21 @@ export class PlayCombatController {
         return this.service.advanceTurn(id, body.currentEntityId);
     }
 
+    @Post(':id/process-builtin-action')
+    @HttpCode(HttpStatus.OK)
+    processBuiltinAction(
+        @Param('id', ParseIntPipe) id:   number,
+        @Body()                    body: { actorEntityId: number; action: 'dodge' | 'help'; targetEntityId: number | null; roundNumber: number },
+    ) {
+        if (!body?.actorEntityId || !body?.action || body?.roundNumber === undefined) {
+            throw new BadRequestException('actorEntityId, action, and roundNumber are required');
+        }
+        if (body.action !== 'dodge' && body.action !== 'help') {
+            throw new BadRequestException('action must be "dodge" or "help"');
+        }
+        return this.service.processBuiltinAction(id, body.actorEntityId, body.action, body.targetEntityId ?? null, body.roundNumber);
+    }
+
     @Post(':id/process-action')
     @HttpCode(HttpStatus.OK)
     processAction(
@@ -82,24 +97,14 @@ export class PlayCombatController {
         return this.service.distributeCombatXp(id);
     }
 
-    @Post(':id/second-wind')
+    @Post(':id/mark-deceased')
     @HttpCode(HttpStatus.OK)
-    acceptSecondWind(
-        @Param('id', ParseIntPipe) id:   number,
+    markDeceased(
+        @Param('id', ParseIntPipe) _id:  number,
         @Body()                    body: { entityId: number },
     ) {
         if (!body?.entityId) throw new BadRequestException('entityId is required');
-        return this.service.acceptSecondWind(id, body.entityId);
-    }
-
-    @Post(':id/decline-second-wind')
-    @HttpCode(HttpStatus.OK)
-    declineSecondWind(
-        @Param('id', ParseIntPipe) id:   number,
-        @Body()                    body: { entityId: number },
-    ) {
-        if (!body?.entityId) throw new BadRequestException('entityId is required');
-        return this.service.declineSecondWind(id, body.entityId);
+        return this.service.markDeceased(body.entityId);
     }
 
     @Post(':id/flee')
@@ -110,6 +115,18 @@ export class PlayCombatController {
     ) {
         if (!body?.entityId) throw new BadRequestException('entityId is required');
         return this.service.flee(id, body.entityId);
+    }
+
+    @Post(':id/join')
+    @HttpCode(HttpStatus.OK)
+    joinCombat(
+        @Param('id', ParseIntPipe) id:   number,
+        @Body()                    body: { entityId: number; allyFactionId: number; roundNumber: number },
+    ) {
+        if (!body?.entityId || !body?.allyFactionId || body?.roundNumber === undefined || body.roundNumber < 1) {
+            throw new BadRequestException('entityId, allyFactionId, and roundNumber are required; roundNumber must be ≥ 1');
+        }
+        return this.service.joinCombat(id, body.entityId, body.allyFactionId, body.roundNumber);
     }
 
     @Post(':id/process-reaction')

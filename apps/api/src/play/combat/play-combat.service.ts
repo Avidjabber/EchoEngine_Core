@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrimaryDatabaseService } from '../../database/primary.service';
 import { runCombatPipeline } from './engine/combat-pipeline';
-import { defaultRoller } from '../../utils/dice';
-import type { CombatActionContext } from './engine/combat-action-context';
+import { COMBAT_INTERCEPTORS } from './engine/interceptors';
+import { defaultRoller, rollDice } from '../../utils/dice';
+import type { CombatActionContext, PendingReaction, ConcentrationSaveEvent } from './engine/combat-action-context';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -36,8 +37,9 @@ export interface CombatParticipantInfo {
 }
 
 export interface AvailableAction {
-    profileId:      number;
-    storedItemId:   number;
+    profileId:      number | null;  // null for builtin universal actions
+    storedItemId:   number | null;  // null for builtin universal actions
+    builtinAction:  'dodge' | 'help' | null;
     itemName:       string;
     actionLabel:    string | null;
     targetScope: {
@@ -55,30 +57,35 @@ export interface AvailableAction {
     isOnCooldown:   boolean;
 }
 
-export interface PendingReaction {
-    defenderEntityId:   number;
-    defenderEntityName: string;
-    defenderUserId:     string | null;
-    attackerEntityId:   number;
-    reactionProfiles:   Array<{ profileId: number; storedItemId: number; label: string }>;
-}
+export type { PendingReaction, ConcentrationSaveEvent } from './engine/combat-action-context';
 
 export type ActionResultOutcome =
-    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
-    | { kind: 'miss';     hitRoll: number; targetAC: number }
+    | { kind: 'hit'; hitRoll: number; targetAC: number; isCritical: boolean; diceRolls: number[]; totalDamage: number; damageTypeName: string | null; elementalDiceRolls: number[]; totalElementalDamage: number; elementalDamageTypeName: string | null; absorbedDamage: number; tempHpDrained: number; saveRoll: number | null; saveTotal: number | null; savedSuccessfully: boolean | null; hpAfter: number; knockedDown: boolean; defeated: boolean }
+    | { kind: 'miss';     hitRoll: number; targetAC: number; isFumble: boolean }
     | { kind: 'heal';     diceRolls: number[]; totalHeal: number; hpAfter: number }
     | { kind: 'behavior'; effectName: string; guardedName: string | null; rounds: number }
     | { kind: 'no_op' };
 
+export interface SummonedEntity {
+    entityId:      number;
+    name:          string;
+    allyFactionId: number;
+    turnOrder:     number;
+}
+
 export interface ActionResult {
-    actionId:         number;
-    actionLabel:      string;
-    actorName:        string;
-    targetName:       string;
-    actualTargetName: string;
-    wasRedirected:    boolean;
-    outcome:          ActionResultOutcome;
-    pendingReaction?: PendingReaction;
+    actionId:               number;
+    actionLabel:            string;
+    actorName:              string;
+    targetName:             string;
+    actualTargetName:       string;
+    wasRedirected:          boolean;
+    legendaryResistanceUsed: boolean;
+    outcome:                ActionResultOutcome;
+    appliedEffects:         string[];
+    pendingReaction?:       PendingReaction;
+    concentrationSaveEvent: ConcentrationSaveEvent | null;
+    summonedEntities:       SummonedEntity[];
 }
 
 export interface XpGrant {
@@ -92,25 +99,42 @@ export interface XpGrant {
 }
 
 export interface RoundEndEvent {
-    kind:       'dot' | 'hot';
+    kind:        'dot' | 'hot';
+    entityId:    number;
+    entityName:  string;
+    amount:      number;
+    hpAfter:     number;
+    defeated:    boolean;
+    knockedDown: boolean;  // true when HP hits 0 and entity enters death save state
+}
+
+export interface DeathSaveEvent {
     entityId:   number;
     entityName: string;
-    amount:     number;
-    hpAfter:    number;
-    defeated:   boolean;
+    roll:       number;  // raw d20 result
+    successes:  number;  // total after this roll
+    failures:   number;  // total after this roll
+    result:     'success' | 'failure' | 'revived' | 'stable' | 'defeated';
+}
+
+export interface MortallyWoundedCharacter {
+    entityId: number;
+    name:     string;
+    userId:   string | null;
 }
 
 export interface AdvanceTurnResult {
-    combatEnded:            boolean;
-    turnEndEvents:          RoundEndEvent[];
-    nextEntityId:           number | null;
-    nextEntityName:         string | null;
-    nextUserId:             string | null;
-    isAiControlled:         boolean;
-    isAwaitingSecondWind:   boolean;
-    allowsFleeing:          boolean;
-    round:                  number;
-    winningAllyFactionId:   number | null;
+    combatEnded:          boolean;
+    turnEndEvents:        RoundEndEvent[];
+    nextEntityId:         number | null;
+    nextEntityName:       string | null;
+    nextUserId:           string | null;
+    isAiControlled:       boolean;
+    deathSaveEvent:       DeathSaveEvent | null;
+    allowsFleeing:        boolean;
+    round:                number;
+    winningAllyFactionId: number | null;
+    mortallyWounded:      MortallyWoundedCharacter[];  // non-empty only when combatEnded = true, canResultInDeath = true, and at least one non-AI PC failed all 3 death saves
 }
 
 export interface CombatTargetEntity {
@@ -251,17 +275,24 @@ export class PlayCombatService {
             team.entities.map(e => {
                 const dex      = dexByEntity.get(e.entityId) ?? 10;
                 const modifier = Math.floor((dex - 10) / 2);
-                const roll     = Math.floor(Math.random() * 20) + 1 + modifier;
+                const roll     = rollDice(1, 20, defaultRoller)[0]! + modifier;
                 return { entityId: e.entityId, allyFactionId: teamIdx + 1, initiativeRoll: roll };
             }),
         );
+        const tiebreakers = new Map(participants.map(p => [p.entityId, rollDice(1, 20, defaultRoller)[0]!]));
         participants.sort((a, b) =>
             b.initiativeRoll - a.initiativeRoll ||
             (dexByEntity.get(b.entityId) ?? 10) - (dexByEntity.get(a.entityId) ?? 10) ||
-            Math.random() - 0.5,
+            tiebreakers.get(b.entityId)! - tiebreakers.get(a.entityId)!,
         );
 
         const eligibleEntityIds = participants.map(p => p.entityId);
+
+        const legendaryRows = await this.db.entity.findMany({
+            where:  { id: { in: eligibleEntityIds } },
+            select: { id: true, species: { select: { legendaryResistancesMax: true } } },
+        });
+        const legendaryMaxMap = new Map(legendaryRows.map(r => [r.id, r.species?.legendaryResistancesMax ?? null]));
 
         const combat = await this.db.$transaction(async (tx) => {
             const created = await tx.activeCombat.create({
@@ -270,9 +301,10 @@ export class PlayCombatService {
                     initiationTypeId: initiationType.id,
                     participants: {
                         create: participants.map((p, i) => ({
-                            entityId:      p.entityId,
-                            allyFactionId: p.allyFactionId,
-                            turnOrder:     i + 1,
+                            entityId:                    p.entityId,
+                            allyFactionId:               p.allyFactionId,
+                            turnOrder:                   i + 1,
+                            legendaryResistancesRemaining: legendaryMaxMap.get(p.entityId) ?? null,
                         })),
                     },
                 },
@@ -288,6 +320,8 @@ export class PlayCombatService {
 
             return created;
         });
+
+        await this._seedPreCombatEffects(combat.id, eligibleEntityIds);
 
         return {
             success:         true,
@@ -344,35 +378,7 @@ export class PlayCombatService {
         };
         const categoryName = categoryNameMap[category];
 
-        const combat = await this.db.activeCombat.findUnique({
-            where:  { id: combatId },
-            select: {
-                initiationType: { select: { name: true } },
-                participants: {
-                    where:  { entityId },
-                    select: { id: true },
-                },
-            },
-        });
-        if (!combat) return [];
-
-        const participantId = combat.participants[0]?.id;
-        const isSpar        = combat.initiationType.name === 'spar';
-
-        const cooldowns = participantId
-            ? await this.db.activeCombat_Participant_ActionCooldown.findMany({
-                where:  { participantId },
-                select: { equipmentProfileId: true },
-            })
-            : [];
-        const cooldownProfileIds = new Set(cooldowns.map(c => c.equipmentProfileId));
-
-        const entityStorage = await this.db.entity_Storage.findUnique({
-            where:  { entityId },
-            select: { storageId: true },
-        });
-        if (!entityStorage) return [];
-
+        // profileSelect defined early so it can be reused in the override replacement fetch below.
         const profileSelect = {
             id:              true,
             label:           true,
@@ -387,6 +393,35 @@ export class PlayCombatService {
             healDiceCount:   true,
             healDiceSides:   true,
         } as const;
+
+        const [combat, cooldowns, entityStorage, rawOverrides] = await Promise.all([
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: { initiationType: { select: { name: true } } },
+            }),
+            this.db.activeCombat_Participant_ActionCooldown.findMany({
+                where:  { participant: { activeCombatId: combatId, entityId } },
+                select: { equipmentProfileId: true },
+            }),
+            this.db.entity_Storage.findUnique({
+                where:  { entityId },
+                select: { storageId: true },
+            }),
+            this.db.entity_ProfileOverride.findMany({
+                where:  { entityId },
+                select: { originalProfileId: true, replacementProfileId: true },
+            }),
+        ]);
+        if (!combat) return [];
+        if (!entityStorage) return [];
+
+        const isSpar             = combat.initiationType.name === 'spar';
+        const cooldownProfileIds = new Set(cooldowns.map(c => c.equipmentProfileId));
+
+        // Build override lookup: originalProfileId → replacementProfileId.
+        // Used in both the equipped path and the item-category path below.
+        const overriddenIds     = new Set(rawOverrides.map(o => o.originalProfileId));
+        const replacementIdList = rawOverrides.map(o => o.replacementProfileId);
 
         const profileWhere = {
             actionCategory: { name: categoryName },
@@ -418,9 +453,12 @@ export class PlayCombatService {
                 if (stored.usesRemaining !== null && stored.usesRemaining <= 0) continue;
                 if (stored.dailyUsesRemaining !== null && stored.dailyUsesRemaining <= 0) continue;
                 for (const profile of stored.item.equipmentProfiles) {
+                    // Hide profiles that have been superseded by an active override.
+                    if (overriddenIds.has(profile.id)) continue;
                     actions.push({
                         profileId:               profile.id,
                         storedItemId:            stored.id,
+                        builtinAction:           null,
                         itemName:                stored.item.name,
                         actionLabel:             profile.label,
                         targetScope:             profile.targetScope,
@@ -437,101 +475,132 @@ export class PlayCombatService {
             return actions;
         }
 
+        // Fetch equipped items whose chosenProfile matches the category, OR whose chosenProfileId
+        // is overridden (replacement may satisfy the category even if original does not).
+        const overriddenIdsArray = [...overriddenIds];
         const equipped = await this.db.storedItem.findMany({
             where: {
-                storageId:     entityStorage.storageId,
-                isEquipped:    true,
-                chosenProfile: profileWhere,
+                storageId:  entityStorage.storageId,
+                isEquipped: true,
+                OR: [
+                    { chosenProfile: profileWhere },
+                    ...(overriddenIdsArray.length > 0 ? [{ chosenProfileId: { in: overriddenIdsArray } }] : []),
+                ],
             },
             select: {
-                id:   true,
-                item: { select: { name: true } },
-                chosenProfile: { select: profileSelect },
+                id:              true,
+                chosenProfileId: true,
+                item:            { select: { name: true } },
+                chosenProfile:   { select: profileSelect },
             },
         });
 
-        return equipped
-            .filter(s => s.chosenProfile !== null)
-            .map(s => ({
-                profileId:               s.chosenProfile!.id,
-                storedItemId:            s.id,
-                itemName:                s.item.name,
-                actionLabel:             s.chosenProfile!.label,
-                targetScope:             s.chosenProfile!.targetScope,
-                damageDice:              s.chosenProfile!.damageDiceCount
-                    ? `${s.chosenProfile!.damageDiceCount}d${s.chosenProfile!.damageDiceSides}`
-                    : null,
-                damageTypeName:          s.chosenProfile!.damageType?.name  ?? null,
-                elementalDamageDice:     s.chosenProfile!.elementalDiceCount
-                    ? `${s.chosenProfile!.elementalDiceCount}d${s.chosenProfile!.elementalDiceSides}`
-                    : null,
-                elementalDamageTypeName: s.chosenProfile!.elementalDamageType?.name ?? null,
-                healDice:                s.chosenProfile!.healDiceCount
-                    ? `${s.chosenProfile!.healDiceCount}d${s.chosenProfile!.healDiceSides}`
-                    : null,
-                cooldownRounds:          s.chosenProfile!.cooldownRounds,
-                isOnCooldown:            cooldownProfileIds.has(s.chosenProfile!.id),
-            }));
+        // Fetch replacement profiles filtered to the current category so cross-category overrides
+        // are silently excluded (replacement not shown if it doesn't match the active category).
+        const replacementProfiles = replacementIdList.length > 0
+            ? await this.db.itemEquipmentProfile.findMany({
+                where:  { id: { in: replacementIdList }, ...profileWhere },
+                select: profileSelect,
+            })
+            : [];
+        const replacementById = new Map(replacementProfiles.map(p => [p.id, p]));
+
+        // Override map: originalProfileId → replacement profile (only those matching current category).
+        const overrideProfileMap = new Map(
+            rawOverrides
+                .filter(o => replacementById.has(o.replacementProfileId))
+                .map(o => [o.originalProfileId, replacementById.get(o.replacementProfileId)!]),
+        );
+
+        const builtins: AvailableAction[] = [
+            {
+                profileId: null, storedItemId: null, builtinAction: 'dodge',
+                itemName: 'Dodge', actionLabel: 'Dodge',
+                targetScope: { targetsSelf: true, targetsSingle: false, targetsAllies: false, targetsEnemies: false },
+                damageDice: null, damageTypeName: null, elementalDamageDice: null, elementalDamageTypeName: null,
+                healDice: null, cooldownRounds: 0, isOnCooldown: false,
+            },
+            {
+                profileId: null, storedItemId: null, builtinAction: 'help',
+                itemName: 'Help', actionLabel: 'Help',
+                targetScope: { targetsSelf: false, targetsSingle: true, targetsAllies: true, targetsEnemies: true },
+                damageDice: null, damageTypeName: null, elementalDamageDice: null, elementalDamageTypeName: null,
+                healDice: null, cooldownRounds: 0, isOnCooldown: false,
+            },
+        ];
+
+        const itemActions = equipped
+            .filter(s => s.chosenProfileId !== null)
+            .flatMap(s => {
+                // Use the replacement profile if an override is active; fall back to the equipped profile.
+                const effectiveProfile = overrideProfileMap.get(s.chosenProfileId!) ?? s.chosenProfile;
+                // If neither matches the current category (e.g. item fetched via the OR but replacement
+                // is a different category), skip it.
+                if (effectiveProfile === null) return [];
+                return [{
+                    profileId:               effectiveProfile.id,
+                    storedItemId:            s.id,
+                    builtinAction:           null as null,
+                    itemName:                s.item.name,
+                    actionLabel:             effectiveProfile.label,
+                    targetScope:             effectiveProfile.targetScope,
+                    damageDice:              effectiveProfile.damageDiceCount
+                        ? `${effectiveProfile.damageDiceCount}d${effectiveProfile.damageDiceSides}`
+                        : null,
+                    damageTypeName:          effectiveProfile.damageType?.name  ?? null,
+                    elementalDamageDice:     effectiveProfile.elementalDiceCount
+                        ? `${effectiveProfile.elementalDiceCount}d${effectiveProfile.elementalDiceSides}`
+                        : null,
+                    elementalDamageTypeName: effectiveProfile.elementalDamageType?.name ?? null,
+                    healDice:                effectiveProfile.healDiceCount
+                        ? `${effectiveProfile.healDiceCount}d${effectiveProfile.healDiceSides}`
+                        : null,
+                    cooldownRounds:          effectiveProfile.cooldownRounds,
+                    isOnCooldown:            cooldownProfileIds.has(effectiveProfile.id),
+                }];
+            });
+
+        return [...builtins, ...itemActions];
     }
 
     async advanceTurn(combatId: number, currentEntityId: number): Promise<AdvanceTurnResult> {
-        const combat = await this.db.activeCombat.findUnique({
-            where:  { id: combatId },
-            select: {
-                currentTurnOrder: true,
-                currentRound:     true,
-                initiationType:   { select: { canSecondWind: true, allowsFleeing: true } },
-                participants: {
-                    where:   { hasFled: false, isDefeated: false },
-                    select: {
-                        id:               true,
-                        entityId:         true,
-                        allyFactionId:    true,
-                        turnOrder:        true,
-                        isAiControlled:   true,
-                        inSecondWind:     true,
-                        controllerUserId: true,
-                        entity: {
-                            select: {
-                                name:   true,
-                                userId: true,
-                                stats:  { select: { currentHp: true } },
-                            },
-                        },
-                    },
-                    orderBy: { turnOrder: 'asc' },
+        const [combat, endingParticipant] = await Promise.all([
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: {
+                    currentTurnOrder: true,
+                    currentRound:     true,
+                    initiationType:   { select: { usesDeathSaves: true, allowsFleeing: true, canResultInDeath: true } },
                 },
-            },
-        });
+            }),
+            this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: currentEntityId },
+                select: { id: true },
+            }),
+        ]);
         if (!combat) throw new Error(`Combat ${combatId} not found`);
 
-        const active        = combat.participants;
-        const canSecondWind = combat.initiationType.canSecondWind;
-        const allowsFleeing = combat.initiationType.allowsFleeing;
+        const usesDeathSaves  = combat.initiationType.usesDeathSaves;
+        const allowsFleeing   = combat.initiationType.allowsFleeing;
+        const canResultInDeath = combat.initiationType.canResultInDeath;
 
-        const currentIdx    = active.findIndex(p => p.entityId === currentEntityId);
-        const nextIdx       = active.length > 0 ? (currentIdx + 1) % active.length : 0;
-        const roundBoundary = active.length > 0 && nextIdx <= currentIdx;
-
-        let newRound = combat.currentRound;
-        if (roundBoundary) newRound++;
-
-        const endingParticipant = active.find(p => p.entityId === currentEntityId);
         const turnEndEvents = endingParticipant
-            ? await this._processTurnEnd(combatId, endingParticipant.id, canSecondWind)
+            ? await this._processTurnEnd(endingParticipant.id, usesDeathSaves)
             : [];
 
-        type ParticipantRow = typeof active[0];
-        const freshActive: ParticipantRow[] = await this.db.activeCombat_Participant.findMany({
+        let freshActive = await this.db.activeCombat_Participant.findMany({
             where:   { activeCombatId: combatId, hasFled: false, isDefeated: false },
             select: {
-                id:               true,
-                entityId:         true,
-                allyFactionId:    true,
-                turnOrder:        true,
-                isAiControlled:   true,
-                inSecondWind:     true,
-                controllerUserId: true,
+                id:                   true,
+                entityId:             true,
+                allyFactionId:        true,
+                turnOrder:            true,
+                isAiControlled:       true,
+                isUnconscious:         true,
+                deathSaveSuccesses:   true,
+                deathSaveFailures:    true,
+                helpRollMod:          true,
+                controllerUserId:     true,
                 entity: {
                     select: {
                         name:   true,
@@ -543,11 +612,36 @@ export class PlayCombatService {
             orderBy: { turnOrder: 'asc' },
         });
 
-        const factions = new Set(freshActive.map(p => p.allyFactionId));
-        if (factions.size < 2) {
-            const winningAllyFactionId = factions.size === 1 ? [...factions][0]! : null;
+        // roundBoundary: no remaining participant has a higher turnOrder than the current one,
+        // meaning the next turn wraps back to the start of initiative — a new round.
+        const roundBoundary = freshActive.length > 0 && !freshActive.some(p => p.turnOrder > combat.currentTurnOrder);
+        const newRound      = roundBoundary ? combat.currentRound + 1 : combat.currentRound;
+
+        const endCombat = async (active: typeof freshActive): Promise<AdvanceTurnResult> => {
+            // Winner is determined by which factions still have conscious participants.
+            // Unconscious participants do not keep their faction in contention.
+            const consciousFactions    = new Set(active.filter(p => !p.isUnconscious).map(p => p.allyFactionId));
+            const winningAllyFactionId = consciousFactions.size === 1 ? [...consciousFactions][0]! : null;
             const outcomeName          = winningAllyFactionId !== null ? 'win' : 'draw';
-            const outcome              = await this.db.combatOutcome.findFirst({ where: { name: outcomeName }, select: { id: true } });
+
+            const [outcome, mortallyWoundedRows] = await Promise.all([
+                this.db.combatOutcome.findFirst({ where: { name: outcomeName }, select: { id: true } }),
+                canResultInDeath
+                    ? this.db.activeCombat_Participant.findMany({
+                        where: {
+                            activeCombatId: combatId,
+                            isAiControlled: false,
+                            hasFled:        false,
+                            isDefeated:     true,
+                        },
+                        select: {
+                            entityId: true,
+                            entity:   { select: { name: true, userId: true } },
+                        },
+                    })
+                    : Promise.resolve([]),
+            ]);
+
             await this.db.activeCombat.update({
                 where: { id: combatId },
                 data:  {
@@ -557,24 +651,171 @@ export class PlayCombatService {
                     completedAt:          new Date(),
                 },
             });
-            return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, isAwaitingSecondWind: false, allowsFleeing, round: newRound, winningAllyFactionId };
+
+            const mortallyWounded: MortallyWoundedCharacter[] = mortallyWoundedRows.map(r => ({
+                entityId: r.entityId,
+                name:     r.entity.name,
+                userId:   r.entity.userId ?? null,
+            }));
+
+            return { combatEnded: true, turnEndEvents, nextEntityId: null, nextEntityName: null, nextUserId: null, isAiControlled: false, deathSaveEvent: null, allowsFleeing, round: newRound, winningAllyFactionId, mortallyWounded };
+        };
+
+        if (new Set(freshActive.filter(p => !p.isUnconscious).map(p => p.allyFactionId)).size < 2) {
+            return endCombat(freshActive);
         }
 
-        const currentTurnOrder = active.find(p => p.entityId === currentEntityId)?.turnOrder ?? 0;
-        const next             = freshActive.find(p => p.turnOrder > currentTurnOrder) ?? freshActive[0]!;
+        let next = freshActive.find(p => p.turnOrder > combat.currentTurnOrder) ?? freshActive[0]!;
 
-        await this._processTurnStart(combatId, next.id);
+        // ── Death saving throw ────────────────────────────────────────────────
+        // If the next entity is knocked down (isUnconscious) and player-controlled,
+        // their "turn" is consumed by a death save roll. The actual acting turn then
+        // passes to the entity after them (unless they roll a natural 20 and revive).
+        let deathSaveEvent: DeathSaveEvent | null = null;
+        let deathSaverParticipantId: number | null = null;
 
-        await this.db.activeCombat.update({
-            where: { id: combatId },
-            data:  { currentTurnOrder: next.turnOrder, currentRound: newRound },
-        });
+        if (next.isUnconscious && !next.isAiControlled) {
+            deathSaverParticipantId = next.id;
+            const helpMod = (next.helpRollMod as 'advantage' | 'disadvantage' | null) ?? null;
+            let roll: number;
+            if (helpMod === null) {
+                roll = rollDice(1, 20, defaultRoller)[0]!;
+            } else {
+                const [a, b] = rollDice(2, 20, defaultRoller) as [number, number];
+                roll = helpMod === 'advantage' ? Math.max(a, b) : Math.min(a, b);
+            }
+            let newSuccesses  = next.deathSaveSuccesses;
+            let newFailures   = next.deathSaveFailures;
+            let result: DeathSaveEvent['result'];
 
-        const isAwaitingSecondWind =
-            canSecondWind &&
-            !next.isAiControlled &&
-            !next.inSecondWind &&
-            (next.entity.stats?.currentHp ?? 1) <= 0;
+            if (roll === 20) {
+                // Natural 20: revive at 1 HP — entity gets to act this turn.
+                result       = 'revived';
+                newSuccesses = 0;
+                newFailures  = 0;
+                await this.db.$transaction([
+                    this.db.entityStats.update({
+                        where: { entityId: next.entityId },
+                        data:  { currentHp: 1 },
+                    }),
+                    this.db.activeCombat_Participant.update({
+                        where: { id: next.id },
+                        data:  { isUnconscious: false, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                    }),
+                ]);
+            } else if (roll === 1) {
+                // Natural 1: two failures.
+                newFailures = Math.min(next.deathSaveFailures + 2, 3);
+                if (newFailures >= 3) {
+                    result = 'defeated';
+                    await this.db.$transaction([
+                        this.db.activeCombat_Participant.update({
+                            where: { id: next.id },
+                            data:  { isDefeated: true, deathSaveFailures: newFailures },
+                        }),
+                        this.db.activeCombat_BehaviorEffect.deleteMany({ where: { OR: [{ sourceParticipantId: next.id }, { linkedParticipantId: next.id }] } }),
+                        this.db.activeCombat_StatEffect.deleteMany({ where: { affectedParticipantId: next.id } }),
+                    ]);
+                    freshActive = freshActive.filter(p => p.id !== next.id);
+                } else {
+                    result = 'failure';
+                    await this.db.activeCombat_Participant.update({
+                        where: { id: next.id },
+                        data:  { deathSaveFailures: newFailures },
+                    });
+                }
+            } else if (roll >= 10) {
+                newSuccesses = next.deathSaveSuccesses + 1;
+                if (newSuccesses >= 3) {
+                    // Third success: revive at 1 HP. Turn passes — entity acts again next round.
+                    result = 'stable';
+                    await this.db.$transaction([
+                        this.db.entityStats.update({
+                            where: { entityId: next.entityId },
+                            data:  { currentHp: 1 },
+                        }),
+                        this.db.activeCombat_Participant.update({
+                            where: { id: next.id },
+                            data:  { isUnconscious: false, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                        }),
+                    ]);
+                } else {
+                    result = 'success';
+                    await this.db.activeCombat_Participant.update({
+                        where: { id: next.id },
+                        data:  { deathSaveSuccesses: newSuccesses },
+                    });
+                }
+            } else {
+                newFailures = next.deathSaveFailures + 1;
+                if (newFailures >= 3) {
+                    result = 'defeated';
+                    await this.db.$transaction([
+                        this.db.activeCombat_Participant.update({
+                            where: { id: next.id },
+                            data:  { isDefeated: true, deathSaveFailures: newFailures },
+                        }),
+                        this.db.activeCombat_BehaviorEffect.deleteMany({ where: { OR: [{ sourceParticipantId: next.id }, { linkedParticipantId: next.id }] } }),
+                        this.db.activeCombat_StatEffect.deleteMany({ where: { affectedParticipantId: next.id } }),
+                    ]);
+                    freshActive = freshActive.filter(p => p.id !== next.id);
+                } else {
+                    result = 'failure';
+                    await this.db.activeCombat_Participant.update({
+                        where: { id: next.id },
+                        data:  { deathSaveFailures: newFailures },
+                    });
+                }
+            }
+
+            deathSaveEvent = {
+                entityId:   next.entityId,
+                entityName: next.entity.name,
+                roll,
+                successes:  newSuccesses,
+                failures:   newFailures,
+                result,
+            };
+
+            if (result !== 'revived') {
+                // Turn passes to the entity after the death-saver.
+                if (result === 'defeated') {
+                    if (new Set(freshActive.filter(p => !p.isUnconscious).map(p => p.allyFactionId)).size < 2) {
+                        return endCombat(freshActive);
+                    }
+                }
+                const deathSaverTurnOrder = next.turnOrder;
+                next = freshActive.find(p => p.turnOrder > deathSaverTurnOrder) ?? freshActive[0]!;
+            }
+        }
+
+        await this.db.$transaction([
+            // Clear unconsumed Help roll mod on the participant whose turn just ended.
+            ...(endingParticipant ? [this.db.activeCombat_Participant.updateMany({
+                where: { id: endingParticipant.id, helpRollMod: { not: null } },
+                data:  { helpRollMod: null },
+            })] : []),
+            // Clear Help roll mod consumed by the death save (always use exactly once).
+            ...(deathSaverParticipantId !== null ? [this.db.activeCombat_Participant.updateMany({
+                where: { id: deathSaverParticipantId, helpRollMod: { not: null } },
+                data:  { helpRollMod: null },
+            })] : []),
+            this.db.activeCombat_BehaviorEffect.deleteMany({
+                where: { sourceParticipantId: next.id, roundsRemaining: 1 },
+            }),
+            this.db.activeCombat_BehaviorEffect.updateMany({
+                where: { sourceParticipantId: next.id, roundsRemaining: { gt: 1 } },
+                data:  { roundsRemaining: { decrement: 1 } },
+            }),
+            this.db.activeCombat.update({
+                where: { id: combatId },
+                data:  { currentTurnOrder: next.turnOrder, currentRound: newRound },
+            }),
+            this.db.activeCombat_Participant.update({
+                where: { id: next.id },
+                data:  { hasUsedReaction: false },
+            }),
+        ]);
 
         return {
             combatEnded:          false,
@@ -583,34 +824,18 @@ export class PlayCombatService {
             nextEntityName:       next.entity.name,
             nextUserId:           next.controllerUserId ?? next.entity.userId ?? null,
             isAiControlled:       next.isAiControlled,
-            isAwaitingSecondWind,
+            deathSaveEvent,
             allowsFleeing,
             round:                newRound,
             winningAllyFactionId: null,
+            mortallyWounded:      [],
         };
     }
 
-    async acceptSecondWind(combatId: number, entityId: number): Promise<void> {
-        const stats = await this.db.entityStats.findUnique({
-            where:  { entityId },
-            select: { maxHp: true },
-        });
-        await this.db.$transaction([
-            this.db.entityStats.update({
-                where: { entityId },
-                data:  { currentHp: stats?.maxHp ?? 1 },
-            }),
-            this.db.activeCombat_Participant.update({
-                where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
-                data:  { inSecondWind: true },
-            }),
-        ]);
-    }
-
-    async declineSecondWind(combatId: number, entityId: number): Promise<void> {
-        await this.db.activeCombat_Participant.update({
-            where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
-            data:  { isDefeated: true },
+    async markDeceased(entityId: number): Promise<void> {
+        await this.db.entity.update({
+            where: { id: entityId },
+            data:  { isDeceased: true },
         });
     }
 
@@ -620,10 +845,24 @@ export class PlayCombatService {
             select: { initiationType: { select: { allowsFleeing: true } } },
         });
         if (!combat?.initiationType.allowsFleeing) return { allowed: false };
-        await this.db.activeCombat_Participant.update({
-            where: { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
-            data:  { hasFled: true },
+        const participant = await this.db.activeCombat_Participant.findUnique({
+            where:  { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
+            select: { id: true, isUnconscious: true, isDefeated: true, hasFled: true },
         });
+        if (!participant) return { allowed: false };
+        if (participant.isUnconscious || participant.isDefeated || participant.hasFled) return { allowed: false };
+        await this.db.$transaction([
+            this.db.activeCombat_Participant.update({
+                where: { id: participant.id },
+                data:  { hasFled: true },
+            }),
+            this.db.activeCombat_BehaviorEffect.deleteMany({
+                where: { OR: [{ sourceParticipantId: participant.id }, { linkedParticipantId: participant.id }] },
+            }),
+            this.db.activeCombat_StatEffect.deleteMany({
+                where: { affectedParticipantId: participant.id },
+            }),
+        ]);
         return { allowed: true };
     }
 
@@ -636,35 +875,260 @@ export class PlayCombatService {
         storedItemId:   number,
         targetEntityId: number | null,
         roundNumber:    number,
+    ): Promise<ActionResult | ActionResult[]> {
+        // Detect AoE and multiattack before running the pipeline, and fetch actor faction + guildId in parallel.
+        const [scopeRow, actorPart] = await Promise.all([
+            this.db.itemEquipmentProfile.findUnique({
+                where:  { id: profileId },
+                select: { attackCount: true, targetScope: { select: { targetsSingle: true, targetsAllies: true, targetsEnemies: true } } },
+            }),
+            this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: actorEntityId },
+                select: { allyFactionId: true, activeCombat: { select: { guildId: true } } },
+            }),
+        ]);
+        const scope = scopeRow?.targetScope ?? null;
+        const isAoe = scope !== null
+            && (scope.targetsAllies || scope.targetsEnemies)
+            && !scope.targetsSingle;
+
+        if (isAoe) {
+            if (!actorPart) throw new Error('Actor not found in combat');
+
+            // Build faction filter: allies share allyFactionId, enemies differ.
+            const factionFilter = (scope.targetsAllies && scope.targetsEnemies)
+                ? {}
+                : scope.targetsAllies
+                ? { allyFactionId:       actorPart.allyFactionId }
+                : { allyFactionId: { not: actorPart.allyFactionId } };
+
+            const targets = await this.db.activeCombat_Participant.findMany({
+                where:   { activeCombatId: combatId, isDefeated: false, hasFled: false, ...factionFilter },
+                orderBy: { turnOrder: 'asc' },
+                select:  { entityId: true },
+            });
+
+            const results: ActionResult[] = [];
+            let firstCtx: CombatActionContext | null = null;
+            for (let i = 0; i < targets.length; i++) {
+                const ctx = await runCombatPipeline(
+                    { combatId, actorEntityId, profileId, storedItemId, targetEntityId: targets[i]!.entityId, roundNumber, isReaction: false, aoeIndex: i },
+                    { db: this.db, roller: defaultRoller },
+                    COMBAT_INTERCEPTORS,
+                );
+                // Actor-side abort on the first target (off-turn, stunned, etc.) fails the whole AoE.
+                // Target-side aborts (e.g. unconscious target) have ctx.target set before aborting;
+                // actor-side aborts happen before TARGET loads ctx.target, so ctx.target is null.
+                if (i === 0 && ctx.aborted && ctx.target === null) throw new Error(ctx.abortReason ?? 'Action aborted');
+                if (ctx.aborted) continue;
+                if (!firstCtx) firstCtx = ctx;
+                results.push(this._toActionResult(ctx));
+            }
+
+            // Summons fire once per action — requires a hit for damaging actions, same gate as behavior effects.
+            if (firstCtx && firstCtx.profile?.summonSpeciesId && (!firstCtx.profile.dealsDamage || firstCtx.isHit)) {
+                const summons = await this._executeSummons(firstCtx.profile.summonSpeciesId, firstCtx.profile.summonDiceCount, firstCtx.profile.summonDiceSides, actorPart.activeCombat.guildId, combatId, actorPart.allyFactionId, roundNumber);
+                if (results.length > 0) results[0]!.summonedEntities.push(...summons);
+            }
+
+            return results;
+        }
+
+        // Single-target path (also handles multiattack when attackCount > 1).
+        const attackCount = scopeRow?.attackCount ?? 1;
+        const ctx = await runCombatPipeline(
+            { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber, isReaction: false, aoeIndex: null },
+            { db: this.db, roller: defaultRoller },
+            COMBAT_INTERCEPTORS,
+        );
+        if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Action aborted');
+        const result = this._toActionResult(ctx);
+
+        // Summons fire after the first attack — requires a hit for damaging actions.
+        if (ctx.profile?.summonSpeciesId && (!ctx.profile.dealsDamage || ctx.isHit) && actorPart) {
+            result.summonedEntities.push(...await this._executeSummons(ctx.profile.summonSpeciesId, ctx.profile.summonDiceCount, ctx.profile.summonDiceSides, actorPart.activeCombat.guildId, combatId, actorPart.allyFactionId, roundNumber));
+        }
+
+        if (attackCount <= 1) return result;
+
+        // Multiattack: run additional attacks with aoeIndex: 1 (skips cooldown/use decrement, suppresses reactions).
+        const results: ActionResult[] = [result];
+        for (let i = 1; i < attackCount; i++) {
+            const extraCtx = await runCombatPipeline(
+                { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber, isReaction: false, aoeIndex: 1 },
+                { db: this.db, roller: defaultRoller },
+                COMBAT_INTERCEPTORS,
+            );
+            if (!extraCtx.aborted) results.push(this._toActionResult(extraCtx));
+        }
+        return results;
+    }
+
+    async processReaction(
+        combatId:         number,
+        defenderEntityId: number,
+        profileId:        number,
+        storedItemId:     number,
+        attackerEntityId: number,
+        roundNumber:      number,
     ): Promise<ActionResult> {
         const ctx = await runCombatPipeline(
-            { combatId, actorEntityId, profileId, storedItemId, targetEntityId, roundNumber },
+            { combatId, actorEntityId: defenderEntityId, profileId, storedItemId, targetEntityId: attackerEntityId, roundNumber, isReaction: true, aoeIndex: null },
             { db: this.db, roller: defaultRoller },
+            COMBAT_INTERCEPTORS,
         );
-
-        if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Action aborted');
-
+        if (ctx.aborted) throw new Error(ctx.abortReason ?? 'Reaction aborted');
         return this._toActionResult(ctx);
     }
 
-    // Stage 1: reactions are not triggered by the pipeline yet.
-    // This endpoint exists to satisfy the HTTP surface; it is a no-op until stage 2.
-    async processReaction(
-        _combatId:         number,
-        _defenderEntityId: number,
-        _profileId:        number,
-        _storedItemId:     number,
-        _attackerEntityId: number,
-        _roundNumber:      number,
+    // ── Universal builtin actions (Dodge, Help) ───────────────────────────────
+
+    async processBuiltinAction(
+        combatId:       number,
+        actorEntityId:  number,
+        action:         'dodge' | 'help',
+        targetEntityId: number | null,
+        roundNumber:    number,
     ): Promise<ActionResult> {
+        const [actorPart, combat, existingCount, actorEntity] = await Promise.all([
+            this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: actorEntityId },
+                select: { id: true, turnOrder: true, isDefeated: true, hasFled: true, isUnconscious: true, allyFactionId: true },
+            }),
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: { currentTurnOrder: true, initiationType: { select: { name: true } } },
+            }),
+            this.db.activeCombat_Action.count({
+                where: { activeCombatId: combatId, roundNumber },
+            }),
+            this.db.entity.findUnique({
+                where:  { id: actorEntityId },
+                select: { name: true },
+            }),
+        ]);
+
+        if (!actorPart || !combat || !actorEntity) throw new Error('Combat data could not be loaded.');
+        if (actorPart.isDefeated || actorPart.hasFled || actorPart.isUnconscious) throw new Error('You cannot act.');
+        if (actorPart.turnOrder !== combat.currentTurnOrder) throw new Error('It is not this entity\'s turn.');
+
+        const stun = await this.db.activeCombat_BehaviorEffect.findFirst({
+            where:  { affectedParticipantId: actorPart.id, effectType: { deniesActions: true } },
+            select: { id: true },
+        });
+        if (stun) throw new Error('You are stunned and cannot act.');
+
+        const mainCategory = await this.db.combatActionCategory.findFirst({
+            where:  { name: 'Main Action' },
+            select: { id: true },
+        });
+
+        if (action === 'dodge') {
+            const dodgeType = await this.db.combatEffectType.findFirst({
+                where:  { grantsHitDisadvantage: true },
+                select: { id: true },
+            });
+            if (!dodgeType) throw new Error('Dodge effect type not found.');
+
+            const logged = await this.db.$transaction(async tx => {
+                const log = await tx.activeCombat_Action.create({
+                    data: {
+                        activeCombatId:  combatId,
+                        roundNumber,
+                        turnIndex:       existingCount + 1,
+                        actorEntityId,
+                        actionCategoryId: mainCategory?.id ?? null,
+                    },
+                    select: { id: true },
+                });
+
+                await tx.activeCombat_BehaviorEffect.upsert({
+                    where:  { affectedParticipantId_effectTypeId: { affectedParticipantId: actorPart.id, effectTypeId: dodgeType.id } },
+                    create: {
+                        activeCombatId:        combatId,
+                        effectTypeId:          dodgeType.id,
+                        affectedParticipantId: actorPart.id,
+                        sourceParticipantId:   actorPart.id,
+                        roundsRemaining:       1,
+                    },
+                    update: {
+                        sourceParticipantId: actorPart.id,
+                        roundsRemaining:     1,
+                    },
+                });
+
+                return log;
+            });
+
+            return {
+                actionId:                logged.id,
+                actionLabel:             'Dodge',
+                actorName:               actorEntity.name,
+                targetName:              actorEntity.name,
+                actualTargetName:        actorEntity.name,
+                wasRedirected:           false,
+                legendaryResistanceUsed: false,
+                outcome:                 { kind: 'behavior', effectName: 'Dodge', guardedName: null, rounds: 1 },
+                appliedEffects:          [],
+                concentrationSaveEvent:  null,
+                summonedEntities:        [],
+            };
+        }
+
+        // Help action
+        if (targetEntityId === null) throw new Error('Help requires a target.');
+
+        const [targetPart, targetEntity] = await Promise.all([
+            this.db.activeCombat_Participant.findFirst({
+                where:  { activeCombatId: combatId, entityId: targetEntityId, isDefeated: false, hasFled: false },
+                select: { id: true, allyFactionId: true },
+            }),
+            this.db.entity.findUnique({
+                where:  { id: targetEntityId },
+                select: { name: true },
+            }),
+        ]);
+
+        if (!targetPart || !targetEntity) throw new Error('Target is not an active participant.');
+        if (targetEntityId === actorEntityId) throw new Error('You cannot Help yourself.');
+
+        const isAlly    = targetPart.allyFactionId === actorPart.allyFactionId;
+        const helpMod   = isAlly ? 'advantage' : 'disadvantage';
+
+        const logged = await this.db.$transaction(async tx => {
+            const log = await tx.activeCombat_Action.create({
+                data: {
+                    activeCombatId:   combatId,
+                    roundNumber,
+                    turnIndex:        existingCount + 1,
+                    actorEntityId,
+                    actionCategoryId: mainCategory?.id ?? null,
+                    targetEntityId,
+                },
+                select: { id: true },
+            });
+
+            await tx.activeCombat_Participant.update({
+                where: { id: targetPart.id },
+                data:  { helpRollMod: helpMod },
+            });
+
+            return log;
+        });
+
+        const effectLabel = isAlly ? 'Help (Advantage)' : 'Help (Disadvantage)';
         return {
-            actionId:         0,
-            actionLabel:      'Reaction',
-            actorName:        'Unknown',
-            targetName:       'Unknown',
-            actualTargetName: 'Unknown',
-            wasRedirected:    false,
-            outcome:          { kind: 'no_op' },
+            actionId:                logged.id,
+            actionLabel:             'Help',
+            actorName:               actorEntity.name,
+            targetName:              targetEntity.name,
+            actualTargetName:        targetEntity.name,
+            wasRedirected:           false,
+            legendaryResistanceUsed: false,
+            outcome:                 { kind: 'behavior', effectName: effectLabel, guardedName: null, rounds: 1 },
+            appliedEffects:          [],
+            concentrationSaveEvent:  null,
+            summonedEntities:        [],
         };
     }
 
@@ -787,6 +1251,200 @@ export class PlayCombatService {
         return results;
     }
 
+    // ── Mid-combat joins and summons ──────────────────────────────────────────
+
+    async joinCombat(combatId: number, entityId: number, allyFactionId: number, roundNumber: number): Promise<SummonedEntity> {
+        const [combat, entity, existing] = await Promise.all([
+            this.db.activeCombat.findUnique({
+                where:  { id: combatId },
+                select: { isActive: true },
+            }),
+            this.db.entity.findUnique({
+                where:  { id: entityId },
+                select: { name: true },
+            }),
+            this.db.activeCombat_Participant.findUnique({
+                where:  { activeCombatId_entityId: { activeCombatId: combatId, entityId } },
+                select: { id: true },
+            }),
+        ]);
+        if (!combat)        throw new Error(`Combat ${combatId} not found`);
+        if (!combat.isActive) throw new Error('Combat is no longer active');
+        if (!entity)        throw new Error(`Entity ${entityId} not found`);
+        if (existing)       throw new Error(`Entity ${entityId} is already a participant in this combat`);
+
+        // Wrap read+create atomically to prevent a race on @@unique([activeCombatId, turnOrder]).
+        const turnOrder = await this.db.$transaction(async tx => {
+            const last = await tx.activeCombat_Participant.findFirst({
+                where:   { activeCombatId: combatId },
+                orderBy: { turnOrder: 'desc' },
+                select:  { turnOrder: true },
+            });
+            const next = (last?.turnOrder ?? 0) + 1;
+            await tx.activeCombat_Participant.create({
+                data: { activeCombatId: combatId, entityId, allyFactionId, turnOrder: next, joinedAtRound: roundNumber },
+            });
+            return next;
+        });
+
+        await this._seedPreCombatEffects(combatId, [entityId]);
+
+        return { entityId, name: entity.name, allyFactionId, turnOrder };
+    }
+
+    private async _spawnNpcEntity(
+        speciesId:     number,
+        guildId:       string,
+        combatId:      number,
+        allyFactionId: number,
+        roundNumber:   number,
+        entityTypeId:  number,
+        statusId:      number,
+    ): Promise<SummonedEntity> {
+        const species = await this.db.species.findUnique({
+            where:  { id: speciesId },
+            select: {
+                name:             true,
+                baseStrength:     true,
+                baseDexterity:    true,
+                baseConstitution: true,
+                baseIntelligence: true,
+                baseWisdom:       true,
+                baseCharisma:     true,
+                hpDiceCount:              true,
+                hpDiceSides:              true,
+                dropTableId:              true,
+                legendaryResistancesMax:  true,
+                defaultLoadout:   {
+                    select: {
+                        itemId:    true,
+                        quantity:  true,
+                        autoEquip: true,
+                        item:      { select: { maxUses: true, maxDailyUses: true } },
+                    },
+                },
+            },
+        });
+        if (!species) throw new Error(`Species ${speciesId} not found`);
+
+        // For auto-equip items, look up the first profile per item so chosenProfileId can be set.
+        const autoEquipItemIds = species.defaultLoadout.filter(l => l.autoEquip).map(l => l.itemId);
+        const profileRows = autoEquipItemIds.length > 0
+            ? await this.db.itemEquipmentProfile.findMany({
+                where:   { itemId: { in: autoEquipItemIds } },
+                select:  { id: true, itemId: true },
+                orderBy: { id: 'asc' },
+            })
+            : [];
+        const firstProfileByItemId = new Map<number, number>();
+        for (const p of profileRows) {
+            if (!firstProfileByItemId.has(p.itemId)) firstProfileByItemId.set(p.itemId, p.id);
+        }
+
+        // NPC HP uses the floor-average formula: floor(count * sides / 2) + CON mod.
+        const conMod = Math.floor((species.baseConstitution - 10) / 2);
+        const hp     = Math.max(1, Math.floor((species.hpDiceCount * species.hpDiceSides) / 2) + conMod);
+
+        const spawned = await this.db.$transaction(async tx => {
+            const entity = await tx.entity.create({
+                data:   { guildId, name: species.name, statusId, typeId: entityTypeId, speciesId },
+                select: { id: true, name: true },
+            });
+
+            const storage = await tx.storage.create({
+                data:   { guildId, name: `${entity.name} Inventory` },
+                select: { id: true },
+            });
+
+            await Promise.all([
+                tx.entityStats.create({
+                    data: {
+                        entityId:     entity.id,
+                        maxHp:        hp,
+                        currentHp:    hp,
+                        strength:     species.baseStrength,
+                        dexterity:    species.baseDexterity,
+                        constitution: species.baseConstitution,
+                        intelligence: species.baseIntelligence,
+                        wisdom:       species.baseWisdom,
+                        charisma:     species.baseCharisma,
+                    },
+                }),
+                tx.entity_Storage.create({ data: { entityId: entity.id, storageId: storage.id } }),
+            ]);
+
+            if (species.defaultLoadout.length > 0) {
+                await tx.storedItem.createMany({
+                    data: species.defaultLoadout.map(l => {
+                        const chosenProfileId = l.autoEquip ? (firstProfileByItemId.get(l.itemId) ?? null) : null;
+                        return {
+                            storageId:          storage.id,
+                            itemId:             l.itemId,
+                            quantity:           l.quantity,
+                            isEquipped:         l.autoEquip,
+                            chosenProfileId,
+                            equippedAt:         l.autoEquip ? new Date() : null,
+                            usesRemaining:      l.item.maxUses      ? l.item.maxUses      : null,
+                            dailyUsesRemaining: l.item.maxDailyUses ? l.item.maxDailyUses : null,
+                        };
+                    }),
+                });
+            }
+
+            const last = await tx.activeCombat_Participant.findFirst({
+                where:   { activeCombatId: combatId },
+                orderBy: { turnOrder: 'desc' },
+                select:  { turnOrder: true },
+            });
+            const turnOrder = (last?.turnOrder ?? 0) + 1;
+
+            await tx.activeCombat_Participant.create({
+                data: {
+                    activeCombatId:               combatId,
+                    entityId:                     entity.id,
+                    allyFactionId,
+                    turnOrder,
+                    isAiControlled:               true,
+                    joinedAtRound:                roundNumber,
+                    dropTableId:                  species.dropTableId ?? null,
+                    legendaryResistancesRemaining: species.legendaryResistancesMax ?? null,
+                },
+            });
+
+            return { entityId: entity.id, name: entity.name, turnOrder };
+        });
+
+        await this._seedPreCombatEffects(combatId, [spawned.entityId]);
+
+        return { entityId: spawned.entityId, name: spawned.name, allyFactionId, turnOrder: spawned.turnOrder };
+    }
+
+    private async _executeSummons(
+        speciesId:     number,
+        diceCount:     number | null,
+        diceSides:     number | null,
+        guildId:       string,
+        combatId:      number,
+        allyFactionId: number,
+        roundNumber:   number,
+    ): Promise<SummonedEntity[]> {
+        const [entityType, status] = await Promise.all([
+            this.db.entityType.findFirst({ where: { name: 'NPC' },    select: { id: true } }),
+            this.db.status.findFirst(    { where: { name: 'Active' }, select: { id: true } }),
+        ]);
+        if (!entityType) throw new Error('EntityType "NPC" not found');
+        if (!status)     throw new Error('Status "Active" not found');
+
+        const count = (diceCount && diceSides)
+            ? rollDice(diceCount, diceSides, defaultRoller).reduce((a, b) => a + b, 0)
+            : 1;
+        const results: SummonedEntity[] = [];
+        for (let i = 0; i < count; i++) {
+            results.push(await this._spawnNpcEntity(speciesId, guildId, combatId, allyFactionId, roundNumber, entityType.id, status.id));
+        }
+        return results;
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private _toActionResult(ctx: CombatActionContext): ActionResult {
@@ -805,15 +1463,36 @@ export class PlayCombatService {
                     elementalDiceRolls:      ctx.elementalDiceRolls,
                     totalElementalDamage:    ctx.finalElementalDamage,
                     elementalDamageTypeName: ctx.profile?.elementalDamageTypeName ?? null,
+                    absorbedDamage:          ctx.absorbedDamage,
+                    tempHpDrained:           ctx.tempHpDrained,
+                    saveRoll:                ctx.saveRoll,
+                    saveTotal:               ctx.saveTotal,
+                    savedSuccessfully:       ctx.savedSuccessfully,
                     hpAfter:                 ctx.hpAfter ?? 0,
                     knockedDown:             ctx.knockedDown,
                     defeated:                ctx.defeated,
                 };
             } else {
-                outcome = { kind: 'miss', hitRoll: ctx.hitTotal!, targetAC: ctx.targetAC };
+                outcome = { kind: 'miss', hitRoll: ctx.hitTotal!, targetAC: ctx.targetAC, isFumble: ctx.isFumble };
             }
+        } else if (ctx.profile?.restoresHealth) {
+            outcome = {
+                kind:      'heal',
+                diceRolls: ctx.diceRolls,
+                totalHeal: ctx.finalHeal,
+                hpAfter:   ctx.hpAfter ?? ctx.target?.currentHp ?? 0,
+            };
+        } else if (ctx.appliedBehaviorEffect) {
+            outcome = { kind: 'behavior', ...ctx.appliedBehaviorEffect };
         } else {
             outcome = { kind: 'no_op' };
+        }
+
+        // Secondary effects shown alongside a damage/heal outcome go in appliedEffects.
+        // If the primary outcome is already 'behavior', its name is in the outcome itself.
+        const appliedEffects: string[] = [...ctx.appliedStatEffectNames];
+        if (ctx.appliedBehaviorEffect && outcome.kind !== 'behavior') {
+            appliedEffects.push(ctx.appliedBehaviorEffect.effectName);
         }
 
         const targetName = ctx.wasRedirected
@@ -821,19 +1500,49 @@ export class PlayCombatService {
             : (ctx.target?.name ?? 'Unknown');
 
         return {
-            actionId:         ctx.actionId ?? 0,
-            actionLabel:      ctx.profile?.label ?? 'Unknown',
-            actorName:        ctx.actor?.name ?? 'Unknown',
+            actionId:               ctx.actionId ?? 0,
+            actionLabel:            ctx.profile?.label ?? 'Unknown',
+            actorName:              ctx.actor?.name ?? 'Unknown',
             targetName,
-            actualTargetName: ctx.target?.name ?? 'Unknown',
-            wasRedirected:    ctx.wasRedirected,
+            actualTargetName:       ctx.target?.name ?? 'Unknown',
+            wasRedirected:          ctx.wasRedirected,
+            legendaryResistanceUsed: ctx.legendaryResistanceUsed,
             outcome,
-            pendingReaction:  ctx.pendingReaction ?? undefined,
+            appliedEffects,
+            pendingReaction:        ctx.pendingReaction ?? undefined,
+            concentrationSaveEvent: ctx.concentrationSaveEvent ?? null,
+            summonedEntities:       [],
         };
     }
 
-    // Stage 1: only ticks down cooldowns. DoT/HoT and stat-effect decrement are stage 2+.
-    private async _processTurnEnd(combatId: number, participantId: number, _canSecondWind: boolean): Promise<RoundEndEvent[]> {
+    private async _processTurnEnd(participantId: number, usesDeathSaves: boolean): Promise<RoundEndEvent[]> {
+        // Fetch both in parallel — the tick transaction doesn't touch participant HP or metadata.
+        const [activeEffects, participant] = await Promise.all([
+            this.db.activeCombat_StatEffect.findMany({
+                where:   { affectedParticipantId: participantId },
+                orderBy: { id: 'asc' },
+                select: {
+                    effectDef: {
+                        select: {
+                            damageOverTime: { select: { diceCount: true, diceSides: true, flatDamage: true } },
+                            healOverTime:   { select: { diceCount: true, diceSides: true, flatHeal: true } },
+                        },
+                    },
+                },
+            }),
+            this.db.activeCombat_Participant.findUnique({
+                where:  { id: participantId },
+                select: {
+                    entityId:                true,
+                    isAiControlled:          true,
+                    isUnconscious:           true,
+                    deathSaveFailures:       true,
+                    concentratingOnEffectId: true,
+                    entity: { select: { name: true, stats: { select: { currentHp: true, maxHp: true } } } },
+                },
+            }),
+        ]);
+
         await this.db.$transaction([
             this.db.activeCombat_Participant_ActionCooldown.deleteMany({
                 where: { participantId, roundsRemaining: 1 },
@@ -842,13 +1551,130 @@ export class PlayCombatService {
                 where: { participantId, roundsRemaining: { gt: 1 } },
                 data:  { roundsRemaining: { decrement: 1 } },
             }),
+            this.db.activeCombat_StatEffect.deleteMany({
+                where: { affectedParticipantId: participantId, roundsRemaining: 1 },
+            }),
+            this.db.activeCombat_StatEffect.updateMany({
+                where: { affectedParticipantId: participantId, roundsRemaining: { gt: 1 } },
+                data:  { roundsRemaining: { decrement: 1 } },
+            }),
         ]);
-        return [];
-    }
 
-    // Stage 1: no-op. Behavior effect decrement is stage 2+.
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    private async _processTurnStart(_combatId: number, _participantId: number): Promise<void> {}
+        const hasDotOrHot = activeEffects.some(
+            e => e.effectDef.damageOverTime.length > 0 || e.effectDef.healOverTime.length > 0,
+        );
+        if (!hasDotOrHot) return [];
+        if (!participant) return [];
+
+        let currentHp = participant.entity.stats?.currentHp ?? 0;
+        const maxHp   = participant.entity.stats?.maxHp     ?? 0;
+        const events: RoundEndEvent[] = [];
+
+        // Accumulate all tick results first; write HP once at the end (or immediately on defeat).
+        for (const effect of activeEffects) {
+            for (const dot of effect.effectDef.damageOverTime) {
+                const rolls  = rollDice(dot.diceCount, dot.diceSides, defaultRoller);
+                const amount = Math.max(0, rolls.reduce((a, b) => a + b, 0) + dot.flatDamage);
+                currentHp   -= amount;
+
+                if (currentHp <= 0) {
+                    // Eligible for death saves if player-controlled, combat allows it, and not already saving.
+                    const canStartDeathSaves   = !participant.isAiControlled && usesDeathSaves && !participant.isUnconscious;
+                    const alreadyInDeathSaves  = !participant.isAiControlled && usesDeathSaves && participant.isUnconscious;
+                    if (canStartDeathSaves) {
+                        await this.db.$transaction(async tx => {
+                            await tx.entityStats.update({
+                                where: { entityId: participant.entityId },
+                                data:  { currentHp: 0 },
+                            });
+                            await tx.activeCombat_Participant.update({
+                                where: { id: participantId },
+                                data:  { isUnconscious: true, deathSaveSuccesses: 0, deathSaveFailures: 0, concentratingOnEffectId: null },
+                            });
+                            // Going unconscious ends all behavior effects this entity was sourcing
+                            // (guard, taunt, dodge, concentration) and any guard protecting this entity.
+                            await tx.activeCombat_BehaviorEffect.deleteMany({
+                                where: { OR: [{ sourceParticipantId: participantId }, { linkedParticipantId: participantId }] },
+                            });
+                        });
+                        events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: false, knockedDown: true });
+                    } else if (alreadyInDeathSaves) {
+                        // DoT while already unconscious counts as one death save failure; no HP write needed.
+                        const newFailures = Math.min(participant.deathSaveFailures + 1, 3);
+                        if (newFailures >= 3) {
+                            await this.db.$transaction([
+                                this.db.activeCombat_Participant.update({
+                                    where: { id: participantId },
+                                    data:  { isDefeated: true, deathSaveFailures: newFailures },
+                                }),
+                                this.db.activeCombat_BehaviorEffect.deleteMany({
+                                    where: { OR: [{ sourceParticipantId: participantId }, { linkedParticipantId: participantId }] },
+                                }),
+                                this.db.activeCombat_StatEffect.deleteMany({
+                                    where: { affectedParticipantId: participantId },
+                                }),
+                            ]);
+                            events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: true, knockedDown: false });
+                        } else {
+                            await this.db.activeCombat_Participant.update({
+                                where: { id: participantId },
+                                data:  { deathSaveFailures: newFailures },
+                            });
+                            events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: false, knockedDown: false });
+                        }
+                    } else {
+                        await this.db.$transaction([
+                            this.db.entityStats.update({
+                                where: { entityId: participant.entityId },
+                                data:  { currentHp: 0 },
+                            }),
+                            this.db.activeCombat_Participant.update({
+                                where: { id: participantId },
+                                data:  { isDefeated: true },
+                            }),
+                            this.db.activeCombat_BehaviorEffect.deleteMany({
+                                where: { OR: [{ sourceParticipantId: participantId }, { linkedParticipantId: participantId }] },
+                            }),
+                            this.db.activeCombat_StatEffect.deleteMany({
+                                where: { affectedParticipantId: participantId },
+                            }),
+                        ]);
+                        events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: 0, defeated: true, knockedDown: false });
+                    }
+                    return events;
+                }
+
+                events.push({ kind: 'dot', entityId: participant.entityId, entityName: participant.entity.name, amount, hpAfter: currentHp, defeated: false, knockedDown: false });
+            }
+
+            for (const hot of effect.effectDef.healOverTime) {
+                const rolls      = rollDice(hot.diceCount, hot.diceSides, defaultRoller);
+                const raw        = rolls.reduce((a, b) => a + b, 0) + hot.flatHeal;
+                const actualHeal = Math.min(Math.max(0, raw), maxHp - currentHp);
+                currentHp       += actualHeal;
+
+                if (actualHeal > 0) {
+                    events.push({ kind: 'hot', entityId: participant.entityId, entityName: participant.entity.name, amount: actualHeal, hpAfter: currentHp, defeated: false, knockedDown: false });
+                }
+            }
+        }
+
+        // Single HP write covering all DoT/HoT ticks for the turn.
+        if (events.length > 0) {
+            await this.db.entityStats.update({
+                where: { entityId: participant.entityId },
+                data:  { currentHp },
+            });
+            if (participant.isUnconscious && currentHp > 0) {
+                await this.db.activeCombat_Participant.update({
+                    where: { id: participantId },
+                    data:  { isUnconscious: false, deathSaveSuccesses: 0, deathSaveFailures: 0 },
+                });
+            }
+        }
+
+        return events;
+    }
 
     private async _distributeEventCombatXp(combat: {
         guildId:              string;
@@ -931,6 +1757,7 @@ export class PlayCombatService {
             const threshold = meta.isStatProgression
                 ? meta.baseXp
                 : Math.floor(meta.baseXp * Math.pow(nextLevel, 1.5));
+            if (threshold <= 0) break;
             if (currentXp < threshold) break;
             currentXp -= threshold;
             level++;
@@ -949,6 +1776,94 @@ export class PlayCombatService {
                 data:  { level: u.level, currentXp: u.currentXp },
             }))
         );
+    }
+
+    private async _seedPreCombatEffects(combatId: number, entityIds: number[]): Promise<void> {
+        const [preCombatEffects, dbParticipants] = await Promise.all([
+            this.db.entity_PreCombatEffect.findMany({
+                where:  { entityId: { in: entityIds }, expiresAt: { gt: new Date() } },
+                select: {
+                    entityId:          true,
+                    effectDefId:       true,
+                    equipmentProfileId: true,
+                    effectDef: {
+                        select: {
+                            durationRounds: true,
+                            stackBehavior:  { select: { name: true } },
+                        },
+                    },
+                    equipmentProfile: { select: { cooldownRounds: true } },
+                },
+            }),
+            this.db.activeCombat_Participant.findMany({
+                where:  { activeCombatId: combatId },
+                select: { id: true, entityId: true },
+            }),
+        ]);
+
+        if (preCombatEffects.length === 0) return;
+
+        const participantMap = new Map(dbParticipants.map(p => [p.entityId, p.id]));
+
+        // Group effects by participant so we can batch per-participant DB operations.
+        const effectsByParticipant = new Map<number, typeof preCombatEffects>();
+        for (const effect of preCombatEffects) {
+            const participantId = participantMap.get(effect.entityId);
+            if (!participantId) continue;
+            if (!effectsByParticipant.has(participantId)) effectsByParticipant.set(participantId, []);
+            effectsByParticipant.get(participantId)!.push(effect);
+        }
+
+        await Promise.all([...effectsByParticipant].map(async ([participantId, effects]) => {
+            const effectDefIds = effects.map(e => e.effectDefId);
+
+            const existing = await this.db.activeCombat_StatEffect.findMany({
+                where:  { activeCombatId: combatId, affectedParticipantId: participantId, effectDefId: { in: effectDefIds } },
+                select: { effectDefId: true },
+            });
+            const existingDefIds = new Set(existing.map(e => e.effectDefId));
+
+            const refreshDefIds = effects
+                .filter(e => e.effectDef.stackBehavior.name === 'refresh' && existingDefIds.has(e.effectDefId))
+                .map(e => e.effectDefId);
+            if (refreshDefIds.length > 0) {
+                await this.db.activeCombat_StatEffect.deleteMany({
+                    where: { activeCombatId: combatId, affectedParticipantId: participantId, effectDefId: { in: refreshDefIds } },
+                });
+            }
+
+            const toCreate = effects.filter(e =>
+                !(e.effectDef.stackBehavior.name === 'ignore' && existingDefIds.has(e.effectDefId)),
+            );
+
+            if (toCreate.length > 0) {
+                await this.db.activeCombat_StatEffect.createMany({
+                    data: toCreate.map(e => {
+                        const rounds = e.effectDef.durationRounds;
+                        return {
+                            activeCombatId:        combatId,
+                            effectDefId:           e.effectDefId,
+                            affectedParticipantId: participantId,
+                            roundsRemaining:       rounds && rounds > 0 ? rounds : null,
+                        };
+                    }),
+                });
+            }
+
+            // Prisma has no upsertMany — run cooldown upserts in parallel.
+            const cooldownEffects = toCreate.filter(e =>
+                e.equipmentProfileId && (e.equipmentProfile?.cooldownRounds ?? 0) > 0,
+            );
+            if (cooldownEffects.length > 0) {
+                await Promise.all(cooldownEffects.map(e =>
+                    this.db.activeCombat_Participant_ActionCooldown.upsert({
+                        where:  { participantId_equipmentProfileId: { participantId, equipmentProfileId: e.equipmentProfileId! } },
+                        create: { participantId, equipmentProfileId: e.equipmentProfileId!, roundsRemaining: e.equipmentProfile!.cooldownRounds },
+                        update: { roundsRemaining: e.equipmentProfile!.cooldownRounds },
+                    }),
+                ));
+            }
+        }));
     }
 
     private async _getActionEnergyCost(guildId: string, mode: 'spar' | 'fight'): Promise<number> {
