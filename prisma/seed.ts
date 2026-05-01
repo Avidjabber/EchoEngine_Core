@@ -1087,35 +1087,38 @@ async function main() {
     await prisma.envCondition.createMany({
       skipDuplicates: true,
       data: [
-        // Temperature / Precipitation
+        // Temperature
         { codeName: 'cold',           name: 'Cold'          },
         { codeName: 'frost',          name: 'Frost'         },
-        { codeName: 'snow',           name: 'Snow'          },
         { codeName: 'freezing',       name: 'Freezing'      },
         { codeName: 'warm',           name: 'Warm'          },
         { codeName: 'heat',           name: 'Heat'          },
         { codeName: 'scorching',      name: 'Scorching'     },
-        { codeName: 'icy',            name: 'Icy'           },
-        // Moisture
-        { codeName: 'humid',          name: 'Humid'         },
-        { codeName: 'damp',           name: 'Damp'          },
-        { codeName: 'rain',           name: 'Rain'          },
-        { codeName: 'storm',          name: 'Storm'         },
-        { codeName: 'flood',          name: 'Flood'         },
-        { codeName: 'dry',            name: 'Dry'           },
+        // Precipitation
+        { codeName: 'wet',            name: 'Wet'           },
+        { codeName: 'drenched',       name: 'Drenched'      },
+        { codeName: 'flooded',        name: 'Flooded'       },
+        // Humidity
         { codeName: 'arid',           name: 'Arid'          },
+        { codeName: 'dry',            name: 'Dry'           },
+        { codeName: 'damp',           name: 'Damp'          },
+        { codeName: 'humid',          name: 'Humid'         },
         // Wind
         { codeName: 'still',          name: 'Still'         },
         { codeName: 'breezy',         name: 'Breezy'        },
         { codeName: 'windy',          name: 'Windy'         },
         { codeName: 'gusting',        name: 'Gusting'       },
+        { codeName: 'gale',           name: 'Gale'          },
         // Air / Ground Conditions
-        { codeName: 'fog',            name: 'Fog'           },
-        { codeName: 'misty',          name: 'Misty'         },
-        { codeName: 'hazy',           name: 'Hazy'          },
-        { codeName: 'dusty',          name: 'Dusty'         },
-        { codeName: 'filth',          name: 'Filth'         },
+        { codeName: 'icy',            name: 'Icy'           },
         { codeName: 'muddy',          name: 'Muddy'         },
+        { codeName: 'dusty',          name: 'Dusty'         },
+        { codeName: 'misty',          name: 'Misty'         },
+        { codeName: 'fog',            name: 'Fog'           },
+        { codeName: 'dense_fog',      name: 'Dense Fog'     },
+        { codeName: 'hazy',           name: 'Hazy'          },
+        { codeName: 'fouled',         name: 'Fouled'        },
+        { codeName: 'putrid',         name: 'Putrid'        },
         { codeName: 'pollen',         name: 'Pollen'        },
         { codeName: 'smoke',          name: 'Smoke'         },
         { codeName: 'toxic',          name: 'Toxic'         },
@@ -1292,7 +1295,7 @@ async function main() {
       { codeName: 'arctic_tundra',        name: 'Arctic Tundra',        color: 9222344,  conditions: [{ codeName: 'freezing', stacks: 2 }, { codeName: 'windy', stacks: 1 }] },
       { codeName: 'alpine_tundra',        name: 'Alpine Tundra',        color: 10139816, conditions: [{ codeName: 'cold', stacks: 2 }, { codeName: 'windy', stacks: 1 }] },
       { codeName: 'glacier',              name: 'Glacier',              color: 12114152, conditions: [{ codeName: 'freezing', stacks: 2 }, { codeName: 'icy', stacks: 1 }] },
-      { codeName: 'snowfield',            name: 'Snowfield',            color: 15266040, conditions: [{ codeName: 'freezing', stacks: 1 }, { codeName: 'snow', stacks: 1 }] },
+      { codeName: 'snowfield',            name: 'Snowfield',            color: 15266040, conditions: [{ codeName: 'freezing', stacks: 1 }, { codeName: 'icy', stacks: 1 }] },
       // FRESHWATER
       { codeName: 'river',                name: 'River',                color: 4889272,  conditions: [{ codeName: 'damp', stacks: 1 }] },
       { codeName: 'stream',               name: 'Stream',               color: 6992072,  conditions: [{ codeName: 'damp', stacks: 1 }] },
@@ -1319,7 +1322,7 @@ async function main() {
       { codeName: 'oasis',                name: 'Oasis',                color: 4896906,  conditions: [{ codeName: 'damp', stacks: 2 }] },
       { codeName: 'canyon',               name: 'Canyon',               color: 13138506, conditions: [{ codeName: 'dusty', stacks: 1 }, { codeName: 'dry', stacks: 1 }] },
       // HUMAN-MADE / BUILT
-      { codeName: 'urban',                name: 'Urban',                color: 9079450,  conditions: [{ codeName: 'filth', stacks: 1 }, { codeName: 'dusty', stacks: 1 }] },
+      { codeName: 'urban',                name: 'Urban',                color: 9079450,  conditions: [{ codeName: 'fouled', stacks: 1 }, { codeName: 'dusty', stacks: 1 }] },
       { codeName: 'suburban',             name: 'Suburban',             color: 11053210, conditions: [{ codeName: 'cultivated', stacks: 1 }] },
       { codeName: 'ruins',                name: 'Ruins',                color: 8024160,  conditions: [{ codeName: 'dusty', stacks: 1 }] },
       { codeName: 'farmland',             name: 'Farmland',             color: 11061360, conditions: [{ codeName: 'cultivated', stacks: 1 }] },
