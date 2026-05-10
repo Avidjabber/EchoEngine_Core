@@ -273,7 +273,7 @@ export class WeatherPatternsService {
                     continue;
                 }
                 if (typeof wr.weight !== 'number' || wr.weight <= 0) {
-                    weightErrors.push({ row: wr.row, input: wi, message: 'weight must be a positive number' });
+                    weightErrors.push({ row: wr.row, input: wi, message: 'weight must be a rarity tier: common, uncommon, rare, or very rare' });
                     continue;
                 }
 

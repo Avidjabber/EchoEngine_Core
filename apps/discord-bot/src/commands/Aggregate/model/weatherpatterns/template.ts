@@ -19,12 +19,12 @@ function buildGuideComponents(): object[] {
         `-# \`pattern\` — Must match a \`code_name\` from the patterns sheet`,
         `-# \`step_order\` — Positive integer. Determines playback order (1, 2, 3…)`,
         `-# \`weather_state\` — Weather state \`code_name\` for this step (see reference sheet). Leave blank to use the season's default weather state`,
-        `-# \`duration_hours\` — How long this step lasts in hours (positive integer)`,
+        `-# \`duration_hours\` — How long this step lasts in hours (positive integer). Steps can sum to any total — patterns shorter than 24h hold their final step until midnight; patterns longer than 24h continue across multiple days`,
         ``,
         `**season_weights** — Which seasons can select this pattern and how often`,
         `-# \`pattern\` — Must match a \`code_name\` from the patterns sheet`,
         `-# \`season\` — Season name (see reference sheet). Omit a season to exclude the pattern from it`,
-        `-# \`weight\` — Relative spawn weight (positive number). Higher = selected more often relative to other patterns in that season`,
+        `-# \`weight\` — Rarity tier: \`common\`, \`uncommon\`, \`rare\`, or \`very rare\` (see reference sheet). Controls how often this pattern is picked relative to others in that season`,
     ].join('\n');
 
     const notes = [

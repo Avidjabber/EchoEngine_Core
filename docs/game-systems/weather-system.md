@@ -76,11 +76,11 @@ common in green-leaf, etc.
 
   seasonId    FK → Season
   patternId   FK → WeatherPattern
-  weight      Relative probability weight for this season
+  weight      Rarity tier for this season: common (10), uncommon (5), rare (2), very rare (1)
 
-When the Worker selects a new pattern, it samples from all patterns using their
-season-adjusted weights. Patterns with weight 0 for the current season are
-never selected.
+When the Worker selects a new pattern, it samples from all patterns that have a
+weight entry for the current season, using their tier values as relative weights.
+Patterns with no entry for the current season are never selected.
 
 
 ─────────────────────────────────────────────

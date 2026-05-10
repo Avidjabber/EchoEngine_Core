@@ -30,6 +30,14 @@ export interface ParsedWeatherPatternPack {
     seasonWeights: WeatherPatternSeasonWeightRow[];
 }
 
+const TIER_WEIGHTS: Record<string, number> = {
+    'common':    10,
+    'uncommon':  5,
+    'rare':      2,
+    'very rare': 1,
+    'very_rare': 1,
+};
+
 type CellValue = string | number | boolean | null | undefined;
 
 function cellStr(val: CellValue): string | null {
@@ -51,6 +59,12 @@ function cellNum(val: CellValue): number | null {
     if (typeof val === 'number') return val;
     const n = Number(String(val).trim());
     return isNaN(n) ? null : n;
+}
+
+function cellTier(val: CellValue): number | null {
+    if (val === null || val === undefined || val === '') return null;
+    const key = String(val).trim().toLowerCase();
+    return TIER_WEIGHTS[key] ?? null;
 }
 
 function buildHeaderMap(rowValues: CellValue[]): Record<number, string> {
@@ -144,7 +158,7 @@ export async function parseWeatherPatternPack(buffer: Buffer): Promise<ParsedWea
                     row:     rowIndex,
                     pattern: cellStr(r['pattern']),
                     season:  cellStr(r['season']),
-                    weight:  cellNum(r['weight']),
+                    weight:  cellTier(r['weight']),
                 });
             }
         }

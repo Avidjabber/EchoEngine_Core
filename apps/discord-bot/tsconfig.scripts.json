@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "rootDir": ".",
+    "outDir": "./dist-scripts",
+    "esModuleInterop": true
+  },
+  "include": [
+    "src/scripts/**/*",
+    "src/utils/generators/weatherPatternTemplate.ts"
+  ]
+}

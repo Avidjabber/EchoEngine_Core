@@ -32,19 +32,23 @@ function styleHeaderRow(row: ExcelJS.Row): void {
     row.height = 18;
 }
 
+const RARITY_TIERS = ['common', 'uncommon', 'rare', 'very rare'] as const;
+
 function addRefSheet(workbook: ExcelJS.Workbook, data: WeatherPatternTemplateData): void {
     const sheet = workbook.addWorksheet('reference');
     sheet.columns = [
         { header: 'weather_state', key: 'weather_state', width: 28 },
         { header: 'season',        key: 'season',        width: 20 },
+        { header: 'rarity',        key: 'rarity',        width: 16 },
     ];
     styleHeaderRow(sheet.getRow(1));
 
-    const maxRows = Math.max(data.weatherStates.length, data.seasons.length);
+    const maxRows = Math.max(data.weatherStates.length, data.seasons.length, RARITY_TIERS.length);
     for (let i = 0; i < maxRows; i++) {
         sheet.addRow({
             weather_state: data.weatherStates[i] ?? '',
             season:        data.seasons[i] ?? '',
+            rarity:        RARITY_TIERS[i] ?? '',
         });
     }
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
@@ -89,7 +93,7 @@ export async function generateWeatherPatternTemplate(data: WeatherPatternTemplat
     styleHeaderRow(weightsSheet.getRow(1));
     weightsSheet.getRow(1).getCell('pattern').note = 'Must match a code_name from the patterns sheet.';
     weightsSheet.getRow(1).getCell('season').note  = 'Must match a season name (see reference sheet). Add one row per season this pattern should be eligible for.';
-    weightsSheet.getRow(1).getCell('weight').note  = 'Relative spawn weight (positive number). Higher weight = selected more often. Omit a season to make the pattern ineligible for it.';
+    weightsSheet.getRow(1).getCell('weight').note  = 'Rarity tier. Must be one of: common, uncommon, rare, very rare (see reference sheet). Omit a season to make the pattern ineligible for it.';
     weightsSheet.views = [{ state: 'frozen', ySplit: 1 }];
 
     addRefSheet(workbook, data);
@@ -97,6 +101,13 @@ export async function generateWeatherPatternTemplate(data: WeatherPatternTemplat
     const raw = await workbook.xlsx.writeBuffer();
     return Buffer.from(raw);
 }
+
+const WEIGHT_TO_TIER: Record<number, string> = {
+    10: 'common',
+    5:  'uncommon',
+    2:  'rare',
+    1:  'very rare',
+};
 
 export async function generateWeatherPatternDownload(
     patterns:     WeatherPatternDownloadItem[],
@@ -147,7 +158,7 @@ export async function generateWeatherPatternDownload(
     weightsSheet.views = [{ state: 'frozen', ySplit: 1 }];
     for (const p of patterns) {
         for (const sw of p.seasonWeights) {
-            weightsSheet.addRow({ pattern: p.codeName, season: sw.season, weight: sw.weight });
+            weightsSheet.addRow({ pattern: p.codeName, season: sw.season, weight: WEIGHT_TO_TIER[sw.weight] ?? sw.weight });
         }
     }
 
