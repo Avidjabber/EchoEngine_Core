@@ -3,6 +3,7 @@ import { client } from './core/client';
 import interactionCreate from './events/interactionCreate';
 import onReady from './events/onReady';
 import onGuildCreate from './events/onGuildCreate';
+import { startInternalServer } from './internal/server';
 
 // ── Timestamps on all console output ──────────────────────────────────────────
 const timestamp = () => new Date().toISOString();
@@ -15,9 +16,10 @@ console.error = (...args: unknown[]) => _error(`[${timestamp()}]`, ...args);
 client.commands = new Map();
 
 // ── Events ────────────────────────────────────────────────────────────────────
-client.once('clientReady', () =>
-    onReady(client).catch(err => console.error('Error in onReady:', err)),
-);
+client.once('clientReady', () => {
+    onReady(client).catch(err => console.error('Error in onReady:', err));
+    startInternalServer(client, Number(process.env.INTERNAL_PORT ?? 4000));
+});
 
 client.on('guildCreate', guild =>
     onGuildCreate(guild).catch(err => console.error('Error in onGuildCreate:', err)),

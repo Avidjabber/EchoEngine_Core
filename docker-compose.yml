@@ -16,6 +16,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      BOT_INTERNAL_URL: http://discord-bot:4000
     ports:
       - "3000:3000"
     networks:

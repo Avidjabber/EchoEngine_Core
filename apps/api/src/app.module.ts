@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { ServerModule } from './server/server.module';
 import { ModelModule } from './model/model.module';
 import { PlayModule } from './play/play.module';
+import { WeatherSimModule } from './weather-sim/weather-sim.module';
 
 @Module({
     imports: [
@@ -19,6 +20,7 @@ import { PlayModule } from './play/play.module';
         ServerModule,
         ModelModule,
         PlayModule,
+        WeatherSimModule,
     ],
     controllers: [AppController],
     providers: [AppService],
