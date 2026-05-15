@@ -6,6 +6,7 @@ import {
     MessageFlags,
     ModalBuilder,
     ModalSubmitInteraction,
+    StringSelectMenuInteraction,
     TextDisplayBuilder,
     TextInputBuilder,
     TextInputStyle,
@@ -224,6 +225,64 @@ export async function handleGsFlagToggle(interaction: ButtonInteraction): Promis
     await interaction.update({
         flags:      MessageFlags.IsComponentsV2,
         components: buildFlagsSettingsComponents(updated, interaction.guild!.name) as never,
+    });
+}
+
+// ── Timezone button: show picker ──────────────────────────────────────────────
+// customId: gs_tz_btn
+
+export async function handleGsTzButton(interaction: ButtonInteraction): Promise<void> {
+    const guildId = interaction.guildId!;
+    const state   = getState(interaction.user.id, guildId);
+
+    if (!state) {
+        await interaction.reply({
+            flags:      MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
+            components: [
+                new ContainerBuilder()
+                    .setAccentColor(colors.error)
+                    .addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(messages.notYourButton),
+                    ),
+            ],
+        });
+        return;
+    }
+
+    await interaction.update({
+        flags:      MessageFlags.IsComponentsV2,
+        components: buildGuildSettingsComponents(state, interaction.guild!.name, true) as never,
+    });
+}
+
+// ── Timezone select: save and return to main view ─────────────────────────────
+// customId: gs_tz_select
+
+export async function handleGsTzSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const guildId = interaction.guildId!;
+    const state   = getState(interaction.user.id, guildId);
+
+    if (!state) {
+        await interaction.reply({
+            flags:      MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
+            components: [
+                new ContainerBuilder()
+                    .setAccentColor(colors.error)
+                    .addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(messages.notYourButton),
+                    ),
+            ],
+        });
+        return;
+    }
+
+    const offset  = parseInt(interaction.values[0], 10);
+    const updated = { ...state, timezoneOffset: offset };
+    setState(interaction.user.id, guildId, updated);
+
+    await interaction.update({
+        flags:      MessageFlags.IsComponentsV2,
+        components: buildGuildSettingsComponents(updated, interaction.guild!.name) as never,
     });
 }
 

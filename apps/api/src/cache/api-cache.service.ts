@@ -24,6 +24,33 @@ export type CachedProfDefFull = {
     stat:        { id: number; name: string };
 };
 
+export type CachedWeatherStateFull = {
+    id:        number;
+    codeName:  string;
+    name:      string;
+    isSevere:  boolean;
+    envConditions: { envCondition: { id: number; codeName: string } }[];
+};
+
+export type CachedSeason = { id: number; name: string };
+
+export type CachedWeatherPatternFull = {
+    id:           number;
+    codeName:     string;
+    name:         string;
+    isSevere:     boolean;
+    cooldownDays: number;
+    steps: {
+        stepOrder:    number;
+        durationHours: number;
+        weatherState: { id: number; codeName: string } | null;
+    }[];
+    seasonWeights: {
+        season:  { id: number; name: string };
+        weight:  number;
+    }[];
+};
+
 export type CachedGuildModifiers = {
     worldModifiers: {
         envCondition: { codeName: string };
@@ -57,9 +84,13 @@ export class ApiCacheService {
     private relationTypes:     CachedRelationType[]     | null = null;
 
     // Per-guild — write-through, 2-hour TTL as safety net
-    private profDefsSlim = new Map<string, GuildEntry<CachedProfDefSlim[]>>();
-    private profDefsFull = new Map<string, GuildEntry<CachedProfDefFull[]>>();
-    private modifiers    = new Map<string, GuildEntry<CachedGuildModifiers>>();
+    private profDefsSlim     = new Map<string, GuildEntry<CachedProfDefSlim[]>>();
+    private profDefsFull     = new Map<string, GuildEntry<CachedProfDefFull[]>>();
+    private modifiers        = new Map<string, GuildEntry<CachedGuildModifiers>>();
+    private weatherStates    = new Map<string, GuildEntry<CachedWeatherStateFull[]>>();
+    private weatherPatterns  = new Map<string, GuildEntry<CachedWeatherPatternFull[]>>();
+
+    private seasons: CachedSeason[] | null = null;
 
     // ── Global getters / setters ──────────────────────────────────────────────
 
@@ -99,6 +130,39 @@ export class ApiCacheService {
     invalidateProfDefs(guildId: string): void {
         this.profDefsSlim.delete(guildId);
         this.profDefsFull.delete(guildId);
+    }
+
+    // ── Global seasons ────────────────────────────────────────────────────────
+
+    getSeasons(): CachedSeason[] | null { return this.seasons; }
+    setSeasons(v: CachedSeason[]): void { this.seasons = v; }
+
+    // ── Per-guild weather states ──────────────────────────────────────────────
+
+    getWeatherStates(guildId: string): CachedWeatherStateFull[] | null {
+        return this.getGuildEntry(this.weatherStates, guildId);
+    }
+
+    setWeatherStates(guildId: string, data: CachedWeatherStateFull[]): void {
+        this.weatherStates.set(guildId, { data, expiresAt: Date.now() + GUILD_TTL });
+    }
+
+    invalidateWeatherStates(guildId: string): void {
+        this.weatherStates.delete(guildId);
+    }
+
+    // ── Per-guild weather patterns ────────────────────────────────────────────
+
+    getWeatherPatterns(guildId: string): CachedWeatherPatternFull[] | null {
+        return this.getGuildEntry(this.weatherPatterns, guildId);
+    }
+
+    setWeatherPatterns(guildId: string, data: CachedWeatherPatternFull[]): void {
+        this.weatherPatterns.set(guildId, { data, expiresAt: Date.now() + GUILD_TTL });
+    }
+
+    invalidateWeatherPatterns(guildId: string): void {
+        this.weatherPatterns.delete(guildId);
     }
 
     // ── Per-guild modifiers ───────────────────────────────────────────────────

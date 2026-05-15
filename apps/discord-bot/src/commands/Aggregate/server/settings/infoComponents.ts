@@ -1,6 +1,6 @@
 import { colors } from '../../../../core/colors';
 import { GuildSettingsState } from './settingsState';
-import { SETTINGS_NUMBER_FIELDS } from './updateComponents';
+import { SETTINGS_NUMBER_FIELDS, formatOffset } from './updateComponents';
 import { FARMING_FIELDS } from './farmingComponents';
 import { FLAG_FIELDS } from './flagsComponents';
 
@@ -20,6 +20,7 @@ export function buildInfoMainComponents(state: GuildSettingsState, guildName: st
             components:   [
                 { type: 10, content: `## ${guildName} Settings` },
                 { type: 14, divider: true },
+                { type: 10, content: `**Timezone:** ${formatOffset(state.timezoneOffset)}\n-# Your server's UTC offset for daily tick alignment.` },
                 ...rows,
             ],
         },

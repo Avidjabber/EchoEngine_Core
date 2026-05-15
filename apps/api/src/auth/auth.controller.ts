@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { DiscordAuthGuard } from './guards/discord-auth.guard';
 import { ClientTokenDto } from './dto/client-token.dto';
@@ -16,6 +17,7 @@ export class AuthController {
     // Body: { clientId, clientSecret }
     // Returns: { accessToken }
     @Post('token')
+    @Throttle({ default: { ttl: 60000, limit: 5 } })
     async token(@Body() dto: ClientTokenDto) {
         return this.authService.authenticateServiceClient(dto.clientId, dto.clientSecret);
     }

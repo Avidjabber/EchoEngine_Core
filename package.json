@@ -12,15 +12,18 @@
     "db:migrate:deploy:primary": "prisma migrate deploy --schema=prisma/primary/schema.prisma",
     "db:push:primary": "prisma db push --schema=prisma/primary/schema.prisma",
     "db:studio:primary": "prisma studio --schema=prisma/primary/schema.prisma",
-    "db:seed": "ts-node --project tsconfig.seed.json prisma/seed.ts"
+    "db:seed": "ts-node --project tsconfig.seed.json prisma/seed.ts",
+    "db:provision:all": "ts-node --project tsconfig.seed.json scripts/provision-all.ts",
+    "db:provision:worker": "ts-node --project tsconfig.seed.json scripts/provision-service-client.ts -- --client=worker",
+    "db:provision:bot": "ts-node --project tsconfig.seed.json scripts/provision-service-client.ts -- --client=bot"
   },
   "devDependencies": {
     "prisma": "^7.8.0",
-    "typescript": "^5.8.0"
+    "typescript": "^6.0.0"
   },
   "dependencies": {
     "cron": "^4.4.0",
-    "node-cron": "^4.2.1"
+    "node-cron": "^4.2.1",
     "@prisma/client": "^7.8.0"
   }
 }

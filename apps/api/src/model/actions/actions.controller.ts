@@ -1,8 +1,10 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UploadActionPackDto } from './dto/upload-action-pack.dto';
 import { ActionsService } from './actions.service';
 
 @Controller('model/actions')
+@UseGuards(JwtAuthGuard)
 export class ActionsController {
     constructor(private readonly actionsService: ActionsService) {}
 

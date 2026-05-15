@@ -21,13 +21,18 @@ COPY packages/shared/ ./packages/shared/
 COPY apps/discord-bot/package.json ./apps/discord-bot/
 RUN npm install --workspace=apps/discord-bot
 
+# Compile shared package to CJS JS (consumers load dist/, not raw .ts)
+RUN node_modules/.bin/tsc --project packages/shared/tsconfig.json
+
 # Generate Prisma client (types only — no DB connection at runtime)
 RUN npx prisma generate --schema=prisma/primary/schema.prisma
 
 # Copy source
 COPY apps/discord-bot/ ./apps/discord-bot/
 
-ENV NODE_ENV=production
 WORKDIR /app/apps/discord-bot
+RUN npm run build
 
-CMD ["npx", "tsx", "src/index.ts"]
+ENV NODE_ENV=production
+
+CMD ["node", "dist/index.js"]

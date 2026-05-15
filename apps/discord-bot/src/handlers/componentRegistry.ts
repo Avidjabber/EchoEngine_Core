@@ -1,6 +1,6 @@
 import { ButtonInteraction, MessageComponentInteraction, ModalSubmitInteraction, StringSelectMenuInteraction } from 'discord.js';
 import { handleDenListDone, handleDenListConfig, handleDenListPage, handleDenToggle, handleDenResetDefaults, handleDenDone, handleDenDelete } from '../commands/Aggregate/server/den/configHandlers';
-import { handleGsFieldButton, handleGsFieldModal, handleGsFarmButton, handleGsFarmModal, handleGsFlagToggle, handleGsSection, handleGsCancel, handleGsFinalize } from '../commands/Aggregate/server/settings/settingsHandlers';
+import { handleGsFieldButton, handleGsFieldModal, handleGsFarmButton, handleGsFarmModal, handleGsFlagToggle, handleGsTzButton, handleGsTzSelect, handleGsSection, handleGsCancel, handleGsFinalize } from '../commands/Aggregate/server/settings/settingsHandlers';
 import { handleGsiSection, handleGsiDone } from '../commands/Aggregate/server/settings/infoHandlers';
 import { handleEcListPage, handleEcListFilter, handleEcListDone } from '../commands/Aggregate/config/envcondition/listHandlers';
 import { handleEcInfoDetail, handleEcInfoBack, handleEcInfoPage, handleEcInfoDone } from '../commands/Aggregate/config/envcondition/infoHandlers';
@@ -50,6 +50,7 @@ export const modalHandlers: ComponentHandler[] = [
 
 // ── Select menu handlers ───────────────────────────────────────────────────────
 export const selectMenuHandlers: ComponentHandler[] = [
+    { prefix: 'gs_tz_select',   handler: interaction => handleGsTzSelect(interaction as StringSelectMenuInteraction) },
     { prefix: 'ec_list_filter', handler: interaction => handleEcListFilter(interaction as StringSelectMenuInteraction) },
     { prefix: 'ec_upd_type',    handler: interaction => handleEcUpdType(interaction as StringSelectMenuInteraction) },
     { prefix: 'ec_upd_et',      handler: interaction => handleEcUpdEt(interaction as StringSelectMenuInteraction) },
@@ -105,6 +106,7 @@ export const buttonHandlers: ComponentHandler[] = [
     { prefix: 'gs_field_btn:',    handler: interaction => handleGsFieldButton(interaction as ButtonInteraction) },
     { prefix: 'gs_farm_btn:',     handler: interaction => handleGsFarmButton(interaction as ButtonInteraction) },
     { prefix: 'gs_flag_toggle:',  handler: interaction => handleGsFlagToggle(interaction as ButtonInteraction) },
+    { prefix: 'gs_tz_btn',        handler: interaction => handleGsTzButton(interaction as ButtonInteraction) },
     { prefix: 'gs_section:',      handler: interaction => handleGsSection(interaction as ButtonInteraction) },
     { prefix: 'gs_cancel',        handler: interaction => handleGsCancel(interaction as ButtonInteraction) },
     { prefix: 'gs_finalize',      handler: interaction => handleGsFinalize(interaction as ButtonInteraction) },

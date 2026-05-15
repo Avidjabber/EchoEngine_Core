@@ -21,6 +21,9 @@ COPY packages/shared/ ./packages/shared/
 COPY apps/api/package.json ./apps/api/
 RUN npm install --workspace=apps/api
 
+# Compile shared package to CJS JS (consumers load dist/, not raw .ts)
+RUN node_modules/.bin/tsc --project packages/shared/tsconfig.json
+
 # Copy source (before prisma generate so generated files land inside src/)
 COPY apps/api/ ./apps/api/
 
@@ -28,7 +31,9 @@ COPY apps/api/ ./apps/api/
 # Must run after source copy so it is not overwritten
 RUN npx prisma generate --schema=prisma/primary/schema.prisma
 
-ENV NODE_ENV=production
 WORKDIR /app/apps/api
+RUN npm run build
 
-CMD ["node", "-r", "ts-node/register", "-r", "tsconfig-paths/register", "src/main.ts"]
+ENV NODE_ENV=production
+
+CMD ["node", "-r", "tsconfig-paths/register", "dist/main.js"]

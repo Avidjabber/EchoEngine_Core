@@ -53,6 +53,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         craftingEnabled:    s.craftingEnabled,
         progressionEnabled: s.progressionEnabled,
         socialEnabled:      s.socialEnabled,
+        timezoneOffset:     s.timezoneOffset,
     });
 
     await interaction.editReply({

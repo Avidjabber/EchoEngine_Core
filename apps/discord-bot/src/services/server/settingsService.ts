@@ -31,6 +31,8 @@ export interface GuildSettings {
     progressionEnabled: boolean;
     socialEnabled:      boolean;
 
+    timezoneOffset: number;
+
     disciplineLevelCaps: DisciplineLevelCap[];
 
     createdAt: string;
@@ -67,6 +69,7 @@ export interface GuildSettingsUpdate {
     craftingEnabled?:    boolean;
     progressionEnabled?: boolean;
     socialEnabled?:      boolean;
+    timezoneOffset?:     number;
 }
 
 export async function updateGuildSettings(guildId: string, data: GuildSettingsUpdate) {

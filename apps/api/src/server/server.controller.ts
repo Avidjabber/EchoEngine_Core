@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateDenDto } from './dto/create-den.dto';
 import { UpdateDenDto } from './dto/update-den.dto';
 import { UpdateGuildSettingsDto } from './dto/update-guild-settings.dto';
@@ -6,6 +7,7 @@ import { ResetGuildSettingsDto } from './dto/reset-guild-settings.dto';
 import { ServerService } from './server.service';
 
 @Controller('server')
+@UseGuards(JwtAuthGuard)
 export class ServerController {
     constructor(private readonly serverService: ServerService) {}
 

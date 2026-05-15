@@ -1,12 +1,8 @@
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { Client } from 'discord.js';
 import { loadCommands } from '../handlers/loadCommands';
 import { deployCommands } from '../handlers/deploy';
 import { setBotPresence } from '../core/presence';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export default async function onReady(client: Client): Promise<void> {
     console.log(`Logged in as ${client.user!.tag}`);

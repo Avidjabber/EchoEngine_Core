@@ -1,5 +1,4 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { BotApiKeyMiddleware } from '../auth/middleware/bot-api-key.middleware';
+import { Module } from '@nestjs/common';
 import { ApiCacheService } from '../cache/api-cache.service';
 import { EnvConditionsController } from './env-conditions/envConditions.controller';
 import { EnvConditionsService } from './env-conditions/envConditions.service';
@@ -10,15 +9,15 @@ import { ProficienciesRepository } from './proficiencies/proficiencies.repositor
 import { ActionsController } from './actions/actions.controller';
 import { ActionsService } from './actions/actions.service';
 import { ActionsRepository } from './actions/actions.repository';
+import { WeatherStatesController } from './weather-states/weatherStates.controller';
+import { WeatherStatesService } from './weather-states/weatherStates.service';
+import { WeatherStatesRepository } from './weather-states/weatherStates.repository';
+import { WeatherPatternsController } from './weather-patterns/weatherPatterns.controller';
+import { WeatherPatternsService } from './weather-patterns/weatherPatterns.service';
+import { WeatherPatternsRepository } from './weather-patterns/weatherPatterns.repository';
 
 @Module({
-    controllers: [EnvConditionsController, ProficienciesController, ActionsController],
-    providers:   [ApiCacheService, EnvConditionsService, EnvConditionsRepository, ProficienciesService, ProficienciesRepository, ActionsService, ActionsRepository],
+    controllers: [EnvConditionsController, ProficienciesController, ActionsController, WeatherStatesController, WeatherPatternsController],
+    providers:   [ApiCacheService, EnvConditionsService, EnvConditionsRepository, ProficienciesService, ProficienciesRepository, ActionsService, ActionsRepository, WeatherStatesService, WeatherStatesRepository, WeatherPatternsService, WeatherPatternsRepository],
 })
-export class ModelModule implements NestModule {
-    configure(consumer: MiddlewareConsumer): void {
-        consumer
-            .apply(BotApiKeyMiddleware)
-            .forRoutes(EnvConditionsController, ProficienciesController, ActionsController);
-    }
-}
+export class ModelModule {}

@@ -1,8 +1,10 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UploadEnvConditionPackDto } from './dto/upload-env-condition-pack.dto';
 import { EnvConditionsService } from './envConditions.service';
 
 @Controller('model/env-conditions')
+@UseGuards(JwtAuthGuard)
 export class EnvConditionsController {
     constructor(private readonly envConditionsService: EnvConditionsService) {}
 

@@ -1,11 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "commonjs",
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "6.0",
+    "types": ["node"],
     "rootDir": "./src",
     "outDir": "./dist",
-    "baseUrl": "./",
     "paths": {
       "@prisma/primary": ["../../prisma/primary/generated/client"],
       "@prisma/primary/*": ["../../prisma/primary/generated/*"]

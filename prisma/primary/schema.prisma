@@ -129,6 +129,8 @@ model GuildSettings {
   progressionEnabled Boolean @default(true)  // energy, aging, EXP, skill points, faction reputation
   socialEnabled      Boolean @default(true)  // faction standings, entity relationships, family trees
 
+  timezoneOffset Int @default(0)  // UTC offset in hours (-12 to +12); used to align the daily tick with the guild's local midnight
+
   // Daily tick tracking — null = never ticked; updated by Worker after each daily processing run
   lastTickAt DateTime? @db.Timestamptz
 

@@ -1,8 +1,10 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UploadProficiencyPackDto } from './dto/upload-proficiency-pack.dto';
 import { ProficienciesService } from './proficiencies.service';
 
 @Controller('model/proficiencies')
+@UseGuards(JwtAuthGuard)
 export class ProficienciesController {
     constructor(private readonly proficienciesService: ProficienciesService) {}
 

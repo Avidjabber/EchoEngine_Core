@@ -40,6 +40,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
             craftingEnabled:    settings.craftingEnabled,
             progressionEnabled: settings.progressionEnabled,
             socialEnabled:      settings.socialEnabled,
+            timezoneOffset:     settings.timezoneOffset,
         };
 
         setCachedInfo(guildId, state);

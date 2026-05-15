@@ -1,6 +1,6 @@
 GLOBAL SEED DATA — REFERENCE
 ==============================
-Last updated: 2026-04-06
+Last updated: 2026-05-01
 
 This file defines all global seed values for EchoPaw. Work through each
 table one at a time. Mark a table as DONE when its values are finalised.
@@ -1362,7 +1362,7 @@ Removed from original list as redundant:
   arctic_tundra  Arctic Tundra  9222344   (#8CB8C8)    freezing:2  windy:1
   alpine_tundra  Alpine Tundra  10139816  (#9AB8A8)    cold:2      windy:1
   glacier        Glacier        12114152  (#B8D8E8)    freezing:2  icy:1
-  snowfield      Snowfield      15266040  (#E8F0F8)    freezing:1  snow:1
+  snowfield      Snowfield      15266040  (#E8F0F8)    freezing:1  icy:1
 
   FRESHWATER
   codeName   name                 color                  inherentConditions
@@ -1399,7 +1399,7 @@ Removed from original list as redundant:
 
   HUMAN-MADE / BUILT
   codeName  name      color                  inherentConditions
-  urban     Urban     9079450   (#8A8A9A)    filth:1  dusty:1
+  urban     Urban     9079450   (#8A8A9A)    fouled:1  dusty:1
   suburban  Suburban  11053210  (#A8A89A)    cultivated:1
   ruins     Ruins     8024160   (#7A7060)    dusty:1
   farmland  Farmland  11061360  (#A8C870)    cultivated:1
@@ -1417,42 +1417,50 @@ Conditions with no inherent world modifiers are marked with —. Their effects o
 species, and illnesses are expressed via per-entity tables (PlantDef_EnvConditionEffect,
 Species_EnvConditionEffect, ConditionDef_EnvRule) seeded separately.
 
-  TEMPERATURE / PRECIPITATION
-  codeName       name           modifiers
-  cold           Cold           spoilage=-0.3
-  frost          Frost          spoilage=-0.5
-  snow           Snow           spoilage=-0.5
-  freezing       Freezing       spoilage=-0.6                                   [NEW]
-  warm           Warm           spoilage=0.2                                    [NEW]
-  heat           Heat           spoilage=0.5
-  scorching      Scorching      spoilage=0.8                                    [NEW]
-  icy            Icy            —
+  TEMPERATURE
+  codeName   name       modifiers
+  cold       Cold       spoilage=-0.3
+  frost      Frost      spoilage=-0.5
+  freezing   Freezing   spoilage=-0.6
+  warm       Warm       spoilage=0.2
+  heat       Heat       spoilage=0.5
+  scorching  Scorching  spoilage=0.8
 
-  MOISTURE
+  PRECIPITATION
+  Intensity scale for liquid precipitation. Compose with other conditions for full weather states
+  (e.g. heavy rain = drenched + overcast; thunderstorm = drenched + gusting + overcast).
+  codeName  name      modifiers
+  wet       Wet       filth=0.3  spoilage=0.2
+  drenched  Drenched  filth=0.5  spoilage=0.2
+  flooded   Flooded   filth=0.5
+
+  HUMIDITY
+  Ambient moisture scale — biome baseline and persistent atmospheric conditions.
   codeName  name   modifiers
-  humid     Humid  filth=0.2  spoilage=0.6
-  damp      Damp   filth=0.2  spoilage=0.3
-  rain      Rain   filth=0.3  spoilage=0.2
-  storm     Storm  filth=0.5  spoilage=0.2
-  flood     Flood  filth=0.5
+  arid      Arid   spoilage=-0.5
   dry       Dry    —
-  arid      Arid   spoilage=-0.5                                                [NEW]
+  damp      Damp   filth=0.2  spoilage=0.3
+  humid     Humid  filth=0.2  spoilage=0.6
 
   WIND
   codeName  name     modifiers
-  still     Still    —                                                          [NEW]
-  breezy    Breezy   filth=0.1                                                  [NEW]
+  still     Still    —
+  breezy    Breezy   filth=0.1
   windy     Windy    filth=0.3
-  gusting   Gusting  filth=0.4                                                   [NEW]
+  gusting   Gusting  filth=0.4
+  gale      Gale     filth=0.6
 
   AIR / GROUND CONDITIONS
   codeName  name    modifiers
-  fog       Fog     —
-  misty     Misty   —                                                           [NEW]
-  hazy      Hazy    —                                                           [NEW]
-  dusty     Dusty   filth=0.2
-  filth     Filth   filth=0.5
+  icy       Icy     —
   muddy     Muddy   filth=0.3
+  dusty     Dusty   filth=0.2
+  misty     Misty      —
+  fog       Fog        —
+  dense_fog Dense Fog  —
+  hazy      Hazy       —
+  fouled    Fouled     filth=0.5
+  putrid    Putrid     filth=0.8
   pollen    Pollen  —
   smoke     Smoke   —
   toxic     Toxic   —
@@ -1461,12 +1469,12 @@ Species_EnvConditionEffect, ConditionDef_EnvRule) seeded separately.
   codeName       name           modifiers
   overcast       Overcast       —
   sunny          Sunny          spoilage=0.2
-  harsh_sunlight Harsh Sunlight spoilage=0.3                                    [NEW]
-  bright         Bright         —                                               [NEW]
-  dappled_light  Dappled Light  —                                               [NEW]
-  shaded         Shaded         —                                               [NEW]
-  dim            Dim            —                                               [NEW]
-  dark           Dark           —                                               [NEW]
+  harsh_sunlight Harsh Sunlight spoilage=0.3
+  bright         Bright         —
+  dappled_light  Dappled Light  —
+  shaded         Shaded         —
+  dim            Dim            —
+  dark           Dark           —
 
   LAND USE
   codeName   name       modifiers

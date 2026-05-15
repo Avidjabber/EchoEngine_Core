@@ -2,13 +2,13 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "module": "commonjs",
-    "moduleResolution": "node",
+    "moduleResolution": "node10",
     "ignoreDeprecations": "6.0",
+    "types": ["node"],
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "rootDir": "./src",
     "outDir": "./dist",
-    "baseUrl": "./",
     "incremental": true,
     "paths": {
       "@prisma/primary": ["./src/generated/prisma-primary/client"],

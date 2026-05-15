@@ -5,13 +5,14 @@ name: echoengine-worker
 services:
   worker:
     build:
-        context: ../..
-        dockerfile: apps/worker/Dockerfile
-    restart: unless-stopped
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    restart: on-failure:2
     env_file:
       - .env
     environment:
       NODE_ENV: production
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:3000}
     volumes:
       - "/etc/timezone:/etc/timezone:ro"
       - "/etc/localtime:/etc/localtime:ro"

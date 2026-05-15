@@ -25,17 +25,24 @@ services:
     build:
       context: ../..
       dockerfile: apps/api/Dockerfile
-    restart: unless-stopped
+    restart: on-failure:2
     env_file:
       - .env
     environment:
       NODE_ENV: production
+      PORT: 3000
       DATABASE_URL_PRIMARY: postgresql://${POSTGRES_USER:-echoengine}:${POSTGRES_PASSWORD:-changeme}@postgres-primary:5432/${POSTGRES_DB:-echoengine_primary}
     ports:
       - "3000:3000"
     depends_on:
       postgres-primary:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
 volumes:
   postgres-primary-data:
