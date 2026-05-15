@@ -21,6 +21,9 @@ COPY packages/shared/ ./packages/shared/
 COPY apps/discord-bot/package.json ./apps/discord-bot/
 RUN npm install --workspace=apps/discord-bot
 
+# Compile shared package to CJS JS (consumers load dist/, not raw .ts)
+RUN node_modules/.bin/tsc --project packages/shared/tsconfig.json
+
 # Generate Prisma client (types only — no DB connection at runtime)
 RUN npx prisma generate --schema=prisma/primary/schema.prisma
 

@@ -2,8 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "module": "commonjs",
-    "moduleResolution": "node",
+    "moduleResolution": "node10",
     "ignoreDeprecations": "6.0",
+    "types": ["node"],
     "rootDir": "./src",
     "outDir": "./dist",
     "paths": {

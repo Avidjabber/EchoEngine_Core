@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
 import { Client } from 'discord.js';
 import type { CommandModule } from '../core/client';
 
@@ -63,7 +62,7 @@ async function loadCommandFile(
     forDeploy: object[],
 ): Promise<void> {
     try {
-        const mod = (await import(pathToFileURL(filePath).href)) as Partial<CommandModule>;
+        const mod = (await import(filePath)) as Partial<CommandModule>;
 
         if (!mod.data || !mod.execute) {
             console.warn(`[loadCommands] Missing "data" or "execute" in ${filePath}`);
