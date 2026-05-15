@@ -206,22 +206,18 @@ export class ProficienciesService {
             );
         });
 
-        const results = await Promise.allSettled(
-            toSave.map(c => this.repo.upsertProficiencyDef({
-                guildId:     dto.guildId,
-                codeName:    c.codeName,
-                name:        c.name,
-                description: c.description,
-                statId:      c.statId,
-            })),
-        );
-
         const saved:      ProficiencySavedRow[]       = [];
         const overwrites: ProficiencyOverwrittenRow[] = [];
 
-        results.forEach((result, i) => {
-            const c = toSave[i];
-            if (result.status === 'fulfilled') {
+        for (const c of toSave) {
+            try {
+                await this.repo.upsertProficiencyDef({
+                    guildId:     dto.guildId,
+                    codeName:    c.codeName,
+                    name:        c.name,
+                    description: c.description,
+                    statId:      c.statId,
+                });
                 saved.push({ row: c.dto.row, codeName: c.codeName, name: c.name, stat: c.statName });
                 if (c.existing) {
                     overwrites.push({
@@ -233,10 +229,10 @@ export class ProficienciesService {
                         newStat:  c.statName,
                     });
                 }
-            } else {
+            } catch {
                 errors.push({ row: c.dto.row, input: rowInput(c.codeName, c.name, c.dto.stat), message: 'Failed to save to database' });
             }
-        });
+        }
 
         errors.sort((a, b) => a.row - b.row);
 

@@ -1,5 +1,4 @@
 import ExcelJS from 'exceljs';
-import { Readable } from 'stream';
 
 export interface ItemRow {
     row:             number;
@@ -149,29 +148,19 @@ function isEmptyRow(record: Record<string, CellValue>): boolean {
 export async function parseItemPack(buffer: Buffer): Promise<ParsedItemPack> {
     const result: ParsedItemPack = { items: [], equipment: [], food: [], actions: [], effects: [] };
 
-    const stream = Readable.from(buffer);
-    const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(stream, {
-        sharedStrings: 'cache',
-        styles:        'ignore',
-        hyperlinks:    'ignore',
-        worksheets:    'emit',
-        entries:       'emit',
-    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
-    workbookReader.read();
-
-    for await (const worksheet of workbookReader) {
-        const sheetName = (worksheet as unknown as { name: string }).name.toLowerCase().replace(/\s+/g, '_');
+    for (const worksheet of workbook.worksheets) {
+        const sheetName = worksheet.name.toLowerCase().replace(/\s+/g, '_');
 
         if (sheetName === 'items') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.items.push({
                     row:             rowIndex,
                     codeName:        cellStr(r['code_name']),
@@ -190,18 +179,16 @@ export async function parseItemPack(buffer: Buffer): Promise<ParsedItemPack> {
                     fuelType:        cellStr(r['fuel_type']),
                     isEphemeral:     cellBool(r['is_ephemeral']),
                 });
-            }
+            });
         }
 
         if (sheetName === 'equipment') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.equipment.push({
                     row:                   rowIndex,
                     itemCodeName:          cellStr(r['item_code_name']),
@@ -247,18 +234,16 @@ export async function parseItemPack(buffer: Buffer): Promise<ParsedItemPack> {
                     summonDiceSides:       cellNum(r['summon_dice_sides']),
                     attackCount:           cellNum(r['attack_count']),
                 });
-            }
+            });
         }
 
         if (sheetName === 'food') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.food.push({
                     row:                   rowIndex,
                     itemCodeName:          cellStr(r['item_code_name']),
@@ -267,18 +252,16 @@ export async function parseItemPack(buffer: Buffer): Promise<ParsedItemPack> {
                     plantNutritionPerGram: cellNum(r['plant_nutrition_per_gram']),
                     plantHydrationPerGram: cellNum(r['plant_hydration_per_gram']),
                 });
-            }
+            });
         }
 
         if (sheetName === 'actions') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.actions.push({
                     row:           rowIndex,
                     itemCodeName:  cellStr(r['item_code_name']),
@@ -286,18 +269,16 @@ export async function parseItemPack(buffer: Buffer): Promise<ParsedItemPack> {
                     energyCost:    cellNum(r['energy_cost']),
                     consumedOnUse: cellBool(r['consumed_on_use']),
                 });
-            }
+            });
         }
 
         if (sheetName === 'effects') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.effects.push({
                     row:           rowIndex,
                     itemCodeName:  cellStr(r['item_code_name']),
@@ -306,7 +287,7 @@ export async function parseItemPack(buffer: Buffer): Promise<ParsedItemPack> {
                     relationType:  cellStr(r['relation_type']),
                     effectiveness: cellNum(r['effectiveness']),
                 });
-            }
+            });
         }
     }
 

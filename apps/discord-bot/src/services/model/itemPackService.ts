@@ -62,7 +62,7 @@ export function uploadItemPack(guildId: string, pack: ParsedItemPack) {
         food:      pack.food,
         actions:   pack.actions,
         effects:   pack.effects,
-    });
+    }, 120_000);
 }
 
 export function resetItemPack(guildId: string) {

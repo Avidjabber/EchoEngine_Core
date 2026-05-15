@@ -118,9 +118,9 @@ export class ActionsService {
         const overwrites: OverwrittenRow[] = [];
 
         // ── base_configs ──────────────────────────────────────────────────────
-        const baseResults = await Promise.allSettled(
-            this._validateBaseConfigs(dto.baseConfigs, actionMap, errors).map(c =>
-                this.repo.upsertBaseConfig({
+        for (const c of this._validateBaseConfigs(dto.baseConfigs, actionMap, errors)) {
+            try {
+                await this.repo.upsertBaseConfig({
                     guildId:           dto.guildId,
                     actionTypeId:      c.actionTypeId,
                     energyCost:        c.energyCost,
@@ -129,111 +129,76 @@ export class ActionsService {
                     maxEntities:       c.maxEntities,
                     durationMinutes:   c.durationMinutes,
                     baseFactionReward: c.baseFactionReward,
-                }).then(() => ({ candidate: c })),
-            ),
-        );
-
-        for (const result of baseResults) {
-            if (result.status === 'rejected') continue;
-            const { candidate: c } = result.value;
-            const existing = existingConfigMap.get(c.actionTypeId);
-            saved.push({ sheet: 'base_configs', row: c.row, action: c.action });
-            if (existing) overwrites.push({ sheet: 'base_configs', row: c.row, action: c.action });
+                });
+                const existing = existingConfigMap.get(c.actionTypeId);
+                saved.push({ sheet: 'base_configs', row: c.row, action: c.action });
+                if (existing) overwrites.push({ sheet: 'base_configs', row: c.row, action: c.action });
+            } catch {
+                errors.push({ sheet: 'base_configs', row: c.row, input: rowInput(c.action), message: 'Failed to save to database' });
+            }
         }
-        const baseFailedRows = baseResults
-            .map((r, i) => ({ r, i }))
-            .filter(({ r }) => r.status === 'rejected')
-            .map(({ i }) => {
-                const c = this._validateBaseConfigs(dto.baseConfigs, actionMap, []).at(i);
-                if (c) errors.push({ sheet: 'base_configs', row: c.row, input: rowInput(c.action), message: 'Failed to save to database' });
-            });
-        void baseFailedRows;
 
         // ── discipline_rewards ────────────────────────────────────────────────
-        const rewardCandidates = this._validateDisciplineRewards(dto.disciplineRewards, actionMap, discMap, errors);
-        const rewardResults = await Promise.allSettled(
-            rewardCandidates.map(c =>
-                this.repo.upsertDisciplineReward({
+        for (const c of this._validateDisciplineRewards(dto.disciplineRewards, actionMap, discMap, errors)) {
+            try {
+                await this.repo.upsertDisciplineReward({
                     guildId:        dto.guildId,
                     actionTypeId:   c.actionTypeId,
                     disciplineId:   c.disciplineId,
                     xpAmount:       c.xpAmount,
                     recipientScope: c.recipientScope,
-                }).then(() => ({ candidate: c })),
-            ),
-        );
-
-        rewardResults.forEach((result, i) => {
-            if (result.status === 'rejected') {
-                const c = rewardCandidates[i];
+                });
+                const key = `${c.actionTypeId}:${c.disciplineId}:${c.recipientScope}`;
+                const existing = existingRewardMap.get(key);
+                saved.push({ sheet: 'discipline_rewards', row: c.row, action: c.action, discipline: c.discipline, recipientScope: c.recipientScope, xpAmount: c.xpAmount });
+                if (existing && existing.xpAmount !== c.xpAmount) {
+                    overwrites.push({ sheet: 'discipline_rewards', row: c.row, action: c.action, discipline: c.discipline, recipientScope: c.recipientScope, oldXpAmount: existing.xpAmount, newXpAmount: c.xpAmount });
+                }
+            } catch {
                 errors.push({ sheet: 'discipline_rewards', row: c.row, input: rowInput(c.action, c.discipline, c.recipientScope), message: 'Failed to save to database' });
-                return;
             }
-            const { candidate: c } = result.value;
-            const key = `${c.actionTypeId}:${c.disciplineId}:${c.recipientScope}`;
-            const existing = existingRewardMap.get(key);
-            saved.push({ sheet: 'discipline_rewards', row: c.row, action: c.action, discipline: c.discipline, recipientScope: c.recipientScope, xpAmount: c.xpAmount });
-            if (existing && existing.xpAmount !== c.xpAmount) {
-                overwrites.push({ sheet: 'discipline_rewards', row: c.row, action: c.action, discipline: c.discipline, recipientScope: c.recipientScope, oldXpAmount: existing.xpAmount, newXpAmount: c.xpAmount });
-            }
-        });
+        }
 
         // ── step_configs ──────────────────────────────────────────────────────
-        const stepCandidates = this._validateStepConfigs(dto.stepConfigs, actionMap, stepMap, profMap, statMap, errors);
-        const stepResults = await Promise.allSettled(
-            stepCandidates.map(c =>
-                this.repo.upsertStepConfig({
+        for (const c of this._validateStepConfigs(dto.stepConfigs, actionMap, stepMap, profMap, statMap, errors)) {
+            try {
+                await this.repo.upsertStepConfig({
                     guildId:          dto.guildId,
                     stepId:           c.stepId,
                     proficiencyDefId: c.proficiencyDefId,
                     statId:           c.statId,
-                }).then(() => ({ candidate: c })),
-            ),
-        );
-
-        stepResults.forEach((result, i) => {
-            if (result.status === 'rejected') {
-                const c = stepCandidates[i];
+                });
+                const existing = existingStepMap.get(c.stepId);
+                const oldProf = existing ? (profDefs.find(p => p.id === existing.proficiencyDefId)?.codeName ?? null) : null;
+                const oldStat = existing ? (stats.find(s => s.id === existing.statId)?.name ?? null) : null;
+                saved.push({ sheet: 'step_configs', row: c.row, action: c.action, step: c.step, proficiency: c.proficiencyName, stat: c.statName });
+                if (existing && (existing.proficiencyDefId !== c.proficiencyDefId || existing.statId !== c.statId)) {
+                    overwrites.push({ sheet: 'step_configs', row: c.row, action: c.action, step: c.step, oldProficiency: oldProf, oldStat: oldStat, newProficiency: c.proficiencyName, newStat: c.statName });
+                }
+            } catch {
                 errors.push({ sheet: 'step_configs', row: c.row, input: rowInput(c.action, c.step), message: 'Failed to save to database' });
-                return;
             }
-            const { candidate: c } = result.value;
-            const existing = existingStepMap.get(c.stepId);
-            const oldProf = existing ? (profDefs.find(p => p.id === existing.proficiencyDefId)?.codeName ?? null) : null;
-            const oldStat = existing ? (stats.find(s => s.id === existing.statId)?.name ?? null) : null;
-            saved.push({ sheet: 'step_configs', row: c.row, action: c.action, step: c.step, proficiency: c.proficiencyName, stat: c.statName });
-            if (existing && (existing.proficiencyDefId !== c.proficiencyDefId || existing.statId !== c.statId)) {
-                overwrites.push({ sheet: 'step_configs', row: c.row, action: c.action, step: c.step, oldProficiency: oldProf, oldStat: oldStat, newProficiency: c.proficiencyName, newStat: c.statName });
-            }
-        });
+        }
 
         // ── discipline_requirements ───────────────────────────────────────────
-        const reqCandidates = this._validateDisciplineRequirements(dto.disciplineRequirements, actionMap, discMap, errors);
-        const reqResults = await Promise.allSettled(
-            reqCandidates.map(c =>
-                this.repo.upsertDisciplineRequirement({
+        for (const c of this._validateDisciplineRequirements(dto.disciplineRequirements, actionMap, discMap, errors)) {
+            try {
+                await this.repo.upsertDisciplineRequirement({
                     guildId:      dto.guildId,
                     actionTypeId: c.actionTypeId,
                     disciplineId: c.disciplineId,
                     minLevel:     c.minLevel,
                     scope:        c.scope,
-                }).then(() => ({ candidate: c })),
-            ),
-        );
-
-        reqResults.forEach((result, i) => {
-            if (result.status === 'rejected') {
-                const c = reqCandidates[i];
+                });
+                const existing = existingReqMap.get(`${c.actionTypeId}:${c.disciplineId}`);
+                saved.push({ sheet: 'discipline_requirements', row: c.row, action: c.action, discipline: c.discipline });
+                if (existing && existing.minLevel !== c.minLevel) {
+                    overwrites.push({ sheet: 'discipline_requirements', row: c.row, action: c.action, discipline: c.discipline, oldMinLevel: existing.minLevel, newMinLevel: c.minLevel });
+                }
+            } catch {
                 errors.push({ sheet: 'discipline_requirements', row: c.row, input: rowInput(c.action, c.discipline, c.scope), message: 'Failed to save to database' });
-                return;
             }
-            const { candidate: c } = result.value;
-            const existing = existingReqMap.get(`${c.actionTypeId}:${c.disciplineId}`);
-            saved.push({ sheet: 'discipline_requirements', row: c.row, action: c.action, discipline: c.discipline });
-            if (existing && existing.minLevel !== c.minLevel) {
-                overwrites.push({ sheet: 'discipline_requirements', row: c.row, action: c.action, discipline: c.discipline, oldMinLevel: existing.minLevel, newMinLevel: c.minLevel });
-            }
-        });
+        }
 
         errors.sort((a, b) => {
             const sheetOrder: Record<string, number> = { base_configs: 0, discipline_rewards: 1, step_configs: 2, discipline_requirements: 3 };

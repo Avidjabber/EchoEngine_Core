@@ -1,5 +1,4 @@
 import ExcelJS from 'exceljs';
-import { Readable } from 'stream';
 
 export interface WeatherStateRow {
     row:      number;
@@ -61,55 +60,41 @@ function isEmptyRow(record: Record<string, CellValue>): boolean {
 export async function parseWeatherStatePack(buffer: Buffer): Promise<ParsedWeatherStatePack> {
     const result: ParsedWeatherStatePack = { states: [], envConditions: [] };
 
-    const stream = Readable.from(buffer);
-    const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(stream, {
-        sharedStrings: 'cache',
-        styles:        'ignore',
-        hyperlinks:    'ignore',
-        worksheets:    'emit',
-        entries:       'emit',
-    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
-    workbookReader.read();
-
-    for await (const worksheet of workbookReader) {
-        const sheetName = (worksheet as unknown as { name: string }).name.toLowerCase().replace(/\s+/g, '_');
+    for (const worksheet of workbook.worksheets) {
+        const sheetName = worksheet.name.toLowerCase().replace(/\s+/g, '_');
 
         if (sheetName === 'weather_states') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.states.push({
                     row:      rowIndex,
                     codeName: cellStr(r['code_name']),
                     name:     cellStr(r['name']),
                     isSevere: cellBool(r['is_severe']),
                 });
-            }
+            });
         }
 
         if (sheetName === 'env_conditions') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.envConditions.push({
                     row:          rowIndex,
                     weatherState: cellStr(r['weather_state']),
                     envCondition: cellStr(r['env_condition']),
                 });
-            }
+            });
         }
     }
 

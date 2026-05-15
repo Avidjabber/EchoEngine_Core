@@ -42,9 +42,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
     const { saved, overwrites, errors } = result.value!;
 
-    for (const msg of buildUploadMessages(interaction.user.id, saved, overwrites, errors)) {
+    const [first, ...rest] = buildUploadMessages(interaction.user.id, saved, overwrites, errors);
+    await interaction.editReply(first as never);
+    for (const msg of rest) {
         await interaction.followUp(msg as never);
     }
-
-    await interaction.deleteReply();
 }

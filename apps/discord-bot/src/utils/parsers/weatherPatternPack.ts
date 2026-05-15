@@ -1,5 +1,4 @@
 import ExcelJS from 'exceljs';
-import { Readable } from 'stream';
 
 export interface WeatherPatternRow {
     row:          number;
@@ -93,29 +92,19 @@ function isEmptyRow(record: Record<string, CellValue>): boolean {
 export async function parseWeatherPatternPack(buffer: Buffer): Promise<ParsedWeatherPatternPack> {
     const result: ParsedWeatherPatternPack = { patterns: [], steps: [], seasonWeights: [] };
 
-    const stream = Readable.from(buffer);
-    const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(stream, {
-        sharedStrings: 'cache',
-        styles:        'ignore',
-        hyperlinks:    'ignore',
-        worksheets:    'emit',
-        entries:       'emit',
-    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
-    workbookReader.read();
-
-    for await (const worksheet of workbookReader) {
-        const sheetName = (worksheet as unknown as { name: string }).name.toLowerCase().replace(/\s+/g, '_');
+    for (const worksheet of workbook.worksheets) {
+        const sheetName = worksheet.name.toLowerCase().replace(/\s+/g, '_');
 
         if (sheetName === 'patterns') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.patterns.push({
                     row:          rowIndex,
                     codeName:     cellStr(r['code_name']),
@@ -123,18 +112,16 @@ export async function parseWeatherPatternPack(buffer: Buffer): Promise<ParsedWea
                     isSevere:     cellBool(r['is_severe']),
                     cooldownDays: cellNum(r['cooldown_days']),
                 });
-            }
+            });
         }
 
         if (sheetName === 'steps') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.steps.push({
                     row:           rowIndex,
                     pattern:       cellStr(r['pattern']),
@@ -142,25 +129,23 @@ export async function parseWeatherPatternPack(buffer: Buffer): Promise<ParsedWea
                     weatherState:  cellStr(r['weather_state']),
                     durationHours: cellNum(r['duration_hours']),
                 });
-            }
+            });
         }
 
         if (sheetName === 'season_weights') {
             let headerMap: Record<number, string> = {};
-            let rowIndex = 0;
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.seasonWeights.push({
                     row:     rowIndex,
                     pattern: cellStr(r['pattern']),
                     season:  cellStr(r['season']),
                     weight:  cellTier(r['weight']),
                 });
-            }
+            });
         }
     }
 

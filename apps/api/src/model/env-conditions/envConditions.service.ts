@@ -229,18 +229,12 @@ export class EnvConditionsService {
             }
         }
 
-        const [worldResults, statResults, profResults] = await Promise.all([
-            Promise.allSettled(worldCandidates.map(c => this.repo.upsertEnvConditionModifier(c.item.db))),
-            Promise.allSettled(statCandidates.map(c  => this.repo.upsertStatModifier(c.item.db))),
-            Promise.allSettled(profCandidates.map(c  => this.repo.upsertProficiencyModifier(c.item.db))),
-        ]);
-
         const saved:      SavedRow[]       = [];
         const overwrites: OverwrittenRow[] = [];
 
-        worldResults.forEach((result, i) => {
-            const { item, old } = worldCandidates[i];
-            if (result.status === 'fulfilled') {
+        for (const { item, old } of worldCandidates) {
+            try {
+                await this.repo.upsertEnvConditionModifier(item.db);
                 saved.push(item.savedShape);
                 if (old) {
                     overwrites.push({
@@ -254,14 +248,14 @@ export class EnvConditionsService {
                         newValue:    item.savedShape.value,
                     });
                 }
-            } else {
+            } catch {
                 errors.push({ sheet: 'world_modifiers', row: item.dto.row, input: rowInput(item.dto.condition, item.dto.effectType, item.dto.relation, item.dto.value), message: 'Failed to save to database' });
             }
-        });
+        }
 
-        statResults.forEach((result, i) => {
-            const { item, old } = statCandidates[i];
-            if (result.status === 'fulfilled') {
+        for (const { item, old } of statCandidates) {
+            try {
+                await this.repo.upsertStatModifier(item.db);
                 saved.push(item.savedShape);
                 if (old) {
                     overwrites.push({
@@ -273,14 +267,14 @@ export class EnvConditionsService {
                         newValue:  item.savedShape.value,
                     });
                 }
-            } else {
+            } catch {
                 errors.push({ sheet: 'stat_modifiers', row: item.dto.row, input: rowInput(item.dto.condition, item.dto.stat, item.dto.value), message: 'Failed to save to database' });
             }
-        });
+        }
 
-        profResults.forEach((result, i) => {
-            const { item, old } = profCandidates[i];
-            if (result.status === 'fulfilled') {
+        for (const { item, old } of profCandidates) {
+            try {
+                await this.repo.upsertProficiencyModifier(item.db);
                 saved.push(item.savedShape);
                 if (old) {
                     overwrites.push({
@@ -296,10 +290,10 @@ export class EnvConditionsService {
                         newHasAdvantage:    item.savedShape.hasAdvantage,
                     });
                 }
-            } else {
+            } catch {
                 errors.push({ sheet: 'proficiency_modifiers', row: item.dto.row, input: rowInput(item.dto.condition, item.dto.proficiency, item.dto.value, item.dto.hasDisadvantage), message: 'Failed to save to database' });
             }
-        });
+        }
 
         errors.sort((a, b) => {
             const sheetOrder = ['world_modifiers', 'stat_modifiers', 'proficiency_modifiers'];

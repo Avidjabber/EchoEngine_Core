@@ -1,5 +1,4 @@
 import ExcelJS from 'exceljs';
-import { Readable } from 'stream';
 
 export interface WorldModifierRow {
     row:        number;
@@ -83,29 +82,19 @@ export async function parseEnvConditionPack(buffer: Buffer): Promise<ParsedEnvCo
         proficiencyModifiers: [],
     };
 
-    const stream = Readable.from(buffer);
-    const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(stream, {
-        sharedStrings: 'cache',
-        styles:        'ignore',
-        hyperlinks:    'ignore',
-        worksheets:    'emit',
-        entries:       'emit',
-    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
-    workbookReader.read();
-
-    for await (const worksheet of workbookReader) {
-        const sheetName = (worksheet as unknown as { name: string }).name.toLowerCase().replace(/\s+/g, '_');
+    for (const worksheet of workbook.worksheets) {
+        const sheetName = worksheet.name.toLowerCase().replace(/\s+/g, '_');
         let headerMap: Record<number, string> = {};
-        let rowIndex = 0;
 
         if (sheetName === 'world_modifiers') {
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.worldModifiers.push({
                     row:        rowIndex,
                     condition:  cellStr(r['condition']),
@@ -113,28 +102,26 @@ export async function parseEnvConditionPack(buffer: Buffer): Promise<ParsedEnvCo
                     relation:   cellStr(r['relation']),
                     value:      cellNum(r['value']),
                 });
-            }
+            });
         } else if (sheetName === 'stat_modifiers') {
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.statModifiers.push({
                     row:       rowIndex,
                     condition: cellStr(r['condition']),
                     stat:      cellStr(r['stat']),
                     value:     cellNum(r['value']),
                 });
-            }
+            });
         } else if (sheetName === 'proficiency_modifiers') {
-            for await (const row of worksheet) {
-                rowIndex++;
+            worksheet.eachRow((row, rowIndex) => {
                 const vals = row.values as CellValue[];
-                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); continue; }
+                if (rowIndex === 1) { headerMap = buildHeaderMap(vals); return; }
                 const r = rowToRecord(vals, headerMap);
-                if (isEmptyRow(r)) continue;
+                if (isEmptyRow(r)) return;
                 result.proficiencyModifiers.push({
                     row:             rowIndex,
                     condition:       cellStr(r['condition']),
@@ -143,7 +130,7 @@ export async function parseEnvConditionPack(buffer: Buffer): Promise<ParsedEnvCo
                     hasDisadvantage: cellBool(r['has_disadvantage']),
                     hasAdvantage:    cellBool(r['has_advantage']),
                 });
-            }
+            });
         }
     }
 

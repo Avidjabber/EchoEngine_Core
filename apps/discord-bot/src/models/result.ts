@@ -46,6 +46,7 @@ export class Result<T> {
             return await fn();
         } catch (err) {
             if (err instanceof ApiResultError) {
+                // HTTP errors are already logged by the axios interceptor
                 return Result.fail<T>(err);
             }
             console.error('[Result.wrap] Unhandled error:', err);

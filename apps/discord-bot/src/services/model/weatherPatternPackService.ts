@@ -95,7 +95,7 @@ export async function uploadWeatherPatternPack(
             season:  r.season,
             weight:  r.weight,
         })),
-    });
+    }, 120_000);
 }
 
 export async function resetWeatherPatternPack(guildId: string) {

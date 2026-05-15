@@ -71,7 +71,7 @@ export async function uploadWeatherStatePack(
             weatherState: r.weatherState,
             envCondition: r.envCondition,
         })),
-    });
+    }, 120_000);
 }
 
 export async function resetWeatherStatePack(guildId: string) {

@@ -323,25 +323,21 @@ export class WeatherPatternsService {
             }
         }
 
-        // ── Upsert all candidates ─────────────────────────────────────────────
-        const results = await Promise.allSettled(
-            candidates.map(c => this.repo.upsertWeatherPattern({
-                guildId:      dto.guildId,
-                codeName:     c.codeName,
-                name:         c.name,
-                isSevere:     c.isSevere,
-                cooldownDays: c.cooldownDays,
-                steps:         c.steps,
-                seasonWeights: c.seasonWeights,
-            })),
-        );
+        // ── Upsert all candidates sequentially to avoid exhausting the connection pool ──
+        const saved:      PatternSavedRow[]      = [];
+        const overwrites: PatternOverwrittenRow[] = [];
 
-        const saved:      PatternSavedRow[]       = [];
-        const overwrites: PatternOverwrittenRow[]  = [];
-
-        results.forEach((result, i) => {
-            const c = candidates[i];
-            if (result.status === 'fulfilled') {
+        for (const c of candidates) {
+            try {
+                await this.repo.upsertWeatherPattern({
+                    guildId:      dto.guildId,
+                    codeName:     c.codeName,
+                    name:         c.name,
+                    isSevere:     c.isSevere,
+                    cooldownDays: c.cooldownDays,
+                    steps:         c.steps,
+                    seasonWeights: c.seasonWeights,
+                });
                 saved.push({ row: c.dto.row, codeName: c.codeName, name: c.name, isSevere: c.isSevere, cooldownDays: c.cooldownDays, stepCount: c.steps.length });
                 if (c.existing) {
                     overwrites.push({
@@ -355,10 +351,12 @@ export class WeatherPatternsService {
                         newCooldownDays: c.cooldownDays,
                     });
                 }
-            } else {
-                errors.push({ row: c.dto.row, input: rowInput(c.codeName, c.name), message: 'Failed to save to database' });
+            } catch (err) {
+                const reason = err instanceof Error ? err.message : String(err);
+                console.error(`[uploadPack] Failed to save pattern '${c.codeName}':`, err);
+                errors.push({ row: c.dto.row, input: rowInput(c.codeName, c.name), message: `Failed to save to database: ${reason}` });
             }
-        });
+        }
 
         errors.sort((a, b) => a.row - b.row);
 

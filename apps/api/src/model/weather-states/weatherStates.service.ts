@@ -255,22 +255,18 @@ export class WeatherStatesService {
             );
         });
 
-        const results = await Promise.allSettled(
-            toSave.map(c => this.repo.upsertWeatherState({
-                guildId:         dto.guildId,
-                codeName:        c.codeName,
-                name:            c.name,
-                isSevere:        c.isSevere,
-                envConditionIds: c.envConditionIds,
-            })),
-        );
-
         const saved:      WeatherStateSavedRow[]       = [];
         const overwrites: WeatherStateOverwrittenRow[] = [];
 
-        results.forEach((result, i) => {
-            const c = toSave[i];
-            if (result.status === 'fulfilled') {
+        for (const c of toSave) {
+            try {
+                await this.repo.upsertWeatherState({
+                    guildId:         dto.guildId,
+                    codeName:        c.codeName,
+                    name:            c.name,
+                    isSevere:        c.isSevere,
+                    envConditionIds: c.envConditionIds,
+                });
                 saved.push({ row: c.dto.row, codeName: c.codeName, name: c.name, isSevere: c.isSevere });
                 if (c.existing) {
                     overwrites.push({
@@ -282,10 +278,10 @@ export class WeatherStatesService {
                         newSevere: c.isSevere,
                     });
                 }
-            } else {
+            } catch {
                 errors.push({ row: c.dto.row, input: rowInput(c.codeName, c.name), message: 'Failed to save to database' });
             }
-        });
+        }
 
         errors.sort((a, b) => a.row - b.row);
 

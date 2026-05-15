@@ -23,6 +23,9 @@ export class ApiClient {
                 const message  = err.response?.data?.message ?? err.message;
                 const code     = err.response?.data?.code ?? `HTTP_${status}`;
                 const problems = err.response?.data?.problems ?? null;
+                const method   = err.config?.method?.toUpperCase() ?? '?';
+                const url      = err.config?.url ?? '?';
+                console.error(`[API] ${method} ${url} → ${status}: ${message}`);
                 return Promise.reject(new ApiResultError(code, `HTTP ${status}`, message, problems));
             },
         );
@@ -54,10 +57,10 @@ export class ApiClient {
         });
     }
 
-    async post<T>(path: string, body: unknown): Promise<Result<T>> {
+    async post<T>(path: string, body: unknown, timeoutMs?: number): Promise<Result<T>> {
         return Result.wrap(async () => {
             const token = await this.ensureAuthenticated();
-            const { data } = await this.http.post<T>(path, body, { headers: this.authHeader(token) });
+            const { data } = await this.http.post<T>(path, body, { headers: this.authHeader(token), ...(timeoutMs !== undefined && { timeout: timeoutMs }) });
             return Result.ok(data);
         });
     }

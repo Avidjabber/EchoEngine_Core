@@ -33,18 +33,20 @@ function makeContainer(content: string, accentColor: number): object {
 
 function chunksToMessages(chunks: string[], accentColor: number): ResultMessage[] {
     const messages: ResultMessage[] = [];
-    const MAX_PER_MESSAGE = 5;
-    let current: object[] = [];
+    let currentContainers: object[] = [];
+    let currentTextLength = 0;
 
     for (const chunk of chunks) {
-        current.push(makeContainer(chunk, accentColor));
-        if (current.length >= MAX_PER_MESSAGE) {
-            messages.push({ flags: MessageFlags.IsComponentsV2, components: current });
-            current = [];
+        if (currentContainers.length > 0 && currentTextLength + chunk.length > TEXT_LIMIT) {
+            messages.push({ flags: MessageFlags.IsComponentsV2, components: currentContainers });
+            currentContainers = [];
+            currentTextLength = 0;
         }
+        currentContainers.push(makeContainer(chunk, accentColor));
+        currentTextLength += chunk.length;
     }
-    if (current.length > 0) {
-        messages.push({ flags: MessageFlags.IsComponentsV2, components: current });
+    if (currentContainers.length > 0) {
+        messages.push({ flags: MessageFlags.IsComponentsV2, components: currentContainers });
     }
 
     return messages;

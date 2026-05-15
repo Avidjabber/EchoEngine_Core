@@ -88,7 +88,7 @@ export async function uploadProficiencyPack(guildId: string, rows: ProficiencyRo
             stat:        r.stat,
             description: r.description,
         })),
-    });
+    }, 120_000);
 }
 
 export async function resetProficiencyPack(guildId: string) {

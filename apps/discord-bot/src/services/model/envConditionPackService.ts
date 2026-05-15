@@ -172,5 +172,5 @@ export async function uploadEnvConditionPack(
             hasDisadvantage: r.hasDisadvantage,
             hasAdvantage:    r.hasAdvantage,
         })),
-    });
+    }, 120_000);
 }

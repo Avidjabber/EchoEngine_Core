@@ -538,37 +538,33 @@ export class ItemsService {
             }
         }
 
-        // ── Upsert all candidates ──────────────────────────────────────────────
-        const results = await Promise.allSettled(
-            candidates.map(c => this.repo.upsertItem({
-                guildId:         dto.guildId,
-                codeName:        c.codeName,
-                name:            c.name,
-                description:     c.description,
-                typeIds:         c.typeIds,
-                measurementTypeId: c.measurementTypeId,
-                averageWeight:   c.averageWeight,
-                weightVariance:  c.weightVariance,
-                averageVolume:   c.averageVolume,
-                rotCap:          c.rotCap,
-                maxDurability:   c.maxDurability,
-                maxUses:         c.maxUses,
-                maxDailyUses:    c.maxDailyUses,
-                fuelValue:       c.fuelValue,
-                fuelTypeId:      c.fuelTypeId,
-                isEphemeral:     c.isEphemeral,
-                equipmentProfiles: c.equipmentProfiles,
-                foodProfile:     c.foodProfile,
-                actions:         c.actions,
-            })),
-        );
-
+        // ── Upsert all candidates sequentially to avoid exhausting the connection pool ──
         const saved:      ItemSavedRow[]       = [];
         const overwrites: ItemOverwrittenRow[] = [];
 
-        results.forEach((result, i) => {
-            const c = candidates[i];
-            if (result.status === 'fulfilled') {
+        for (const c of candidates) {
+            try {
+                await this.repo.upsertItem({
+                    guildId:           dto.guildId,
+                    codeName:          c.codeName,
+                    name:              c.name,
+                    description:       c.description,
+                    typeIds:           c.typeIds,
+                    measurementTypeId: c.measurementTypeId,
+                    averageWeight:     c.averageWeight,
+                    weightVariance:    c.weightVariance,
+                    averageVolume:     c.averageVolume,
+                    rotCap:            c.rotCap,
+                    maxDurability:     c.maxDurability,
+                    maxUses:           c.maxUses,
+                    maxDailyUses:      c.maxDailyUses,
+                    fuelValue:         c.fuelValue,
+                    fuelTypeId:        c.fuelTypeId,
+                    isEphemeral:       c.isEphemeral,
+                    equipmentProfiles: c.equipmentProfiles,
+                    foodProfile:       c.foodProfile,
+                    actions:           c.actions,
+                });
                 saved.push({ row: c.dto.row, codeName: c.codeName, name: c.name });
                 if (c.existing) {
                     overwrites.push({
@@ -578,10 +574,10 @@ export class ItemsService {
                         newName:  c.name,
                     });
                 }
-            } else {
+            } catch {
                 errors.push({ row: c.dto.row, input: rowInput(c.codeName, c.name), message: 'Failed to save to database' });
             }
-        });
+        }
 
         errors.sort((a, b) => a.row - b.row);
         return { saved, overwrites, errors };

@@ -32,7 +32,18 @@ async function checkHealth() {
 }
 
 async function hourlyJob() {
-  // TODO
+  const firedAt = new Date().toISOString();
+
+  try {
+    const result = await api.post<{ ticked: number; skipped: number }>('/weather-sim/tick-all');
+    console.log(`[${firedAt}] Weather tick-all OK`, result);
+  } catch (err) {
+    if (axios.isAxiosError(err)) {
+      console.error(`[${firedAt}] Weather tick-all FAILED — ${err.message}`, { status: err.response?.status, data: err.response?.data });
+    } else {
+      console.error(`[${firedAt}] Weather tick-all FAILED — unexpected error`, err);
+    }
+  }
 }
 
 // Run immediately on startup, then every 10 minutes

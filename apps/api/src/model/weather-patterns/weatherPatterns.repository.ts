@@ -69,10 +69,10 @@ export class WeatherPatternsRepository {
             if (data.steps.length > 0) {
                 await tx.weatherPatternStep.createMany({
                     data: data.steps.map(s => ({
-                        patternId:     pattern.id,
-                        stepOrder:     s.stepOrder,
-                        weatherStateId: s.weatherStateId,
-                        durationHours: s.durationHours,
+                        patternId:      pattern.id,
+                        stepOrder:      s.stepOrder,
+                        weatherStateId: s.weatherStateId ?? undefined,
+                        durationHours:  s.durationHours,
                     })),
                 });
             }
