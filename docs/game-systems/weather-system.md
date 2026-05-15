@@ -1,6 +1,6 @@
 WEATHER SYSTEM — DESIGN REFERENCE
 ===================================
-Last updated: 2026-05-10
+Last updated: 2026-05-15
 
 This file is the authoritative reference for how weather works in EchoPaw.
 Read this before touching WeatherState, WeatherPattern, or any system that
@@ -212,7 +212,7 @@ blue (info) otherwise.
 
 
 ─────────────────────────────────────────────
-10. WORKER INSTRUCTIONS
+10. WORKER IMPLEMENTATION
 ─────────────────────────────────────────────
 
 The worker only talks to the API — it never touches the database or the bot
@@ -220,38 +220,40 @@ directly. Its entire job is to fire once per hour and tell the API to run.
 The API figures out which guilds need updating, processes each one, and
 notifies the bot on its own.
 
-If you run into any bugs or errors, please let me know.
+  Architecture (apps/worker/src/)
+    index.ts              — entry point; runs startup auth check, then starts ticker
+    core/ticker.ts        — cron jobs: health check (*/10 min), hourly job (0 * * * *)
+    services/api.ts       — ApiService singleton; handles JWT auth and all API calls
 
-  1. Set up your environment
-     Create a .env file inside apps/worker/ with two values:
+  Environment variables (apps/worker/.env)
+    API_BASE_URL          — e.g. http://localhost:3000 (overridden to http://api:3000
+                            in Docker Compose via docker-compose.yml environment block)
+    API_KEY               — shared bot API key; same as BOT_API_KEY in apps/api/.env
+    WORKER_CLIENT_ID      — service client ID for JWT authentication
+    WORKER_CLIENT_SECRET  — service client secret for JWT authentication
 
-       API_BASE_URL=http://localhost:3000
-       API_KEY=                            # same as BOT_API_KEY in the API's .env
+    To provision the ServiceClient row in the database:
+      npm run db:provision:worker   (from repo root, with the API running)
 
-     When running via Docker Compose, API_BASE_URL is automatically
-     overridden to http://api:3000 so the containers can talk to each
-     other by name. You still need it in .env for local dev.
+  Startup behaviour
+    On startup, the worker authenticates via POST /auth/token (client credentials
+    flow) and exits with code 1 if authentication fails. This ensures misconfigured
+    credentials are caught immediately rather than failing silently at job time.
+    A health check fires immediately on startup and every 10 minutes thereafter
+    as a liveness probe.
 
-  2. Implement the hourly tick in apps/worker/src/core/ticker.ts
-     This file already has a cron job wired up to run every hour — you
-     just need to fill in what it does. Send a single POST request to
-     /weather-sim/tick-all with no body. Include your API key as an
-     Authorization: Bearer header. The API handles everything from there.
+  Pending
+    The hourlyJob() function in ticker.ts is currently a stub. Wire it to
+    POST /weather-sim/tick-all via api.post() — no body needed. Log the
+    response so weather updates can be debugged. The expected response shape is:
 
-     The response body looks like this:
+      {
+        "processed": 3,
+        "results": [
+          { "guildId": "...", "skipped": false, "weatherChanged": true,  "patternChanged": false },
+          { "guildId": "...", "skipped": true,  "reason": "no_season",   "weatherChanged": false, "patternChanged": false },
+          { "guildId": "...", "skipped": false, "weatherChanged": false, "patternChanged": false }
+        ]
+      }
 
-       {
-         "processed": 3,
-         "results": [
-           { "guildId": "...", "skipped": false, "weatherChanged": true,  "patternChanged": false },
-           { "guildId": "...", "skipped": true,  "reason": "no_season",   "weatherChanged": false, "patternChanged": false },
-           { "guildId": "...", "skipped": false, "weatherChanged": false, "patternChanged": false }
-         ]
-       }
-
-     Log this to the console so weather updates can be debugged easily.
-     axios is already installed and ready to use.
-
-  3. Run it
-     Use `npm run dev` to start the worker. You should see it log a
-     message on startup and fire the tick at the top of every hour.
+    Possible skip reasons: world_sim_disabled, no_season, no_eligible_patterns.
