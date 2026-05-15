@@ -25,6 +25,23 @@ export class BotNotifierService {
         this.secret = this.config.get<string>('BOT_INTERNAL_SECRET') ?? '';
     }
 
+    async workerPing(): Promise<void> {
+        try {
+            const res = await fetch(`${this.botUrl}/internal/worker-ping`, {
+                method:  'POST',
+                headers: {
+                    'Content-Type':  'application/json',
+                    'Authorization': `Bearer ${this.secret}`,
+                },
+            });
+            if (!res.ok) {
+                this.logger.error(`Bot returned ${res.status} for worker ping`);
+            }
+        } catch (err) {
+            this.logger.error('Failed to notify bot of worker startup', err);
+        }
+    }
+
     async postWeather(payload: PostWeatherPayload): Promise<void> {
         try {
             const res = await fetch(`${this.botUrl}/internal/post-weather`, {

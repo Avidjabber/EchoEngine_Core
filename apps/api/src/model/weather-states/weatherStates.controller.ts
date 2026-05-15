@@ -1,8 +1,10 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UploadWeatherStatePackDto } from './dto/upload-weather-state-pack.dto';
 import { WeatherStatesService } from './weatherStates.service';
 
 @Controller('model/weather-states')
+@UseGuards(JwtAuthGuard)
 export class WeatherStatesController {
     constructor(private readonly weatherStatesService: WeatherStatesService) {}
 

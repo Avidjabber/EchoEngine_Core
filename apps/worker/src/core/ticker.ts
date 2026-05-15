@@ -4,17 +4,29 @@ import { api } from '../services/api.js';
 
 async function checkHealth() {
   const firedAt = new Date().toISOString();
+
+  // API
   try {
     const data = await api.health();
-    console.log(`[${firedAt}] Health check OK`, data);
+    console.log(`[${firedAt}] API health OK`, data);
   } catch (err) {
     if (axios.isAxiosError(err)) {
-      console.error(`[${firedAt}] Health check FAILED — ${err.message}`, {
-        status: err.response?.status,
-        data: err.response?.data,
-      });
+      console.error(`[${firedAt}] API health FAILED — ${err.message}`, { status: err.response?.status, data: err.response?.data });
     } else {
-      console.error(`[${firedAt}] Health check FAILED — unexpected error`, err);
+      console.error(`[${firedAt}] API health FAILED — unexpected error`, err);
+    }
+  }
+
+  // Bot
+  const botUrl = process.env.BOT_INTERNAL_URL ?? 'http://localhost:4000';
+  try {
+    await axios.get(`${botUrl}/health`, { timeout: 5000 });
+    console.log(`[${firedAt}] Bot health OK`);
+  } catch (err) {
+    if (axios.isAxiosError(err)) {
+      console.error(`[${firedAt}] Bot health FAILED — ${err.message}`, { status: err.response?.status });
+    } else {
+      console.error(`[${firedAt}] Bot health FAILED — unexpected error`, err);
     }
   }
 }

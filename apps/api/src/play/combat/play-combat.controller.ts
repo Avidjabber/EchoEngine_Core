@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { IsArray, IsEnum, IsInt, IsNotEmpty, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PlayCombatService, StartCombatTeam } from './play-combat.service';
@@ -30,6 +31,7 @@ class StartCombatDto {
 }
 
 @Controller('play/combat')
+@UseGuards(JwtAuthGuard)
 export class PlayCombatController {
     constructor(private readonly service: PlayCombatService) {}
 

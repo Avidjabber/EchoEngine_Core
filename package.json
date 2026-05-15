@@ -13,7 +13,9 @@
     "db:push:primary": "prisma db push --schema=prisma/primary/schema.prisma",
     "db:studio:primary": "prisma studio --schema=prisma/primary/schema.prisma",
     "db:seed": "ts-node --project tsconfig.seed.json prisma/seed.ts",
-    "db:provision:worker": "ts-node --project tsconfig.seed.json scripts/provision-service-client.ts"
+    "db:provision:all": "ts-node --project tsconfig.seed.json scripts/provision-all.ts",
+    "db:provision:worker": "ts-node --project tsconfig.seed.json scripts/provision-service-client.ts -- --client=worker",
+    "db:provision:bot": "ts-node --project tsconfig.seed.json scripts/provision-service-client.ts -- --client=bot"
   },
   "devDependencies": {
     "prisma": "^7.8.0",

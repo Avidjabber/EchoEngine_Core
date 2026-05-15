@@ -6,6 +6,12 @@ async function main() {
   try {
     await api.authenticate();
     console.log('[startup] Authenticated successfully.');
+    try {
+      await api.post('/worker/ping');
+      console.log('[startup] Pipeline ping sent.');
+    } catch {
+      console.warn('[startup] Pipeline ping failed — bot may not be up yet.');
+    }
   } catch (err) {
     console.error('[startup] Authentication failed — check WORKER_CLIENT_ID and WORKER_CLIENT_SECRET in .env');
     console.error(err);

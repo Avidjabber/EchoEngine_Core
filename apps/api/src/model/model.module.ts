@@ -1,5 +1,4 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { BotApiKeyMiddleware } from '../auth/middleware/bot-api-key.middleware';
+import { Module } from '@nestjs/common';
 import { ApiCacheService } from '../cache/api-cache.service';
 import { EnvConditionsController } from './env-conditions/envConditions.controller';
 import { EnvConditionsService } from './env-conditions/envConditions.service';
@@ -21,10 +20,4 @@ import { WeatherPatternsRepository } from './weather-patterns/weatherPatterns.re
     controllers: [EnvConditionsController, ProficienciesController, ActionsController, WeatherStatesController, WeatherPatternsController],
     providers:   [ApiCacheService, EnvConditionsService, EnvConditionsRepository, ProficienciesService, ProficienciesRepository, ActionsService, ActionsRepository, WeatherStatesService, WeatherStatesRepository, WeatherPatternsService, WeatherPatternsRepository],
 })
-export class ModelModule implements NestModule {
-    configure(consumer: MiddlewareConsumer): void {
-        consumer
-            .apply(BotApiKeyMiddleware)
-            .forRoutes(EnvConditionsController, ProficienciesController, ActionsController, WeatherStatesController, WeatherPatternsController);
-    }
-}
+export class ModelModule {}
