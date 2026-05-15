@@ -2,7 +2,7 @@ import { IsString } from 'class-validator';
 
 export class WeatherTickDto {
     @IsString()
-    guildId: string;
+    guildId!: string;
 }
 
 export interface WeatherStateInfo {
