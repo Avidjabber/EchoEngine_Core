@@ -28,7 +28,9 @@ COPY apps/api/ ./apps/api/
 # Must run after source copy so it is not overwritten
 RUN npx prisma generate --schema=prisma/primary/schema.prisma
 
-ENV NODE_ENV=production
 WORKDIR /app/apps/api
+RUN npm run build
 
-CMD ["node", "-r", "ts-node/register", "-r", "tsconfig-paths/register", "src/main.ts"]
+ENV NODE_ENV=production
+
+CMD ["node", "-r", "tsconfig-paths/register", "dist/main.js"]

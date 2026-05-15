@@ -27,7 +27,9 @@ RUN npx prisma generate --schema=prisma/primary/schema.prisma
 # Copy source
 COPY apps/discord-bot/ ./apps/discord-bot/
 
-ENV NODE_ENV=production
 WORKDIR /app/apps/discord-bot
+RUN npm run build
 
-CMD ["npx", "tsx", "src/index.ts"]
+ENV NODE_ENV=production
+
+CMD ["node", "dist/index.js"]

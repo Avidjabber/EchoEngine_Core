@@ -17,8 +17,6 @@ services:
       NODE_ENV: production
       PORT: 3000
       BOT_INTERNAL_URL: http://discord-bot:4000
-    ports:
-      - "3000:3000"
     networks:
       - internal
     healthcheck:
@@ -26,7 +24,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 5s
 
   # ── Discord Bot ────────────────────────────────────────────────────────────
   discord-bot:
@@ -48,14 +46,17 @@ services:
   # ── Worker ───────────────────────────────────────────────────────────────
   worker:
     build:
-        context: .
-        dockerfile: apps/worker/Dockerfile
+      context: .
+      dockerfile: apps/worker/Dockerfile
     restart: on-failure:2
     env_file:
       - apps/worker/.env
     environment:
       NODE_ENV: production
       API_BASE_URL: http://api:3000
+    volumes:
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
     networks:
       - internal
     depends_on:

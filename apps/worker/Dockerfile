@@ -17,7 +17,9 @@ RUN npm install --workspace=apps/worker
 # Copy source
 COPY apps/worker/ ./apps/worker/
 
-ENV NODE_ENV=production
 WORKDIR /app/apps/worker
+RUN npm run build
 
-CMD ["npx", "tsx", "src/index.ts"]
+ENV NODE_ENV=production
+
+CMD ["node", "dist/index.js"]
