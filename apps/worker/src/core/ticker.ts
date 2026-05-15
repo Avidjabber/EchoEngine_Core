@@ -1,14 +1,12 @@
-
 import cron from 'node-cron';
 import axios from 'axios';
-
-const API_BASE_URL = process.env.API_BASE_URL ?? 'http://localhost:3000';
+import { api } from '../services/api.js';
 
 async function checkHealth() {
   const firedAt = new Date().toISOString();
   try {
-    const res = await axios.get(`${API_BASE_URL}/health`);
-    console.log(`[${firedAt}] Health check OK — status ${res.status}`, res.data);
+    const data = await api.health();
+    console.log(`[${firedAt}] Health check OK`, data);
   } catch (err) {
     if (axios.isAxiosError(err)) {
       console.error(`[${firedAt}] Health check FAILED — ${err.message}`, {
