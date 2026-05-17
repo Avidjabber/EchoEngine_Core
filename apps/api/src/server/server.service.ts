@@ -5,6 +5,7 @@ import { UpdateDenDto } from './dto/update-den.dto';
 import { UpdateGuildSettingsDto } from './dto/update-guild-settings.dto';
 import { ResetGuildSettingsDto } from './dto/reset-guild-settings.dto';
 import { ServerRepository } from './server.repository';
+import { EngineConditionSeeder } from './engine-condition-seeder';
 
 const GUILD_SETTINGS_DEFAULTS = {
     defaultDailyEnergy:          100,
@@ -29,7 +30,10 @@ const GUILD_SETTINGS_DEFAULTS = {
 
 @Injectable()
 export class ServerService {
-    constructor(private readonly serverRepo: ServerRepository) {}
+    constructor(
+        private readonly serverRepo:       ServerRepository,
+        private readonly conditionSeeder:  EngineConditionSeeder,
+    ) {}
 
     async updateGuildSettings(dto: UpdateGuildSettingsDto) {
         const existing = await this.serverRepo.findGuildSettings(dto.guildId);
@@ -139,6 +143,7 @@ export class ServerService {
         const firstTimeSetup = !existingSettings;
         if (firstTimeSetup) {
             await this.serverRepo.createGuildSettings(dto.guildId);
+            await this.conditionSeeder.seedForGuild(dto.guildId);
         }
 
         return { den, firstTimeSetup };

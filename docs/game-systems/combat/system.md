@@ -34,7 +34,7 @@ Combat can be spawned several ways:
   boss    — admin-initiated boss fight; scripted, pre-defined enemies
 
 Each combat type is defined in CombatInitiationType with flags controlling
-whether death is possible, fleeing is allowed, and second wind is available.
+whether death is possible, fleeing is allowed, and death saves are active.
 
 
 ─────────────────────────────────────────────

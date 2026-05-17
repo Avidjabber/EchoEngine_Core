@@ -533,7 +533,7 @@ This enables contextual combat actions that only make sense in a specific state:
                      "Marked"       (grantedToSource true) → grants "Hunter's Strike" to marker
 
   usesPerApplication  Max times the item can be used during this condition instance.
-                      Null = unlimited. "Second Wind" should be capped at 1.
+                      Null = unlimited. "Last Stand" should be capped at 1.
                       Tracked at runtime per EntityCondition.
 
   minProgression  Item only available when progressionValue >= this value.

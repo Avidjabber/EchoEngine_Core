@@ -10,8 +10,8 @@ export const ACTION_DEFS: Record<ActionCategory, ActionDef[]> = {
     combat: [
         { code: 'spar_invite',  name: 'Spar — Invite',  description: 'Friendly bout. Invite specific clanmates to your teams. No permanent damage.'     },
         { code: 'spar_open',    name: 'Spar — Open',    description: 'Friendly bout. Anyone in the clan can sign up. No permanent damage.'              },
-        { code: 'fight_invite', name: 'Fight — Invite', description: 'Real fight. Invite specific cats to your teams. Second wind available.'           },
-        { code: 'fight_open',   name: 'Fight — Open',   description: 'Real fight. Open to any faction. Second wind available.'                          },
+        { code: 'fight_invite', name: 'Fight — Invite', description: 'Real fight. Invite specific cats to your teams. Death saves active.'              },
+        { code: 'fight_open',   name: 'Fight — Open',   description: 'Real fight. Open to any faction. Death saves active.'                             },
         { code: 'training',     name: 'Training',       description: 'Train a clanmate in a chosen discipline. Once per day.'                           },
     ],
     scouting: [

@@ -1,0 +1,1 @@
+ALTER TABLE "ConditionDef" ADD COLUMN "isEngineOwned" BOOLEAN NOT NULL DEFAULT false;

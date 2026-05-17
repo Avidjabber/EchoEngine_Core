@@ -2012,8 +2012,9 @@ model ConditionDef {
   conditionType    ConditionType   @relation(fields: [conditionTypeId],    references: [id], onDelete: Restrict)
   conditionContext ConditionContext @relation(fields: [conditionContextId], references: [id], onDelete: Restrict)
 
-  isSecondWindConsequence Boolean @default(false)  // eligible to be rolled when combat ends with entity in second wind below the HP threshold
-  isHidden                Boolean @default(false)  // condition name hidden until discoveryLevel >= linked symptomTag.defaultRoll
+  isEngineOwned                 Boolean @default(false)  // seeded by the engine on guild setup; blocks modification via upload
+  isDeathSaveFailureConsequence Boolean @default(false)  // eligible to be rolled when a cat fails all 3 death saving throws at combat end
+  isHidden                      Boolean @default(false)  // condition name hidden until discoveryLevel >= linked symptomTag.defaultRoll
   isFatalAtCap            Boolean @default(false)  // Progressive only: entity dies if cap is hit with no worsen link
 
   // Progressive / Chronic fields — null for Timed / Permanent / Trait
@@ -5456,7 +5457,7 @@ model CombatInitiationType {
   canResultInDeath Boolean @default(false)  // spar = false; event and boss can be fatal
   isScripted       Boolean @default(false)  // boss = true; pre-defined encounter with specific enemies
   allowsFleeing    Boolean @default(false)  // spar = false; event = true; boss = true
-  usesDeathSaves    Boolean @default(true)   // entity can enter second wind state at low HP
+  usesDeathSaves    Boolean @default(true)   // entities make death saving throws at 0 HP instead of being immediately defeated
 
   activeCombats ActiveCombat[]
 }

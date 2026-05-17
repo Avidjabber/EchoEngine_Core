@@ -27,8 +27,8 @@ What's included:
   - Initiative roll and turn order at combat start
   - d20 hit roll + DEX/STR/etc. modifier vs. target AC
   - Damage dice + modifier → HP update
-  - Defeat on HP ≤ 0 (AI entities and post-second-wind players)
-  - Second wind prompt for eligible player-controlled entities
+  - Defeat on HP ≤ 0 (AI entities; player entities enter death saves if usesDeathSaves = true)
+  - Death saving throws for eligible player-controlled entities (3 failures → consequence prompt; mid-saves at combat end → revive to 1 HP)
   - Fleeing (combat type flag gates availability)
   - Per-action cooldown tracking (roundsRemaining decrement at turn end)
   - Item use limits (usesRemaining, dailyUsesRemaining decremented per use)

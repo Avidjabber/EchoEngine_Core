@@ -11,6 +11,9 @@ export const errorCodes = {
     // ── Guild Settings ────────────────────────────────────────────────────────
     GUILD_SETTINGS_NOT_FOUND: 'GUILD_SETTINGS_NOT_FOUND', // guild has no settings row yet
 
+    // ── Conditions ───────────────────────────────────────────────────────────
+    CONDITION_ENGINE_OWNED: 'CONDITION_ENGINE_OWNED', // condition is engine-owned and cannot be modified or deleted
+
 } as const;
 
 export type ErrorCode = typeof errorCodes[keyof typeof errorCodes];

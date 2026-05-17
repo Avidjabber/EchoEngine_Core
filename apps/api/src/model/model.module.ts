@@ -18,9 +18,12 @@ import { WeatherPatternsRepository } from './weather-patterns/weatherPatterns.re
 import { ItemsController } from './items/items.controller';
 import { ItemsService } from './items/items.service';
 import { ItemsRepository } from './items/items.repository';
+import { ConditionsController } from './conditions/conditions.controller';
+import { ConditionsService } from './conditions/conditions.service';
+import { ConditionsRepository } from './conditions/conditions.repository';
 
 @Module({
-    controllers: [EnvConditionsController, ProficienciesController, ActionsController, WeatherStatesController, WeatherPatternsController, ItemsController],
-    providers:   [ApiCacheService, EnvConditionsService, EnvConditionsRepository, ProficienciesService, ProficienciesRepository, ActionsService, ActionsRepository, WeatherStatesService, WeatherStatesRepository, WeatherPatternsService, WeatherPatternsRepository, ItemsService, ItemsRepository],
+    controllers: [EnvConditionsController, ProficienciesController, ActionsController, WeatherStatesController, WeatherPatternsController, ItemsController, ConditionsController],
+    providers:   [ApiCacheService, EnvConditionsService, EnvConditionsRepository, ProficienciesService, ProficienciesRepository, ActionsService, ActionsRepository, WeatherStatesService, WeatherStatesRepository, WeatherPatternsService, WeatherPatternsRepository, ItemsService, ItemsRepository, ConditionsService, ConditionsRepository],
 })
 export class ModelModule {}
