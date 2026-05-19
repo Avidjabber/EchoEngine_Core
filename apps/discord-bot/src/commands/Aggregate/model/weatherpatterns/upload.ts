@@ -6,11 +6,11 @@ import { replyError, replyLoading } from '../../../../core/reply';
 import { uploadWeatherPatternPack, UploadResultRow } from '../../../../services/model/weatherPatternPackService';
 
 function buildCsv(rows: UploadResultRow[]): Buffer {
-    const lines = ['row,input,status,reason'];
+    const lines = ['row,identifier,status,reason'];
     for (const r of rows) {
-        const input  = `"${r.input.replace(/"/g, '""')}"`;
-        const reason = r.reason ? `"${r.reason.replace(/"/g, '""')}"` : '';
-        lines.push(`${r.row},${input},${r.status},${reason}`);
+        const identifier = `"${r.input.replace(/"/g, '""')}"`;
+        const reason     = r.reason ? `"${r.reason.replace(/"/g, '""')}"` : '';
+        lines.push(`${r.row},${identifier},${r.status},${reason}`);
     }
     return Buffer.from(lines.join('\n'), 'utf-8');
 }

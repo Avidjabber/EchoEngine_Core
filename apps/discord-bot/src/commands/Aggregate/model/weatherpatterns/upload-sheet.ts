@@ -8,11 +8,11 @@ import { uploadWeatherPatternPack, UploadResultRow } from '../../../../services/
 const SHEETS_ID_REGEX = /\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/;
 
 function buildCsv(rows: UploadResultRow[]): Buffer {
-    const lines = ['row,input,status,reason'];
+    const lines = ['row,identifier,status,reason'];
     for (const r of rows) {
-        const input  = `"${r.input.replace(/"/g, '""')}"`;
-        const reason = r.reason ? `"${r.reason.replace(/"/g, '""')}"` : '';
-        lines.push(`${r.row},${input},${r.status},${reason}`);
+        const identifier = `"${r.input.replace(/"/g, '""')}"`;
+        const reason     = r.reason ? `"${r.reason.replace(/"/g, '""')}"` : '';
+        lines.push(`${r.row},${identifier},${r.status},${reason}`);
     }
     return Buffer.from(lines.join('\n'), 'utf-8');
 }

@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import {
-    UploadEnvConditionPackDto,
-    UploadEnvConditionPackResult,
     EnvConditionTemplateData,
     EnvConditionModifiersData,
     EnvConditionDownloadData,
@@ -13,7 +11,10 @@ import {
     WorldModifierDto,
     StatModifierDto,
     ProficiencyModifierDto,
+    UploadResultRow,
+    UploadEnvConditionNewResult,
 } from './dto/upload-env-condition-pack.dto';
+import { parseEnvConditionPack } from './envConditions.parser';
 import { EnvConditionsRepository } from './envConditions.repository';
 import { ApiCacheService, CachedGuildModifiers } from '../../cache/api-cache.service';
 
@@ -29,6 +30,17 @@ interface ValidatedProfRow  { dto: ProficiencyModifierDto; db: ProfDbRow; savedS
 
 function rowInput(...parts: (string | number | boolean | null | undefined)[]): string {
     return parts.map(p => p ?? '?').join(' | ');
+}
+
+function savedRowInput(row: SavedRow): string {
+    switch (row.sheet) {
+        case 'world_modifiers':
+            return rowInput(row.condition, row.effectType, row.relation, row.value);
+        case 'stat_modifiers':
+            return rowInput(row.condition, row.stat, row.value);
+        case 'proficiency_modifiers':
+            return rowInput(row.condition, row.proficiency, row.value);
+    }
 }
 
 @Injectable()
@@ -148,22 +160,24 @@ export class EnvConditionsService {
         return removed;
     }
 
-    async uploadPack(dto: UploadEnvConditionPackDto): Promise<UploadEnvConditionPackResult> {
+    async uploadPack(guildId: string, fileBuffer: Buffer): Promise<UploadEnvConditionNewResult> {
+        const parsed = await parseEnvConditionPack(fileBuffer);
+
         let envConditions  = this.cache.getEnvConditions();
         let effectTypes    = this.cache.getEffectTypes();
         let relationTypes  = this.cache.getRelationTypes();
         let stats          = this.cache.getStats();
-        let proficiencyDefs = this.cache.getProfDefsSlim(dto.guildId);
+        let proficiencyDefs = this.cache.getProfDefsSlim(guildId);
 
         const lookupFetches: Promise<void>[] = [];
         if (!envConditions)   lookupFetches.push(this.repo.findAllEnvConditions()         .then(v => { envConditions   = v; this.cache.setEnvConditions(v); }));
         if (!effectTypes)     lookupFetches.push(this.repo.findEnvModifierEffectTypes()    .then(v => { effectTypes     = v; this.cache.setEffectTypes(v); }));
         if (!relationTypes)   lookupFetches.push(this.repo.findEnvConditionRelationTypes() .then(v => { relationTypes   = v; this.cache.setRelationTypes(v); }));
         if (!stats)           lookupFetches.push(this.repo.findAllStats()                  .then(v => { stats           = v; this.cache.setStats(v); }));
-        if (!proficiencyDefs) lookupFetches.push(this.repo.findProficiencyDefs(dto.guildId).then(v => { proficiencyDefs = v; this.cache.setProfDefsSlim(dto.guildId, v); }));
+        if (!proficiencyDefs) lookupFetches.push(this.repo.findProficiencyDefs(guildId)   .then(v => { proficiencyDefs = v; this.cache.setProfDefsSlim(guildId, v); }));
 
         const [existing] = await Promise.all([
-            this.repo.getGuildModifiers(dto.guildId),
+            this.repo.getGuildModifiers(guildId),
             ...lookupFetches,
         ]);
 
@@ -188,9 +202,9 @@ export class EnvConditionsService {
 
         const errors: RowError[] = [];
 
-        const worldToSave = this.validateWorldModifiers(dto.worldModifiers, dto.guildId, envConditionMap, effectTypeMap, relationTypeMap, errors);
-        const statToSave  = this.validateStatModifiers(dto.statModifiers,   dto.guildId, envConditionMap, statMap, errors);
-        const profToSave  = this.validateProficiencyModifiers(dto.proficiencyModifiers, dto.guildId, envConditionMap, proficiencyDefMap, errors);
+        const worldToSave = this.validateWorldModifiers(parsed.worldModifiers, guildId, envConditionMap, effectTypeMap, relationTypeMap, errors);
+        const statToSave  = this.validateStatModifiers(parsed.statModifiers,   guildId, envConditionMap, statMap, errors);
+        const profToSave  = this.validateProficiencyModifiers(parsed.proficiencyModifiers, guildId, envConditionMap, proficiencyDefMap, errors);
 
         type WorldCandidate = { item: ValidatedWorldRow; old?: { relation: string; value: number | null } };
         type StatCandidate  = { item: ValidatedStatRow;  old?: { value: number } };
@@ -295,15 +309,37 @@ export class EnvConditionsService {
             }
         }
 
-        errors.sort((a, b) => {
-            const sheetOrder = ['world_modifiers', 'stat_modifiers', 'proficiency_modifiers'];
+        this.cache.invalidateGuildModifiers(guildId);
+
+        const sheetOrder = ['world_modifiers', 'stat_modifiers', 'proficiency_modifiers'];
+        const overwriteKeys = new Set(overwrites.map(o => `${o.sheet}|${o.row}`));
+
+        const rows: UploadResultRow[] = [
+            ...saved.map(s => ({
+                row:    s.row,
+                sheet:  s.sheet,
+                input:  savedRowInput(s),
+                status: overwriteKeys.has(`${s.sheet}|${s.row}`) ? 'updated' as const : 'added' as const,
+            })),
+            ...errors.map(e => ({
+                row:    e.row,
+                sheet:  e.sheet,
+                input:  e.input,
+                status: 'failed' as const,
+                reason: e.message,
+            })),
+        ];
+        rows.sort((a, b) => {
             const si = sheetOrder.indexOf(a.sheet) - sheetOrder.indexOf(b.sheet);
             return si !== 0 ? si : a.row - b.row;
         });
 
-        this.cache.invalidateGuildModifiers(dto.guildId);
-
-        return { saved, errors, overwrites };
+        return {
+            added:   saved.length - overwrites.length,
+            updated: overwrites.length,
+            failed:  errors.length,
+            rows,
+        };
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

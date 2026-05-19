@@ -1,33 +1,10 @@
 import ExcelJS from 'exceljs';
-
-export interface WorldModifierRow {
-    row:        number;
-    condition:  string | null;
-    effectType: string | null;
-    relation:   string | null;
-    value:      number | null;
-}
-
-export interface StatModifierRow {
-    row:       number;
-    condition: string | null;
-    stat:      string | null;
-    value:     number | null;
-}
-
-export interface ProficiencyModifierRow {
-    row:             number;
-    condition:       string | null;
-    proficiency:     string | null;
-    value:           number | null;
-    hasDisadvantage: boolean | null;
-    hasAdvantage:    boolean | null;
-}
+import { WorldModifierDto, StatModifierDto, ProficiencyModifierDto } from './dto/upload-env-condition-pack.dto';
 
 export interface ParsedEnvConditionPack {
-    worldModifiers:       WorldModifierRow[];
-    statModifiers:        StatModifierRow[];
-    proficiencyModifiers: ProficiencyModifierRow[];
+    worldModifiers:       WorldModifierDto[];
+    statModifiers:        StatModifierDto[];
+    proficiencyModifiers: ProficiencyModifierDto[];
 }
 
 type CellValue = string | number | boolean | null | undefined;

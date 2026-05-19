@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { UploadEnvConditionPackDto } from './dto/upload-env-condition-pack.dto';
 import { EnvConditionsService } from './envConditions.service';
 
 @Controller('model/env-conditions')
@@ -67,7 +67,13 @@ export class EnvConditionsController {
 
     @Post('upload')
     @HttpCode(HttpStatus.OK)
-    uploadPack(@Body() dto: UploadEnvConditionPackDto) {
-        return this.envConditionsService.uploadPack(dto);
+    @UseInterceptors(FileInterceptor('file'))
+    async uploadPack(
+        @UploadedFile() file: Express.Multer.File,
+        @Body('guildId') guildId: string,
+    ) {
+        if (!guildId) throw new BadRequestException('guildId is required');
+        if (!file)    throw new BadRequestException('file is required');
+        return this.envConditionsService.uploadPack(guildId, file.buffer);
     }
 }

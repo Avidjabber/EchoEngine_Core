@@ -1,5 +1,4 @@
 import { apiClient } from '../api';
-import type { WorldModifierRow, StatModifierRow, ProficiencyModifierRow } from '../../utils/parsers/envConditionPack';
 
 export interface EnvConditionTemplateData {
     envConditions:   string[];
@@ -9,27 +8,19 @@ export interface EnvConditionTemplateData {
     proficiencyDefs: string[];
 }
 
-export type SavedRow =
-    | { sheet: 'world_modifiers';       row: number; condition: string; effectType: string; relation: string; value: number | null }
-    | { sheet: 'stat_modifiers';        row: number; condition: string; stat: string; value: number }
-    | { sheet: 'proficiency_modifiers'; row: number; condition: string; proficiency: string; value: number; hasDisadvantage: boolean; hasAdvantage: boolean };
-
-export type OverwrittenRow =
-    | { sheet: 'world_modifiers';       row: number; condition: string; effectType: string;  oldRelation: string; oldValue: number | null; newRelation: string; newValue: number | null }
-    | { sheet: 'stat_modifiers';        row: number; condition: string; stat: string;         oldValue: number; newValue: number }
-    | { sheet: 'proficiency_modifiers'; row: number; condition: string; proficiency: string;  oldValue: number; oldHasDisadvantage: boolean; oldHasAdvantage: boolean; newValue: number; newHasDisadvantage: boolean; newHasAdvantage: boolean };
-
-export interface RowError {
-    sheet:   string;
+export interface UploadResultRow {
     row:     number;
+    sheet:   string;
     input:   string;
-    message: string;
+    status:  'added' | 'updated' | 'failed';
+    reason?: string;
 }
 
-export interface EnvConditionPackUploadResult {
-    saved:      SavedRow[];
-    errors:     RowError[];
-    overwrites: OverwrittenRow[];
+export interface UploadEnvConditionResult {
+    added:   number;
+    updated: number;
+    failed:  number;
+    rows:    UploadResultRow[];
 }
 
 export interface DownloadWorldModifier {
@@ -143,34 +134,10 @@ export async function fetchEnvConditionDownloadData(guildId: string) {
     );
 }
 
-export async function uploadEnvConditionPack(
-    guildId:              string,
-    worldModifiers:       WorldModifierRow[],
-    statModifiers:        StatModifierRow[],
-    proficiencyModifiers: ProficiencyModifierRow[],
-) {
-    return apiClient.post<EnvConditionPackUploadResult>('/model/env-conditions/upload', {
-        guildId,
-        worldModifiers:       worldModifiers.map(r => ({
-            row:        r.row,
-            condition:  r.condition,
-            effectType: r.effectType,
-            relation:   r.relation,
-            value:      r.value,
-        })),
-        statModifiers:        statModifiers.map(r => ({
-            row:       r.row,
-            condition: r.condition,
-            stat:      r.stat,
-            value:     r.value,
-        })),
-        proficiencyModifiers: proficiencyModifiers.map(r => ({
-            row:             r.row,
-            condition:       r.condition,
-            proficiency:     r.proficiency,
-            value:           r.value,
-            hasDisadvantage: r.hasDisadvantage,
-            hasAdvantage:    r.hasAdvantage,
-        })),
-    }, 120_000);
+export async function uploadEnvConditionPack(guildId: string, fileBuffer: Buffer) {
+    return apiClient.postMultipart<UploadEnvConditionResult>(
+        '/model/env-conditions/upload',
+        { guildId },
+        { name: 'env-conditions.xlsx', buffer: fileBuffer },
+    );
 }

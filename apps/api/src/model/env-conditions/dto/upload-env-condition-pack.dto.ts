@@ -52,6 +52,21 @@ export interface UploadEnvConditionPackResult {
     overwrites: OverwrittenRow[];
 }
 
+export interface UploadResultRow {
+    row:     number;
+    sheet:   string;
+    input:   string;
+    status:  'added' | 'updated' | 'failed';
+    reason?: string;
+}
+
+export interface UploadEnvConditionNewResult {
+    added:   number;
+    updated: number;
+    failed:  number;
+    rows:    UploadResultRow[];
+}
+
 export interface EnvConditionTemplateData {
     envConditions:   string[];
     effectTypes:     string[];
