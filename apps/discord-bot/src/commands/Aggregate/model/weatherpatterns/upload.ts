@@ -1,10 +1,19 @@
 import axios from 'axios';
-import { ChatInputCommandInteraction } from 'discord.js';
+import { AttachmentBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { messages } from '@echoengine/shared';
+import { colors } from '../../../../core/colors';
 import { replyError, replyLoading } from '../../../../core/reply';
-import { parseWeatherPatternPack, ParsedWeatherPatternPack } from '../../../../utils/parsers/weatherPatternPack';
-import { uploadWeatherPatternPack } from '../../../../services/model/weatherPatternPackService';
-import { buildUploadMessages } from './uploadComponents';
+import { uploadWeatherPatternPack, UploadResultRow } from '../../../../services/model/weatherPatternPackService';
+
+function buildCsv(rows: UploadResultRow[]): Buffer {
+    const lines = ['row,input,status,reason'];
+    for (const r of rows) {
+        const input  = `"${r.input.replace(/"/g, '""')}"`;
+        const reason = r.reason ? `"${r.reason.replace(/"/g, '""')}"` : '';
+        lines.push(`${r.row},${input},${r.status},${reason}`);
+    }
+    return Buffer.from(lines.join('\n'), 'utf-8');
+}
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const attachment = interaction.options.getAttachment('file', true);
@@ -25,31 +34,32 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return;
     }
 
-    let parsed: ParsedWeatherPatternPack;
-    try {
-        parsed = await parseWeatherPatternPack(buffer);
-    } catch {
-        await replyError(interaction, 'The file could not be read. Make sure it is a valid `.xlsx` file.');
-        return;
-    }
-
-    const result = await uploadWeatherPatternPack(
-        interaction.guildId!,
-        parsed.patterns,
-        parsed.steps,
-        parsed.seasonWeights,
-    );
+    const result = await uploadWeatherPatternPack(interaction.guildId!, buffer);
 
     if (!result.success) {
         await replyError(interaction, messages.errorGeneric);
         return;
     }
 
-    const { saved, errors, overwrites } = result.value!;
+    const { added, updated, failed, rows } = result.value!;
 
-    const [first, ...rest] = buildUploadMessages(interaction.user.id, saved, overwrites, errors);
-    await interaction.editReply(first as never);
-    for (const msg of rest) {
-        await interaction.followUp(msg as never);
-    }
+    const accentColor = failed > 0 && (added + updated) > 0 ? colors.warning
+        : failed > 0                                         ? colors.error
+        : colors.success;
+
+    const summary = [
+        '## Weather Pattern Upload',
+        `**${added}** weather pattern${added !== 1 ? 's' : ''} added`,
+        `**${updated}** weather pattern${updated !== 1 ? 's' : ''} updated`,
+        `**${failed}** weather pattern${failed !== 1 ? 's' : ''} failed validation`,
+    ].join('\n');
+
+    const csv = new AttachmentBuilder(buildCsv(rows), { name: 'weather-patterns-result.csv' });
+
+    await interaction.editReply({ content: 'Upload complete. See the attached file for a full breakdown.', files: [csv] });
+
+    await interaction.followUp({
+        flags:      MessageFlags.IsComponentsV2,
+        components: [{ type: 17, accent_color: accentColor, components: [{ type: 10, content: summary }] }],
+    } as never);
 }

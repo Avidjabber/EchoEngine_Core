@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 
-export interface WeatherPatternRow {
+export interface PatternRowDto {
     row:          number;
     codeName:     string | null;
     name:         string | null;
@@ -8,7 +8,7 @@ export interface WeatherPatternRow {
     cooldownDays: number | null;
 }
 
-export interface WeatherPatternStepRow {
+export interface PatternStepRowDto {
     row:           number;
     pattern:       string | null;
     stepOrder:     number | null;
@@ -16,7 +16,7 @@ export interface WeatherPatternStepRow {
     durationHours: number | null;
 }
 
-export interface WeatherPatternSeasonWeightRow {
+export interface PatternSeasonWeightRowDto {
     row:     number;
     pattern: string | null;
     season:  string | null;
@@ -24,9 +24,9 @@ export interface WeatherPatternSeasonWeightRow {
 }
 
 export interface ParsedWeatherPatternPack {
-    patterns:      WeatherPatternRow[];
-    steps:         WeatherPatternStepRow[];
-    seasonWeights: WeatherPatternSeasonWeightRow[];
+    patterns:      PatternRowDto[];
+    steps:         PatternStepRowDto[];
+    seasonWeights: PatternSeasonWeightRowDto[];
 }
 
 const TIER_WEIGHTS: Record<string, number> = {

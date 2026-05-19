@@ -88,6 +88,65 @@ export class ApiClient {
             return Result.ok(data);
         });
     }
+
+    async postMultipart<T>(
+        path:   string,
+        fields: Record<string, string>,
+        file:   { name: string; buffer: Buffer },
+    ): Promise<Result<T>> {
+        return Result.wrap(async () => {
+            const token    = await this.ensureAuthenticated();
+            const formData = new FormData();
+            for (const [key, value] of Object.entries(fields)) {
+                formData.append(key, value);
+            }
+            formData.append(
+                'file',
+                new Blob([file.buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+                file.name,
+            );
+            const { data } = await this.http.post<T>(path, formData, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            return Result.ok(data);
+        });
+    }
+
+    async postMultipartBuffer(
+        path:   string,
+        fields: Record<string, string>,
+        file:   { name: string; buffer: Buffer },
+    ): Promise<Result<Buffer>> {
+        return Result.wrap(async () => {
+            const token    = await this.ensureAuthenticated();
+            const formData = new FormData();
+            for (const [key, value] of Object.entries(fields)) {
+                formData.append(key, value);
+            }
+            formData.append(
+                'file',
+                new Blob([file.buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+                file.name,
+            );
+            const { data } = await this.http.post<ArrayBuffer>(path, formData, {
+                headers:      { Authorization: `Bearer ${token}` },
+                responseType: 'arraybuffer',
+            });
+            return Result.ok(Buffer.from(data));
+        });
+    }
+
+    async getBuffer(path: string, params?: Record<string, string>): Promise<Result<Buffer>> {
+        return Result.wrap(async () => {
+            const token = await this.ensureAuthenticated();
+            const { data } = await this.http.get<ArrayBuffer>(path, {
+                params,
+                headers:      this.authHeader(token),
+                responseType: 'arraybuffer',
+            });
+            return Result.ok(Buffer.from(data));
+        });
+    }
 }
 
 // Singleton — import this everywhere in the bot

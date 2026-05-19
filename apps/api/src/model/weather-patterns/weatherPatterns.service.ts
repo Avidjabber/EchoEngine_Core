@@ -1,16 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import ExcelJS from 'exceljs';
 import {
-    PatternRowDto,
-    PatternStepRowDto,
-    PatternSeasonWeightRowDto,
-    UploadWeatherPatternPackDto,
-    UploadWeatherPatternPackResult,
     WeatherPatternTemplateData,
     ResetWeatherPatternPackResult,
     PatternSavedRow,
     PatternOverwrittenRow,
     RowError,
+    UploadResultRow,
+    UploadWeatherPatternPackResult,
 } from './dto/upload-weather-pattern-pack.dto';
+import { parseWeatherPatternPack, PatternRowDto, PatternStepRowDto, PatternSeasonWeightRowDto } from './weatherPatterns.parser';
 import { WeatherPatternsRepository } from './weatherPatterns.repository';
 import { validateName, validateCodeName } from '../../utils/contentFilter';
 import { ApiCacheService, CachedWeatherPatternFull } from '../../cache/api-cache.service';
@@ -107,7 +106,9 @@ export class WeatherPatternsService {
         return { deleted, failed };
     }
 
-    async uploadPack(dto: UploadWeatherPatternPackDto): Promise<UploadWeatherPatternPackResult> {
+    async uploadPack(guildId: string, fileBuffer: Buffer): Promise<UploadWeatherPatternPackResult> {
+        const dto = { guildId, ...(await parseWeatherPatternPack(fileBuffer)) };
+
         let seasons:      Awaited<ReturnType<typeof this.repo.findAllSeasons>>              | null = this.cache.getSeasons();
         let weatherSlim:  Awaited<ReturnType<typeof this.repo.findGuildWeatherStateCodes>> | null = null;
         let existing:     Awaited<ReturnType<typeof this.repo.findGuildWeatherPatterns>>   | null = this.cache.getWeatherPatterns(dto.guildId);
@@ -361,6 +362,121 @@ export class WeatherPatternsService {
         errors.sort((a, b) => a.row - b.row);
 
         this.cache.invalidateWeatherPatterns(dto.guildId);
-        return { saved, errors, overwrites };
+
+        const overwrittenCodes = new Set(overwrites.map(o => o.codeName));
+        const rows: UploadResultRow[] = [
+            ...saved.map(s => ({
+                row:    s.row,
+                input:  `${s.codeName} | ${s.name}`,
+                status: overwrittenCodes.has(s.codeName) ? 'updated' as const : 'added' as const,
+            })),
+            ...errors.map(e => ({
+                row:    e.row,
+                input:  e.input,
+                status: 'failed' as const,
+                reason: e.message,
+            })),
+        ];
+        rows.sort((a, b) => a.row - b.row);
+
+        return {
+            added:   saved.length - overwrites.length,
+            updated: overwrites.length,
+            failed:  errors.length,
+            rows,
+        };
+    }
+
+    async downloadPack(guildId: string): Promise<Buffer> {
+        let patterns = this.cache.getWeatherPatterns(guildId);
+        if (!patterns) {
+            patterns = await this.repo.findGuildWeatherPatterns(guildId);
+            this.cache.setWeatherPatterns(guildId, patterns);
+        }
+
+        const seasonsRaw = await (async () => {
+            let seasons = this.cache.getSeasons();
+            if (!seasons) {
+                const raw = await this.repo.findAllSeasons();
+                this.cache.setSeasons(raw);
+                seasons = raw;
+            }
+            return seasons;
+        })();
+
+        const weatherStatesRaw = await this.repo.findGuildWeatherStateCodes(guildId);
+
+        const HEADER_STYLE: Partial<ExcelJS.Style> = {
+            font:      { bold: true },
+            fill:      { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } },
+            alignment: { vertical: 'middle' },
+        };
+        const styleHeader = (row: ExcelJS.Row) => {
+            row.eachCell(cell => { cell.style = HEADER_STYLE; });
+            row.height = 18;
+        };
+
+        const WEIGHT_TO_TIER: Record<number, string> = { 10: 'common', 5: 'uncommon', 2: 'rare', 1: 'very rare' };
+        const RARITY_TIERS = ['common', 'uncommon', 'rare', 'very rare'];
+
+        const workbook = new ExcelJS.Workbook();
+
+        const patternsSheet = workbook.addWorksheet('patterns');
+        patternsSheet.columns = [
+            { header: 'code_name',    key: 'code_name',    width: 28 },
+            { header: 'name',         key: 'name',         width: 28 },
+            { header: 'is_severe',    key: 'is_severe',    width: 12 },
+            { header: 'cooldown_days', key: 'cooldown_days', width: 16 },
+        ];
+        styleHeader(patternsSheet.getRow(1));
+        patternsSheet.views = [{ state: 'frozen', ySplit: 1 }];
+        for (const p of patterns) {
+            patternsSheet.addRow({ code_name: p.codeName, name: p.name, is_severe: p.isSevere, cooldown_days: p.cooldownDays });
+        }
+
+        const stepsSheet = workbook.addWorksheet('steps');
+        stepsSheet.columns = [
+            { header: 'pattern',       key: 'pattern',       width: 28 },
+            { header: 'step_order',    key: 'step_order',    width: 14 },
+            { header: 'weather_state', key: 'weather_state', width: 28 },
+            { header: 'duration_hours', key: 'duration_hours', width: 16 },
+        ];
+        styleHeader(stepsSheet.getRow(1));
+        stepsSheet.views = [{ state: 'frozen', ySplit: 1 }];
+        for (const p of patterns) {
+            for (const s of p.steps) {
+                stepsSheet.addRow({ pattern: p.codeName, step_order: s.stepOrder, weather_state: s.weatherState?.codeName ?? '', duration_hours: s.durationHours });
+            }
+        }
+
+        const weightsSheet = workbook.addWorksheet('season_weights');
+        weightsSheet.columns = [
+            { header: 'pattern', key: 'pattern', width: 28 },
+            { header: 'season',  key: 'season',  width: 20 },
+            { header: 'weight',  key: 'weight',  width: 12 },
+        ];
+        styleHeader(weightsSheet.getRow(1));
+        weightsSheet.views = [{ state: 'frozen', ySplit: 1 }];
+        for (const p of patterns) {
+            for (const sw of p.seasonWeights) {
+                weightsSheet.addRow({ pattern: p.codeName, season: sw.season.name, weight: WEIGHT_TO_TIER[sw.weight] ?? sw.weight });
+            }
+        }
+
+        const refSheet = workbook.addWorksheet('reference');
+        refSheet.columns = [
+            { header: 'weather_state', key: 'weather_state', width: 28 },
+            { header: 'season',        key: 'season',        width: 20 },
+            { header: 'rarity',        key: 'rarity',        width: 16 },
+        ];
+        styleHeader(refSheet.getRow(1));
+        const maxRows = Math.max(weatherStatesRaw.length, seasonsRaw.length, RARITY_TIERS.length);
+        for (let i = 0; i < maxRows; i++) {
+            refSheet.addRow({ weather_state: weatherStatesRaw[i]?.codeName ?? '', season: seasonsRaw[i]?.name ?? '', rarity: RARITY_TIERS[i] ?? '' });
+        }
+        refSheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+        const raw = await workbook.xlsx.writeBuffer();
+        return Buffer.from(raw);
     }
 }

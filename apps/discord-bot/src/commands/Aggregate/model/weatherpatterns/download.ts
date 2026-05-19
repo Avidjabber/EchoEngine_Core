@@ -2,37 +2,26 @@ import { AttachmentBuilder, ChatInputCommandInteraction, MessageFlags } from 'di
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
 import { replyError, replyLoading } from '../../../../core/reply';
-import { fetchAllWeatherPatterns, fetchWeatherPatternTemplateData } from '../../../../services/model/weatherPatternPackService';
-import { generateWeatherPatternDownload } from '../../../../utils/generators/weatherPatternTemplate';
+import { downloadWeatherPatternPack, fetchAllWeatherPatterns } from '../../../../services/model/weatherPatternPackService';
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     await replyLoading(interaction);
 
     const guildId = interaction.guildId!;
 
-    const [patternsResult, templateResult] = await Promise.all([
+    const [bufferResult, patternsResult] = await Promise.all([
+        downloadWeatherPatternPack(guildId),
         fetchAllWeatherPatterns(guildId),
-        fetchWeatherPatternTemplateData(guildId),
     ]);
 
-    if (!patternsResult.success || !templateResult.success) {
+    if (!bufferResult.success) {
         await replyError(interaction, messages.errorGeneric);
         return;
     }
 
-    const patterns     = patternsResult.value!;
-    const templateData = templateResult.value!;
+    const attachment = new AttachmentBuilder(bufferResult.value!, { name: 'weather-patterns.xlsx' });
 
-    let buffer: Buffer;
-    try {
-        buffer = await generateWeatherPatternDownload(patterns, templateData);
-    } catch {
-        await replyError(interaction, 'Failed to generate the download file. Please try again.');
-        return;
-    }
-
-    const attachment = new AttachmentBuilder(buffer, { name: 'weather-patterns.xlsx' });
-
+    const patterns    = patternsResult.success ? patternsResult.value! : [];
     const patternCount = patterns.length;
     const stepCount    = patterns.reduce((sum, p) => sum + p.steps.length, 0);
     const severeCount  = patterns.filter(p => p.isSevere).length;

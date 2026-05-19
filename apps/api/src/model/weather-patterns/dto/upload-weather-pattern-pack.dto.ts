@@ -1,31 +1,16 @@
-export interface PatternRowDto {
-    row:          number;
-    codeName:     string | null;
-    name:         string | null;
-    isSevere:     boolean | null;
-    cooldownDays: number | null;
-}
 
-export interface PatternStepRowDto {
-    row:           number;
-    pattern:       string | null;
-    stepOrder:     number | null;
-    weatherState:  string | null;  // null = use season default
-    durationHours: number | null;
-}
-
-export interface PatternSeasonWeightRowDto {
+export interface UploadResultRow {
     row:     number;
-    pattern: string | null;
-    season:  string | null;
-    weight:  number | null;
+    input:   string;
+    status:  'added' | 'updated' | 'failed';
+    reason?: string;
 }
 
-export interface UploadWeatherPatternPackDto {
-    guildId:       string;
-    patterns:      PatternRowDto[];
-    steps:         PatternStepRowDto[];
-    seasonWeights: PatternSeasonWeightRowDto[];
+export interface UploadWeatherPatternPackResult {
+    added:   number;
+    updated: number;
+    failed:  number;
+    rows:    UploadResultRow[];
 }
 
 export interface PatternSavedRow {
@@ -54,11 +39,6 @@ export interface RowError {
     message: string;
 }
 
-export interface UploadWeatherPatternPackResult {
-    saved:      PatternSavedRow[];
-    errors:     RowError[];
-    overwrites: PatternOverwrittenRow[];
-}
 
 export interface WeatherPatternTemplateData {
     weatherStates: string[];

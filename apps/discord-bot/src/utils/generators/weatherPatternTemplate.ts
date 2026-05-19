@@ -5,21 +5,6 @@ export interface WeatherPatternTemplateData {
     seasons:       string[];
 }
 
-export interface WeatherPatternDownloadItem {
-    codeName:     string;
-    name:         string;
-    isSevere:     boolean;
-    cooldownDays: number;
-    steps: {
-        stepOrder:    number;
-        durationHours: number;
-        weatherState: string | null;
-    }[];
-    seasonWeights: {
-        season:  string;
-        weight:  number;
-    }[];
-}
 
 const HEADER_STYLE: Partial<ExcelJS.Style> = {
     font:      { bold: true },
@@ -102,68 +87,3 @@ export async function generateWeatherPatternTemplate(data: WeatherPatternTemplat
     return Buffer.from(raw);
 }
 
-const WEIGHT_TO_TIER: Record<number, string> = {
-    10: 'common',
-    5:  'uncommon',
-    2:  'rare',
-    1:  'very rare',
-};
-
-export async function generateWeatherPatternDownload(
-    patterns:     WeatherPatternDownloadItem[],
-    templateData: WeatherPatternTemplateData,
-): Promise<Buffer> {
-    const workbook = new ExcelJS.Workbook();
-
-    const patternsSheet = workbook.addWorksheet('patterns');
-    patternsSheet.columns = [
-        { header: 'code_name',    key: 'code_name',    width: 28 },
-        { header: 'name',         key: 'name',         width: 28 },
-        { header: 'is_severe',    key: 'is_severe',    width: 12 },
-        { header: 'cooldown_days', key: 'cooldown_days', width: 16 },
-    ];
-    styleHeaderRow(patternsSheet.getRow(1));
-    patternsSheet.views = [{ state: 'frozen', ySplit: 1 }];
-    for (const p of patterns) {
-        patternsSheet.addRow({ code_name: p.codeName, name: p.name, is_severe: p.isSevere, cooldown_days: p.cooldownDays });
-    }
-
-    const stepsSheet = workbook.addWorksheet('steps');
-    stepsSheet.columns = [
-        { header: 'pattern',       key: 'pattern',       width: 28 },
-        { header: 'step_order',    key: 'step_order',    width: 14 },
-        { header: 'weather_state', key: 'weather_state', width: 28 },
-        { header: 'duration_hours', key: 'duration_hours', width: 16 },
-    ];
-    styleHeaderRow(stepsSheet.getRow(1));
-    stepsSheet.views = [{ state: 'frozen', ySplit: 1 }];
-    for (const p of patterns) {
-        for (const s of p.steps) {
-            stepsSheet.addRow({
-                pattern:       p.codeName,
-                step_order:    s.stepOrder,
-                weather_state: s.weatherState ?? '',
-                duration_hours: s.durationHours,
-            });
-        }
-    }
-
-    const weightsSheet = workbook.addWorksheet('season_weights');
-    weightsSheet.columns = [
-        { header: 'pattern', key: 'pattern', width: 28 },
-        { header: 'season',  key: 'season',  width: 20 },
-        { header: 'weight',  key: 'weight',  width: 12 },
-    ];
-    styleHeaderRow(weightsSheet.getRow(1));
-    weightsSheet.views = [{ state: 'frozen', ySplit: 1 }];
-    for (const p of patterns) {
-        for (const sw of p.seasonWeights) {
-            weightsSheet.addRow({ pattern: p.codeName, season: sw.season, weight: WEIGHT_TO_TIER[sw.weight] ?? sw.weight });
-        }
-    }
-
-    addRefSheet(workbook, templateData);
-
-    const raw = await workbook.xlsx.writeBuffer();
-    return Buffer.from(raw);
-}
