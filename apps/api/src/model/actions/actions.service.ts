@@ -1,54 +1,28 @@
 import { Injectable } from '@nestjs/common';
 import {
-    UploadActionPackDto,
-    UploadActionPackResult,
+    UploadResultRow,
+    ActionPackUploadResult,
     ActionPackTemplateData,
-    BaseConfigRowDto,
-    DisciplineRewardRowDto,
-    StepConfigRowDto,
-    DisciplineRequirementRowDto,
-    SavedRow,
-    OverwrittenRow,
-    RowError,
+    ResetActionPackResult,
+    ActionDownloadData,
 } from './dto/upload-action-pack.dto';
 import { ActionsRepository } from './actions.repository';
 import { ApiCacheService } from '../../cache/api-cache.service';
+import { parseActionPack } from './actions.parser';
+import type { BaseConfigRow, DisciplineRewardRow, StepConfigRow, DisciplineRequirementRow } from './actions.parser';
 
-const VALID_RECIPIENT_SCOPES = new Set(['all', 'leader_only', 'participants_only', 'winners_only', 'losers_only']);
+const VALID_RECIPIENT_SCOPES  = new Set(['all', 'leader_only', 'participants_only', 'winners_only', 'losers_only']);
 const VALID_REQUIREMENT_SCOPES = new Set(['leader', 'all']);
 
 function rowInput(...parts: (string | number | null | undefined)[]): string {
     return parts.map(p => p ?? '?').join(' | ');
 }
 
-interface ExistingBaseConfig {
-    actionTypeId:      number;
-    energyCost:        number;
-    dailyLimit:        number | null;
-    minEntities:       number;
-    maxEntities:       number | null;
-    durationMinutes:   number | null;
-    baseFactionReward: number;
-}
-
-interface ExistingDisciplineReward {
-    actionTypeId:   number;
-    disciplineId:   number;
-    recipientScope: string;
-    xpAmount:       number;
-}
-
-interface ExistingStepConfig {
-    stepId:           number;
-    proficiencyDefId: number | null;
-    statId:           number | null;
-}
-
-interface ExistingDisciplineRequirement {
-    actionTypeId: number;
-    disciplineId: number;
-    minLevel:     number;
-    scope:        string;
+interface InternalError {
+    row:     number;
+    sheet:   string;
+    input:   string;
+    message: string;
 }
 
 @Injectable()
@@ -80,48 +54,85 @@ export class ActionsService {
         };
     }
 
-    async uploadPack(dto: UploadActionPackDto): Promise<UploadActionPackResult> {
+    async resetPack(guildId: string): Promise<ResetActionPackResult> {
+        return this.repo.resetGuildConfigs(guildId);
+    }
+
+    async downloadPack(guildId: string): Promise<ActionDownloadData> {
+        const [rawBase, rawRewards, rawSteps, rawReqs, templateData] = await Promise.all([
+            this.repo.findGuildBaseConfigsFull(guildId),
+            this.repo.findGuildDisciplineRewardsFull(guildId),
+            this.repo.findGuildStepConfigsFull(guildId),
+            this.repo.findGuildDisciplineRequirementsFull(guildId),
+            this.getTemplateData(guildId),
+        ]);
+
+        return {
+            baseConfigs: rawBase.map(r => ({
+                action:            r.actionType.name,
+                energyCost:        r.energyCost,
+                dailyLimit:        r.dailyLimit,
+                minEntities:       r.minEntities,
+                maxEntities:       r.maxEntities,
+                durationMinutes:   r.durationMinutes,
+                baseFactionReward: r.baseFactionReward,
+            })),
+            disciplineRewards: rawRewards.map(r => ({
+                action:         r.actionType.name,
+                discipline:     r.discipline.codeName,
+                xpAmount:       r.xpAmount,
+                recipientScope: r.recipientScope,
+            })),
+            stepConfigs: rawSteps.map(r => ({
+                action:      r.step.actionType.name,
+                step:        r.step.codeName,
+                proficiency: r.proficiencyDef?.codeName ?? null,
+                stat:        r.stat?.name ?? null,
+            })),
+            disciplineRequirements: rawReqs.map(r => ({
+                action:     r.actionType.name,
+                discipline: r.discipline.codeName,
+                minLevel:   r.minLevel,
+                scope:      r.scope,
+            })),
+            templateData,
+        };
+    }
+
+    async uploadPack(guildId: string, buffer: Buffer): Promise<ActionPackUploadResult> {
+        const parsed = await parseActionPack(buffer);
+
         const [actionTypes, allSteps, disciplines, stats, profDefs, existingBaseConfigs, existingRewards, existingStepConfigs, existingRequirements] = await Promise.all([
             this.repo.findAllActionTypes(),
             this.repo.findAllActionSteps(),
             this.repo.findAllDisciplines(),
             this.repo.findAllStats(),
-            this.repo.findGuildProficiencyDefs(dto.guildId),
-            this.repo.findGuildBaseConfigs(dto.guildId),
-            this.repo.findGuildDisciplineRewards(dto.guildId),
-            this.repo.findGuildStepConfigs(dto.guildId),
-            this.repo.findGuildDisciplineRequirements(dto.guildId),
+            this.repo.findGuildProficiencyDefs(guildId),
+            this.repo.findGuildBaseConfigs(guildId),
+            this.repo.findGuildDisciplineRewards(guildId),
+            this.repo.findGuildStepConfigs(guildId),
+            this.repo.findGuildDisciplineRequirements(guildId),
         ]);
 
-        const actionMap   = new Map(actionTypes.map(a => [a.name.toLowerCase(), a]));
-        const discMap     = new Map(disciplines.map(d => [d.codeName.toLowerCase(), d]));
-        const statMap     = new Map(stats.map(s => [s.name.toLowerCase(), s]));
-        const profMap     = new Map(profDefs.map(p => [p.codeName.toLowerCase(), p]));
-        // step lookup: composite key "actionTypeId:codeName"
-        const stepMap     = new Map(allSteps.map(s => [`${s.actionTypeId}:${s.codeName.toLowerCase()}`, s]));
+        const actionMap = new Map(actionTypes.map(a => [a.name.toLowerCase(), a]));
+        const discMap   = new Map(disciplines.map(d => [d.codeName.toLowerCase(), d]));
+        const statMap   = new Map(stats.map(s => [s.name.toLowerCase(), s]));
+        const profMap   = new Map(profDefs.map(p => [p.codeName.toLowerCase(), p]));
+        const stepMap   = new Map(allSteps.map(s => [`${s.actionTypeId}:${s.codeName.toLowerCase()}`, s]));
 
-        const existingConfigMap = new Map<number, ExistingBaseConfig>(
-            existingBaseConfigs.map(c => [c.actionTypeId, c]),
-        );
-        const existingRewardMap = new Map<string, ExistingDisciplineReward>(
-            existingRewards.map(r => [`${r.actionTypeId}:${r.disciplineId}:${r.recipientScope}`, r]),
-        );
-        const existingStepMap = new Map<number, ExistingStepConfig>(
-            existingStepConfigs.map(s => [s.stepId, s]),
-        );
-        const existingReqMap = new Map<string, ExistingDisciplineRequirement>(
-            existingRequirements.map(r => [`${r.actionTypeId}:${r.disciplineId}`, r]),
-        );
+        const existingConfigSet = new Set(existingBaseConfigs.map(c => c.actionTypeId));
+        const existingRewardMap = new Map(existingRewards.map(r => [`${r.actionTypeId}:${r.disciplineId}:${r.recipientScope}`, r]));
+        const existingStepSet   = new Set(existingStepConfigs.map(s => s.stepId));
+        const existingReqMap    = new Map(existingRequirements.map(r => [`${r.actionTypeId}:${r.disciplineId}`, r]));
 
-        const errors:     RowError[]     = [];
-        const saved:      SavedRow[]     = [];
-        const overwrites: OverwrittenRow[] = [];
+        const errors: InternalError[] = [];
+        const rows:   UploadResultRow[] = [];
 
         // ── base_configs ──────────────────────────────────────────────────────
-        for (const c of this._validateBaseConfigs(dto.baseConfigs, actionMap, errors)) {
+        for (const c of this._validateBaseConfigs(parsed.baseConfigs, actionMap, errors)) {
             try {
                 await this.repo.upsertBaseConfig({
-                    guildId:           dto.guildId,
+                    guildId,
                     actionTypeId:      c.actionTypeId,
                     energyCost:        c.energyCost,
                     dailyLimit:        c.dailyLimit,
@@ -130,91 +141,88 @@ export class ActionsService {
                     durationMinutes:   c.durationMinutes,
                     baseFactionReward: c.baseFactionReward,
                 });
-                const existing = existingConfigMap.get(c.actionTypeId);
-                saved.push({ sheet: 'base_configs', row: c.row, action: c.action });
-                if (existing) overwrites.push({ sheet: 'base_configs', row: c.row, action: c.action });
+                const isUpdate = existingConfigSet.has(c.actionTypeId);
+                rows.push({ row: c.row, sheet: 'base_configs', input: rowInput(c.action), status: isUpdate ? 'updated' : 'added' });
             } catch {
-                errors.push({ sheet: 'base_configs', row: c.row, input: rowInput(c.action), message: 'Failed to save to database' });
+                errors.push({ row: c.row, sheet: 'base_configs', input: rowInput(c.action), message: 'Failed to save to database' });
             }
         }
 
         // ── discipline_rewards ────────────────────────────────────────────────
-        for (const c of this._validateDisciplineRewards(dto.disciplineRewards, actionMap, discMap, errors)) {
+        for (const c of this._validateDisciplineRewards(parsed.disciplineRewards, actionMap, discMap, errors)) {
             try {
                 await this.repo.upsertDisciplineReward({
-                    guildId:        dto.guildId,
+                    guildId,
                     actionTypeId:   c.actionTypeId,
                     disciplineId:   c.disciplineId,
                     xpAmount:       c.xpAmount,
                     recipientScope: c.recipientScope,
                 });
                 const key = `${c.actionTypeId}:${c.disciplineId}:${c.recipientScope}`;
-                const existing = existingRewardMap.get(key);
-                saved.push({ sheet: 'discipline_rewards', row: c.row, action: c.action, discipline: c.discipline, recipientScope: c.recipientScope, xpAmount: c.xpAmount });
-                if (existing && existing.xpAmount !== c.xpAmount) {
-                    overwrites.push({ sheet: 'discipline_rewards', row: c.row, action: c.action, discipline: c.discipline, recipientScope: c.recipientScope, oldXpAmount: existing.xpAmount, newXpAmount: c.xpAmount });
-                }
+                const isUpdate = existingRewardMap.has(key);
+                rows.push({ row: c.row, sheet: 'discipline_rewards', input: rowInput(c.action, c.discipline, c.recipientScope), status: isUpdate ? 'updated' : 'added' });
             } catch {
-                errors.push({ sheet: 'discipline_rewards', row: c.row, input: rowInput(c.action, c.discipline, c.recipientScope), message: 'Failed to save to database' });
+                errors.push({ row: c.row, sheet: 'discipline_rewards', input: rowInput(c.action, c.discipline, c.recipientScope), message: 'Failed to save to database' });
             }
         }
 
         // ── step_configs ──────────────────────────────────────────────────────
-        for (const c of this._validateStepConfigs(dto.stepConfigs, actionMap, stepMap, profMap, statMap, errors)) {
+        for (const c of this._validateStepConfigs(parsed.stepConfigs, actionMap, stepMap, profMap, statMap, errors)) {
             try {
                 await this.repo.upsertStepConfig({
-                    guildId:          dto.guildId,
+                    guildId,
                     stepId:           c.stepId,
                     proficiencyDefId: c.proficiencyDefId,
                     statId:           c.statId,
                 });
-                const existing = existingStepMap.get(c.stepId);
-                const oldProf = existing ? (profDefs.find(p => p.id === existing.proficiencyDefId)?.codeName ?? null) : null;
-                const oldStat = existing ? (stats.find(s => s.id === existing.statId)?.name ?? null) : null;
-                saved.push({ sheet: 'step_configs', row: c.row, action: c.action, step: c.step, proficiency: c.proficiencyName, stat: c.statName });
-                if (existing && (existing.proficiencyDefId !== c.proficiencyDefId || existing.statId !== c.statId)) {
-                    overwrites.push({ sheet: 'step_configs', row: c.row, action: c.action, step: c.step, oldProficiency: oldProf, oldStat: oldStat, newProficiency: c.proficiencyName, newStat: c.statName });
-                }
+                const isUpdate = existingStepSet.has(c.stepId);
+                rows.push({ row: c.row, sheet: 'step_configs', input: rowInput(c.action, c.step), status: isUpdate ? 'updated' : 'added' });
             } catch {
-                errors.push({ sheet: 'step_configs', row: c.row, input: rowInput(c.action, c.step), message: 'Failed to save to database' });
+                errors.push({ row: c.row, sheet: 'step_configs', input: rowInput(c.action, c.step), message: 'Failed to save to database' });
             }
         }
 
         // ── discipline_requirements ───────────────────────────────────────────
-        for (const c of this._validateDisciplineRequirements(dto.disciplineRequirements, actionMap, discMap, errors)) {
+        for (const c of this._validateDisciplineRequirements(parsed.disciplineRequirements, actionMap, discMap, errors)) {
             try {
                 await this.repo.upsertDisciplineRequirement({
-                    guildId:      dto.guildId,
+                    guildId,
                     actionTypeId: c.actionTypeId,
                     disciplineId: c.disciplineId,
                     minLevel:     c.minLevel,
                     scope:        c.scope,
                 });
-                const existing = existingReqMap.get(`${c.actionTypeId}:${c.disciplineId}`);
-                saved.push({ sheet: 'discipline_requirements', row: c.row, action: c.action, discipline: c.discipline });
-                if (existing && existing.minLevel !== c.minLevel) {
-                    overwrites.push({ sheet: 'discipline_requirements', row: c.row, action: c.action, discipline: c.discipline, oldMinLevel: existing.minLevel, newMinLevel: c.minLevel });
-                }
+                const key = `${c.actionTypeId}:${c.disciplineId}`;
+                const isUpdate = existingReqMap.has(key);
+                rows.push({ row: c.row, sheet: 'discipline_requirements', input: rowInput(c.action, c.discipline, c.scope), status: isUpdate ? 'updated' : 'added' });
             } catch {
-                errors.push({ sheet: 'discipline_requirements', row: c.row, input: rowInput(c.action, c.discipline, c.scope), message: 'Failed to save to database' });
+                errors.push({ row: c.row, sheet: 'discipline_requirements', input: rowInput(c.action, c.discipline, c.scope), message: 'Failed to save to database' });
             }
         }
 
-        errors.sort((a, b) => {
-            const sheetOrder: Record<string, number> = { base_configs: 0, discipline_rewards: 1, step_configs: 2, discipline_requirements: 3 };
+        for (const e of errors) {
+            rows.push({ row: e.row, sheet: e.sheet, input: e.input, status: 'failed', reason: e.message });
+        }
+
+        const sheetOrder: Record<string, number> = { base_configs: 0, discipline_rewards: 1, step_configs: 2, discipline_requirements: 3 };
+        rows.sort((a, b) => {
             const sd = (sheetOrder[a.sheet] ?? 99) - (sheetOrder[b.sheet] ?? 99);
             return sd !== 0 ? sd : a.row - b.row;
         });
 
-        return { saved, errors, overwrites };
+        const added   = rows.filter(r => r.status === 'added').length;
+        const updated = rows.filter(r => r.status === 'updated').length;
+        const failed  = rows.filter(r => r.status === 'failed').length;
+
+        return { added, updated, failed, rows };
     }
 
     // ── private validators ────────────────────────────────────────────────────
 
     private _validateBaseConfigs(
-        rows: BaseConfigRowDto[],
+        rows:      BaseConfigRow[],
         actionMap: Map<string, { id: number; name: string }>,
-        errors: RowError[],
+        errors:    InternalError[],
     ): Array<{ row: number; action: string; actionTypeId: number; energyCost: number; dailyLimit: number | null; minEntities: number; maxEntities: number | null; durationMinutes: number | null; baseFactionReward: number }> {
         const candidates = [];
         const seen = new Map<number, number>();
@@ -271,10 +279,10 @@ export class ActionsService {
     }
 
     private _validateDisciplineRewards(
-        rows: DisciplineRewardRowDto[],
+        rows:      DisciplineRewardRow[],
         actionMap: Map<string, { id: number; name: string }>,
         discMap:   Map<string, { id: number; codeName: string }>,
-        errors: RowError[],
+        errors:    InternalError[],
     ): Array<{ row: number; action: string; discipline: string; actionTypeId: number; disciplineId: number; xpAmount: number; recipientScope: string }> {
         const candidates = [];
         const seen = new Map<string, number>();
@@ -283,12 +291,12 @@ export class ActionsService {
             const input = rowInput(row.action, row.discipline, row.xpAmount, row.recipientScope);
 
             if (!row.action || !row.discipline || row.xpAmount == null || !row.recipientScope) {
-                const missing = [
-                    !row.action         && 'action',
-                    !row.discipline     && 'discipline',
+                const missing = ([
+                    !row.action          && 'action',
+                    !row.discipline      && 'discipline',
                     row.xpAmount == null && 'xp_amount',
-                    !row.recipientScope && 'recipient_scope',
-                ].filter(Boolean).join(', ');
+                    !row.recipientScope  && 'recipient_scope',
+                ] as (string | false)[]).filter(Boolean).join(', ');
                 errors.push({ sheet: 'discipline_rewards', row: row.row, input, message: `Missing required field(s): ${missing}` });
                 continue;
             }
@@ -312,7 +320,7 @@ export class ActionsService {
 
             const scope = row.recipientScope.toLowerCase();
             if (!VALID_RECIPIENT_SCOPES.has(scope)) {
-                errors.push({ sheet: 'discipline_rewards', row: row.row, input, message: `'${row.recipientScope}' is not a valid recipient_scope. Valid values: ${[...VALID_RECIPIENT_SCOPES].join(', ')}` });
+                errors.push({ sheet: 'discipline_rewards', row: row.row, input, message: `'${row.recipientScope}' is not a valid recipient_scope. Valid: ${[...VALID_RECIPIENT_SCOPES].join(', ')}` });
                 continue;
             }
 
@@ -337,13 +345,13 @@ export class ActionsService {
     }
 
     private _validateStepConfigs(
-        rows:      StepConfigRowDto[],
+        rows:      StepConfigRow[],
         actionMap: Map<string, { id: number; name: string }>,
         stepMap:   Map<string, { id: number; codeName: string; actionTypeId: number }>,
         profMap:   Map<string, { id: number; codeName: string }>,
         statMap:   Map<string, { id: number; name: string }>,
-        errors: RowError[],
-    ): Array<{ row: number; action: string; step: string; stepId: number; proficiencyDefId: number | null; statId: number | null; proficiencyName: string | null; statName: string | null }> {
+        errors:    InternalError[],
+    ): Array<{ row: number; action: string; step: string; stepId: number; proficiencyDefId: number | null; statId: number | null }> {
         const candidates = [];
         const seen = new Map<number, number>();
 
@@ -351,7 +359,7 @@ export class ActionsService {
             const input = rowInput(row.action, row.step, row.proficiency, row.stat);
 
             if (!row.action || !row.step) {
-                const missing = [!row.action && 'action', !row.step && 'step'].filter(Boolean).join(', ');
+                const missing = ([!row.action && 'action', !row.step && 'step'] as (string | false)[]).filter(Boolean).join(', ');
                 errors.push({ sheet: 'step_configs', row: row.row, input, message: `Missing required field(s): ${missing}` });
                 continue;
             }
@@ -362,8 +370,7 @@ export class ActionsService {
                 continue;
             }
 
-            const stepKey = `${actionEntry.id}:${row.step.toLowerCase()}`;
-            const stepEntry = stepMap.get(stepKey);
+            const stepEntry = stepMap.get(`${actionEntry.id}:${row.step.toLowerCase()}`);
             if (!stepEntry) {
                 errors.push({ sheet: 'step_configs', row: row.row, input, message: `'${row.step}' is not a valid step for action '${row.action}'` });
                 continue;
@@ -375,7 +382,6 @@ export class ActionsService {
             }
 
             let proficiencyDefId: number | null = null;
-            let proficiencyName:  string | null = null;
             if (row.proficiency) {
                 const prof = profMap.get(row.proficiency.toLowerCase());
                 if (!prof) {
@@ -383,19 +389,16 @@ export class ActionsService {
                     continue;
                 }
                 proficiencyDefId = prof.id;
-                proficiencyName  = prof.codeName;
             }
 
-            let statId:   number | null = null;
-            let statName: string | null = null;
+            let statId: number | null = null;
             if (row.stat) {
                 const stat = statMap.get(row.stat.toLowerCase());
                 if (!stat) {
                     errors.push({ sheet: 'step_configs', row: row.row, input, message: `'${row.stat}' is not a valid stat` });
                     continue;
                 }
-                statId   = stat.id;
-                statName = stat.name;
+                statId = stat.id;
             }
 
             if (seen.has(stepEntry.id)) {
@@ -404,25 +407,16 @@ export class ActionsService {
             }
             seen.set(stepEntry.id, row.row);
 
-            candidates.push({
-                row:              row.row,
-                action:           actionEntry.name,
-                step:             stepEntry.codeName,
-                stepId:           stepEntry.id,
-                proficiencyDefId,
-                statId,
-                proficiencyName,
-                statName,
-            });
+            candidates.push({ row: row.row, action: actionEntry.name, step: stepEntry.codeName, stepId: stepEntry.id, proficiencyDefId, statId });
         }
         return candidates;
     }
 
     private _validateDisciplineRequirements(
-        rows:      DisciplineRequirementRowDto[],
+        rows:      DisciplineRequirementRow[],
         actionMap: Map<string, { id: number; name: string }>,
         discMap:   Map<string, { id: number; codeName: string }>,
-        errors: RowError[],
+        errors:    InternalError[],
     ): Array<{ row: number; action: string; discipline: string; actionTypeId: number; disciplineId: number; minLevel: number; scope: string }> {
         const candidates = [];
         const seen = new Map<string, number>();
@@ -431,12 +425,12 @@ export class ActionsService {
             const input = rowInput(row.action, row.discipline, row.minLevel, row.scope);
 
             if (!row.action || !row.discipline || row.minLevel == null || !row.scope) {
-                const missing = [
-                    !row.action       && 'action',
-                    !row.discipline   && 'discipline',
+                const missing = ([
+                    !row.action          && 'action',
+                    !row.discipline      && 'discipline',
                     row.minLevel == null && 'min_level',
-                    !row.scope        && 'scope',
-                ].filter(Boolean).join(', ');
+                    !row.scope           && 'scope',
+                ] as (string | false)[]).filter(Boolean).join(', ');
                 errors.push({ sheet: 'discipline_requirements', row: row.row, input, message: `Missing required field(s): ${missing}` });
                 continue;
             }
@@ -460,7 +454,7 @@ export class ActionsService {
 
             const scope = row.scope.toLowerCase();
             if (!VALID_REQUIREMENT_SCOPES.has(scope)) {
-                errors.push({ sheet: 'discipline_requirements', row: row.row, input, message: `'${row.scope}' is not a valid scope. Valid values: ${[...VALID_REQUIREMENT_SCOPES].join(', ')}` });
+                errors.push({ sheet: 'discipline_requirements', row: row.row, input, message: `'${row.scope}' is not a valid scope. Valid: ${[...VALID_REQUIREMENT_SCOPES].join(', ')}` });
                 continue;
             }
 
@@ -471,15 +465,7 @@ export class ActionsService {
             }
             seen.set(key, row.row);
 
-            candidates.push({
-                row:          row.row,
-                action:       actionEntry.name,
-                discipline:   discEntry.codeName,
-                actionTypeId: actionEntry.id,
-                disciplineId: discEntry.id,
-                minLevel:     Math.round(row.minLevel),
-                scope,
-            });
+            candidates.push({ row: row.row, action: actionEntry.name, discipline: discEntry.codeName, actionTypeId: actionEntry.id, disciplineId: discEntry.id, minLevel: Math.round(row.minLevel), scope });
         }
         return candidates;
     }

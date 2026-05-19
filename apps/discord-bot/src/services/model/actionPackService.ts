@@ -1,3 +1,5 @@
+import { apiClient } from '../api';
+
 export interface UploadResultRow {
     row:     number;
     sheet:   string;
@@ -29,8 +31,6 @@ export interface ResetActionPackResult {
     deletedStepConfigs:            number;
     deletedDisciplineRequirements: number;
 }
-
-// ── Download shapes ───────────────────────────────────────────────────────────
 
 export interface DownloadBaseConfigRow {
     action:            string;
@@ -69,4 +69,25 @@ export interface ActionDownloadData {
     stepConfigs:            DownloadStepConfigRow[];
     disciplineRequirements: DownloadDisciplineRequirementRow[];
     templateData:           ActionPackTemplateData;
+}
+
+export function uploadActionPack(guildId: string, fileBuffer: Buffer) {
+    return apiClient.postMultipart<ActionPackUploadResult>(
+        '/model/actions/upload',
+        { guildId },
+        { name: 'actions.xlsx', buffer: fileBuffer },
+        120_000,
+    );
+}
+
+export function fetchActionTemplateData(guildId: string) {
+    return apiClient.get<ActionPackTemplateData>('/model/actions/template-data', { guildId });
+}
+
+export function fetchActionDownloadData(guildId: string) {
+    return apiClient.get<ActionDownloadData>('/model/actions/download', { guildId });
+}
+
+export function resetActionPack(guildId: string) {
+    return apiClient.post<ResetActionPackResult>('/model/actions/reset', { guildId });
 }

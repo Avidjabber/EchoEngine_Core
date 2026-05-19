@@ -128,4 +128,69 @@ export class ActionsRepository {
             update: { minLevel: data.minLevel, scope: data.scope },
         });
     }
+
+    findGuildBaseConfigsFull(guildId: string) {
+        return this.db.guild_ActionConfig.findMany({
+            where:  { guildId },
+            select: {
+                actionType:        { select: { name: true } },
+                energyCost:        true,
+                dailyLimit:        true,
+                minEntities:       true,
+                maxEntities:       true,
+                durationMinutes:   true,
+                baseFactionReward: true,
+            },
+        });
+    }
+
+    findGuildDisciplineRewardsFull(guildId: string) {
+        return this.db.actionType_DisciplineReward.findMany({
+            where:  { guildId },
+            select: {
+                actionType: { select: { name: true } },
+                discipline: { select: { codeName: true } },
+                xpAmount:       true,
+                recipientScope: true,
+            },
+        });
+    }
+
+    findGuildStepConfigsFull(guildId: string) {
+        return this.db.guild_ActionStep_Config.findMany({
+            where:  { guildId },
+            select: {
+                step:           { select: { codeName: true, actionType: { select: { name: true } } } },
+                proficiencyDef: { select: { codeName: true } },
+                stat:           { select: { name: true } },
+            },
+        });
+    }
+
+    findGuildDisciplineRequirementsFull(guildId: string) {
+        return this.db.actionType_DisciplineRequirement.findMany({
+            where:  { guildId },
+            select: {
+                actionType: { select: { name: true } },
+                discipline: { select: { codeName: true } },
+                minLevel:   true,
+                scope:      true,
+            },
+        });
+    }
+
+    async resetGuildConfigs(guildId: string) {
+        const [baseConfigs, disciplineRewards, stepConfigs, disciplineRequirements] = await Promise.all([
+            this.db.guild_ActionConfig.deleteMany({ where: { guildId } }),
+            this.db.actionType_DisciplineReward.deleteMany({ where: { guildId } }),
+            this.db.guild_ActionStep_Config.deleteMany({ where: { guildId } }),
+            this.db.actionType_DisciplineRequirement.deleteMany({ where: { guildId } }),
+        ]);
+        return {
+            deletedBaseConfigs:            baseConfigs.count,
+            deletedDisciplineRewards:      disciplineRewards.count,
+            deletedStepConfigs:            stepConfigs.count,
+            deletedDisciplineRequirements: disciplineRequirements.count,
+        };
+    }
 }

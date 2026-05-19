@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { UploadActionPackDto } from './dto/upload-action-pack.dto';
 import { ActionsService } from './actions.service';
 
 @Controller('model/actions')
@@ -14,9 +14,28 @@ export class ActionsController {
         return this.actionsService.getTemplateData(guildId);
     }
 
+    @Get('download')
+    download(@Query('guildId') guildId: string) {
+        if (!guildId) throw new BadRequestException('guildId is required');
+        return this.actionsService.downloadPack(guildId);
+    }
+
     @Post('upload')
     @HttpCode(HttpStatus.OK)
-    uploadPack(@Body() dto: UploadActionPackDto) {
-        return this.actionsService.uploadPack(dto);
+    @UseInterceptors(FileInterceptor('file'))
+    uploadPack(
+        @UploadedFile() file: Express.Multer.File,
+        @Body('guildId') guildId: string,
+    ) {
+        if (!guildId) throw new BadRequestException('guildId is required');
+        if (!file)    throw new BadRequestException('file is required');
+        return this.actionsService.uploadPack(guildId, file.buffer);
+    }
+
+    @Post('reset')
+    @HttpCode(HttpStatus.OK)
+    resetPack(@Body('guildId') guildId: string) {
+        if (!guildId) throw new BadRequestException('guildId is required');
+        return this.actionsService.resetPack(guildId);
     }
 }

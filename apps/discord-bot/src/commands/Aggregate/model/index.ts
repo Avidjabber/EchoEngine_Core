@@ -1,4 +1,9 @@
 import { ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { execute as actionsUpload }            from './actions/upload';
+import { execute as actionsUploadSheet }       from './actions/upload-sheet';
+import { execute as actionsTemplate }          from './actions/template';
+import { execute as actionsDownload }          from './actions/download';
+import { execute as actionsReset }             from './actions/reset';
 import { execute as conditionsUpload }         from './conditions/upload';
 import { execute as conditionsUploadSheet }    from './conditions/upload-sheet';
 import { execute as conditionsTemplate }       from './conditions/template';
@@ -291,6 +296,48 @@ export const data = new SlashCommandBuilder()
                     .setName('reset')
                     .setDescription('Delete all guild-defined condition definitions for this guild'),
             ),
+    )
+    .addSubcommandGroup(group =>
+        group
+            .setName('actions')
+            .setDescription('Manage guild action configuration')
+            .addSubcommand(sub =>
+                sub
+                    .setName('upload')
+                    .setDescription('Upload an action config pack from an .xlsx file')
+                    .addAttachmentOption(opt =>
+                        opt
+                            .setName('file')
+                            .setDescription('The .xlsx pack file to upload')
+                            .setRequired(true),
+                    ),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('upload-sheet')
+                    .setDescription('Upload an action config pack from a Google Sheets link')
+                    .addStringOption(opt =>
+                        opt
+                            .setName('link')
+                            .setDescription('A Google Sheets share link (must be set to Anyone with the link can view)')
+                            .setRequired(true),
+                    ),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('template')
+                    .setDescription('Download a blank .xlsx template for action config packs'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('download')
+                    .setDescription('Download this guild\'s current action config as an .xlsx file'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('reset')
+                    .setDescription('Clear all action configuration for this guild'),
+            ),
     );
 
 export const publicSubcommands = new Set(['upload', 'upload-sheet', 'template', 'download', 'reset']);
@@ -328,6 +375,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (group === 'items' && sub === 'template')     return itemsTemplate(interaction);
     if (group === 'items' && sub === 'download')     return itemsDownload(interaction);
     if (group === 'items' && sub === 'reset')        return itemsReset(interaction);
+
+    if (group === 'actions' && sub === 'upload')        return actionsUpload(interaction);
+    if (group === 'actions' && sub === 'upload-sheet') return actionsUploadSheet(interaction);
+    if (group === 'actions' && sub === 'template')     return actionsTemplate(interaction);
+    if (group === 'actions' && sub === 'download')     return actionsDownload(interaction);
+    if (group === 'actions' && sub === 'reset')        return actionsReset(interaction);
 
     if (group === 'conditions' && sub === 'upload')        return conditionsUpload(interaction);
     if (group === 'conditions' && sub === 'upload-sheet') return conditionsUploadSheet(interaction);
