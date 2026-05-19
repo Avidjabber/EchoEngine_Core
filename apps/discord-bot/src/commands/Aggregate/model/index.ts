@@ -1,4 +1,9 @@
 import { ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { execute as conditionsUpload }         from './conditions/upload';
+import { execute as conditionsUploadSheet }    from './conditions/upload-sheet';
+import { execute as conditionsTemplate }       from './conditions/template';
+import { execute as conditionsDownload }       from './conditions/download';
+import { execute as conditionsReset }          from './conditions/reset';
 import { execute as envConditionsUpload }       from './envconditions/upload';
 import { execute as envConditionsUploadSheet }  from './envconditions/upload-sheet';
 import { execute as envConditionsTemplate }    from './envconditions/template';
@@ -7,6 +12,7 @@ import { execute as envConditionsReset }       from './envconditions/reset';
 import { execute as proficienciesUpload }       from './proficiencies/upload';
 import { execute as proficienciesUploadSheet }  from './proficiencies/upload-sheet';
 import { execute as proficienciesTemplate }    from './proficiencies/template';
+import { execute as proficienciesDownload }     from './proficiencies/download';
 import { execute as proficienciesReset }       from './proficiencies/reset';
 import { execute as weatherStateUpload }       from './weatherstates/upload';
 import { execute as weatherStateUploadSheet }  from './weatherstates/upload-sheet';
@@ -21,6 +27,7 @@ import { execute as weatherPatternReset }      from './weatherpatterns/reset';
 import { execute as itemsUpload }              from './items/upload';
 import { execute as itemsUploadSheet }         from './items/upload-sheet';
 import { execute as itemsTemplate }            from './items/template';
+import { execute as itemsDownload }            from './items/download';
 import { execute as itemsReset }               from './items/reset';
 
 export const data = new SlashCommandBuilder()
@@ -105,6 +112,11 @@ export const data = new SlashCommandBuilder()
                 sub
                     .setName('template')
                     .setDescription('Download a blank .xlsx template for proficiency packs'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('download')
+                    .setDescription('Download this guild\'s current proficiency config as an .xlsx file'),
             )
             .addSubcommand(sub =>
                 sub
@@ -229,8 +241,55 @@ export const data = new SlashCommandBuilder()
             )
             .addSubcommand(sub =>
                 sub
+                    .setName('download')
+                    .setDescription('Download this guild\'s current item config as an .xlsx file'),
+            )
+            .addSubcommand(sub =>
+                sub
                     .setName('reset')
                     .setDescription('Delete all item definitions for this guild'),
+            ),
+    )
+    .addSubcommandGroup(group =>
+        group
+            .setName('conditions')
+            .setDescription('Manage guild condition definitions')
+            .addSubcommand(sub =>
+                sub
+                    .setName('upload')
+                    .setDescription('Upload a condition pack from an .xlsx file')
+                    .addAttachmentOption(opt =>
+                        opt
+                            .setName('file')
+                            .setDescription('The .xlsx pack file to upload')
+                            .setRequired(true),
+                    ),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('upload-sheet')
+                    .setDescription('Upload a condition pack from a Google Sheets link')
+                    .addStringOption(opt =>
+                        opt
+                            .setName('link')
+                            .setDescription('A Google Sheets share link (must be set to Anyone with the link can view)')
+                            .setRequired(true),
+                    ),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('template')
+                    .setDescription('Download a blank .xlsx template for condition packs'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('download')
+                    .setDescription('Download this guild\'s current condition config as an .xlsx file'),
+            )
+            .addSubcommand(sub =>
+                sub
+                    .setName('reset')
+                    .setDescription('Delete all guild-defined condition definitions for this guild'),
             ),
     );
 
@@ -249,6 +308,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (group === 'proficiencies' && sub === 'upload')        return proficienciesUpload(interaction);
     if (group === 'proficiencies' && sub === 'upload-sheet') return proficienciesUploadSheet(interaction);
     if (group === 'proficiencies' && sub === 'template')     return proficienciesTemplate(interaction);
+    if (group === 'proficiencies' && sub === 'download')     return proficienciesDownload(interaction);
     if (group === 'proficiencies' && sub === 'reset')        return proficienciesReset(interaction);
 
     if (group === 'weatherstate' && sub === 'upload')        return weatherStateUpload(interaction);
@@ -266,5 +326,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     if (group === 'items' && sub === 'upload')        return itemsUpload(interaction);
     if (group === 'items' && sub === 'upload-sheet') return itemsUploadSheet(interaction);
     if (group === 'items' && sub === 'template')     return itemsTemplate(interaction);
+    if (group === 'items' && sub === 'download')     return itemsDownload(interaction);
     if (group === 'items' && sub === 'reset')        return itemsReset(interaction);
+
+    if (group === 'conditions' && sub === 'upload')        return conditionsUpload(interaction);
+    if (group === 'conditions' && sub === 'upload-sheet') return conditionsUploadSheet(interaction);
+    if (group === 'conditions' && sub === 'template')     return conditionsTemplate(interaction);
+    if (group === 'conditions' && sub === 'download')     return conditionsDownload(interaction);
+    if (group === 'conditions' && sub === 'reset')        return conditionsReset(interaction);
 }

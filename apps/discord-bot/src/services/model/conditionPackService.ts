@@ -1,3 +1,5 @@
+import { apiClient } from '../api';
+
 export interface UploadResultRow {
     row:     number;
     sheet:   string;
@@ -36,8 +38,6 @@ export interface ResetConditionPackResult {
     failed:  Array<{ codeName: string; name: string; reason: string }>;
 }
 
-// ── Download shapes ───────────────────────────────────────────────────────────
-
 export interface DownloadConditionRow {
     codeName:                      string;
     name:                          string;
@@ -58,77 +58,16 @@ export interface DownloadConditionRow {
     blocksSomatic:                 boolean;
 }
 
-export interface DownloadStatEffectRow {
-    conditionCodeName: string;
-    stat:              string;
-    amount:            number;
-}
-
-export interface DownloadProfEffectRow {
-    conditionCodeName: string;
-    proficiencyCode:   string;
-    amount:            number | null;
-    hasDisadvantage:   boolean;
-}
-
-export interface DownloadCombatEffectRow {
-    conditionCodeName: string;
-    effectType:        string;
-    stat:              string | null;
-    flatModifier:      number | null;
-}
-
-export interface DownloadCombatStatEffectRow {
-    conditionCodeName: string;
-    effectDefCode:     string;
-    applicationChance: number;
-}
-
-export interface DownloadDamageModifierRow {
-    conditionCodeName: string;
-    damageType:        string;
-    isResistant:       boolean;
-}
-
-export interface DownloadEnvRuleRow {
-    conditionCodeName: string;
-    envConditionCode:  string;
-    relationType:      string;
-    value:             number;
-}
-
-export interface DownloadSymptomTagRow {
-    conditionCodeName: string;
-    symptom:           string;
-}
-
-export interface DownloadGrantedItemRow {
-    conditionCodeName:  string;
-    itemCodeName:       string;
-    grantedToSource:    boolean;
-    usesPerApplication: number | null;
-    minProgression:     number | null;
-    maxProgression:     number | null;
-}
-
-export interface DownloadLinkRow {
-    parentConditionCode: string;
-    childConditionCode:  string;
-    relationType:        string;
-    weight:              number;
-}
-
-export interface DownloadBehaviorEffectRow {
-    conditionCodeName:  string;
-    actionType:         string | null;
-    perspective:        string;
-    behaviorType:       string;
-    triggerChance:      number;
-    redirectTarget:     string | null;
-    biasWeight:         number | null;
-    restrictActionType: string | null;
-    restrictIsBlock:    boolean;
-}
+export interface DownloadStatEffectRow    { conditionCodeName: string; stat: string; amount: number }
+export interface DownloadProfEffectRow    { conditionCodeName: string; proficiencyCode: string; amount: number | null; hasDisadvantage: boolean }
+export interface DownloadCombatEffectRow  { conditionCodeName: string; effectType: string; stat: string | null; flatModifier: number | null }
+export interface DownloadCombatStatEffectRow { conditionCodeName: string; effectDefCode: string; applicationChance: number }
+export interface DownloadDamageModifierRow   { conditionCodeName: string; damageType: string; isResistant: boolean }
+export interface DownloadEnvRuleRow      { conditionCodeName: string; envConditionCode: string; relationType: string; value: number }
+export interface DownloadSymptomTagRow   { conditionCodeName: string; symptom: string }
+export interface DownloadGrantedItemRow  { conditionCodeName: string; itemCodeName: string; grantedToSource: boolean; usesPerApplication: number | null; minProgression: number | null; maxProgression: number | null }
+export interface DownloadLinkRow         { parentConditionCode: string; childConditionCode: string; relationType: string; weight: number }
+export interface DownloadBehaviorEffectRow { conditionCodeName: string; actionType: string | null; perspective: string; behaviorType: string; triggerChance: number; redirectTarget: string | null; biasWeight: number | null; restrictActionType: string | null; restrictIsBlock: boolean }
 
 export interface ConditionDownloadData {
     conditions:        DownloadConditionRow[];
@@ -143,4 +82,25 @@ export interface ConditionDownloadData {
     links:             DownloadLinkRow[];
     behaviorEffects:   DownloadBehaviorEffectRow[];
     templateData:      ConditionTemplateData;
+}
+
+export function uploadConditionPack(guildId: string, fileBuffer: Buffer) {
+    return apiClient.postMultipart<ConditionPackUploadResult>(
+        '/model/conditions/upload',
+        { guildId },
+        { name: 'conditions.xlsx', buffer: fileBuffer },
+        120_000,
+    );
+}
+
+export function fetchConditionTemplateData(guildId: string) {
+    return apiClient.get<ConditionTemplateData>('/model/conditions/template-data', { guildId });
+}
+
+export function fetchConditionDownloadData(guildId: string) {
+    return apiClient.get<ConditionDownloadData>('/model/conditions/download', { guildId });
+}
+
+export function resetConditionPack(guildId: string) {
+    return apiClient.post<ResetConditionPackResult>('/model/conditions/reset', { guildId });
 }

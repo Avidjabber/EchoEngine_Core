@@ -287,4 +287,69 @@ export class ConditionsRepository {
     deleteConditionById(id: number) {
         return this.db.conditionDef.delete({ where: { id } });
     }
+
+    findGuildConditionsFull(guildId: string) {
+        return this.db.conditionDef.findMany({
+            where:   { guildId, isEngineOwned: false },
+            orderBy: { codeName: 'asc' },
+            select: {
+                codeName:                      true,
+                name:                          true,
+                description:                   true,
+                conditionType:                 { select: { name: true } },
+                conditionContext:              { select: { name: true } },
+                isDeathSaveFailureConsequence: true,
+                isHidden:                      true,
+                isFatalAtCap:                  true,
+                progressionCap:                true,
+                dailyRollDC:                   true,
+                maxDays:                       true,
+                durationMinutes:               true,
+                spawnThreshold:                true,
+                contagionResistDC:             true,
+                energyDebuf:                   true,
+                blocksVerbal:                  true,
+                blocksSomatic:                 true,
+                statEffects: {
+                    select: { stat: { select: { name: true } }, amount: true },
+                },
+                proficiencyEffects: {
+                    select: { proficiency: { select: { codeName: true } }, amount: true, hasDisadvantage: true },
+                },
+                combatEffects: {
+                    select: { combatEffectType: { select: { name: true } }, stat: { select: { name: true } }, flatModifier: true },
+                },
+                combatStatEffects: {
+                    select: { effectDef: { select: { codeName: true } }, applicationChance: true },
+                },
+                damageModifiers: {
+                    select: { damageType: { select: { name: true } }, isResistant: true },
+                },
+                envRules: {
+                    select: { envCondition: { select: { codeName: true } }, relationType: { select: { name: true } }, value: true },
+                },
+                symptomTags: {
+                    select: { symptom: { select: { name: true } } },
+                },
+                grantedItems: {
+                    select: { item: { select: { codeName: true } }, grantedToSource: true, usesPerApplication: true, minProgression: true, maxProgression: true },
+                },
+                links: {
+                    select: { childCondition: { select: { codeName: true } }, relationType: { select: { name: true } }, weight: true },
+                },
+                behaviorEffects: {
+                    select: {
+                        actionType:     { select: { name: true } },
+                        perspective:    true,
+                        behaviorType:   { select: { name: true } },
+                        triggerChance:  true,
+                        redirectTarget: { select: { name: true } },
+                        biasWeight:     true,
+                        restrictAction: { select: { name: true } },
+                        restrictIsBlock: true,
+                    },
+                },
+            },
+        });
+    }
 }
