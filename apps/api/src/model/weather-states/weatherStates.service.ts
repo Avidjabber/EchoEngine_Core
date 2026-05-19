@@ -1,26 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import {
-    WeatherStateRowDto,
-    WeatherStateEnvConditionRowDto,
-    UploadWeatherStatePackDto,
-    UploadWeatherStatePackResult,
     WeatherStateTemplateData,
     ResetWeatherStatePackResult,
     WeatherStateSavedRow,
     WeatherStateOverwrittenRow,
-    RowError,
+    UploadResultRow,
+    UploadWeatherStatePackNewResult,
 } from './dto/upload-weather-state-pack.dto';
 import { WeatherStatesRepository } from './weatherStates.repository';
 import { validateName, validateCodeName } from '../../utils/contentFilter';
 import { ApiCacheService, CachedWeatherStateFull } from '../../cache/api-cache.service';
+import { parseWeatherStatePack, WeatherStateRow } from './weatherStates.parser';
 
 interface StateCandidate {
-    dto:             WeatherStateRowDto;
+    dto:             WeatherStateRow;
     codeName:        string;
     name:            string;
     isSevere:        boolean;
     envConditionIds: number[];
     existing:        CachedWeatherStateFull | undefined;
+}
+
+interface InternalError {
+    row:     number;
+    sheet:   string;
+    input:   string;
+    message: string;
 }
 
 function rowInput(...parts: (string | null | undefined)[]): string {
@@ -118,25 +123,26 @@ export class WeatherStatesService {
         return { deleted, failed };
     }
 
-    async uploadPack(dto: UploadWeatherStatePackDto): Promise<UploadWeatherStatePackResult> {
+    async uploadPack(guildId: string, fileBuffer: Buffer): Promise<UploadWeatherStatePackNewResult> {
+        const parsed = await parseWeatherStatePack(fileBuffer);
+
         let envConditions = this.cache.getEnvConditions();
-        let existing      = this.cache.getWeatherStates(dto.guildId);
+        let existing      = this.cache.getWeatherStates(guildId);
 
         const toFetch: Promise<void>[] = [];
         if (!envConditions) toFetch.push(
             this.repo.findAllEnvConditions().then(r => { envConditions = r; this.cache.setEnvConditions(r); }),
         );
         if (!existing) toFetch.push(
-            this.repo.findGuildWeatherStates(dto.guildId).then(r => { existing = r; this.cache.setWeatherStates(dto.guildId, r); }),
+            this.repo.findGuildWeatherStates(guildId).then(r => { existing = r; this.cache.setWeatherStates(guildId, r); }),
         );
         if (toFetch.length) await Promise.all(toFetch);
 
         const envConditionMap = new Map(envConditions!.map(e => [e.codeName.toLowerCase(), e]));
         const existingMap     = new Map(existing!.map(s => [s.codeName.toLowerCase(), s]));
 
-        // Index env condition rows by weather state codeName
-        const envConditionsByState = new Map<string, { ids: number[]; errors: RowError[] }>();
-        for (const row of dto.envConditions) {
+        const envConditionsByState = new Map<string, { ids: number[]; errors: InternalError[] }>();
+        for (const row of parsed.envConditions) {
             const input = rowInput(row.weatherState, row.envCondition);
 
             if (!row.weatherState || !row.envCondition) {
@@ -144,38 +150,37 @@ export class WeatherStatesService {
                     !row.weatherState && 'weather_state',
                     !row.envCondition && 'env_condition',
                 ] as (string | false)[]).filter(Boolean).join(', ');
-                // errors from the env_conditions sheet are collected but handled below
                 const key = (row.weatherState ?? '').toLowerCase();
                 if (!envConditionsByState.has(key)) envConditionsByState.set(key, { ids: [], errors: [] });
-                envConditionsByState.get(key)!.errors.push({ row: row.row, input, message: `Missing required field(s): ${missing}` });
+                envConditionsByState.get(key)!.errors.push({ row: row.row, sheet: 'env_conditions', input, message: `Missing required field(s): ${missing}` });
                 continue;
             }
 
-            const key    = row.weatherState.toLowerCase();
-            const ecKey  = row.envCondition.toLowerCase();
+            const key     = row.weatherState.toLowerCase();
+            const ecKey   = row.envCondition.toLowerCase();
             const ecMatch = envConditionMap.get(ecKey);
 
             if (!envConditionsByState.has(key)) envConditionsByState.set(key, { ids: [], errors: [] });
             const entry = envConditionsByState.get(key)!;
 
             if (!ecMatch) {
-                entry.errors.push({ row: row.row, input, message: `'${row.envCondition}' is not a valid env condition codeName` });
+                entry.errors.push({ row: row.row, sheet: 'env_conditions', input, message: `'${row.envCondition}' is not a valid env condition codeName` });
                 continue;
             }
 
             if (entry.ids.includes(ecMatch.id)) {
-                entry.errors.push({ row: row.row, input, message: `Duplicate env condition '${row.envCondition}' for this weather state` });
+                entry.errors.push({ row: row.row, sheet: 'env_conditions', input, message: `Duplicate env condition '${row.envCondition}' for this weather state` });
                 continue;
             }
 
             entry.ids.push(ecMatch.id);
         }
 
-        const errors:     RowError[]        = [];
+        const errors:     InternalError[]   = [];
         const candidates: StateCandidate[]  = [];
         const seen = new Map<string, number>();
 
-        for (const row of dto.states) {
+        for (const row of parsed.states) {
             const input = rowInput(row.codeName, row.name);
 
             if (!row.codeName || !row.name) {
@@ -183,31 +188,31 @@ export class WeatherStatesService {
                     !row.codeName && 'code_name',
                     !row.name     && 'name',
                 ] as (string | false)[]).filter(Boolean).join(', ');
-                errors.push({ row: row.row, input, message: `Missing required field(s): ${missing}` });
+                errors.push({ row: row.row, sheet: 'weather_states', input, message: `Missing required field(s): ${missing}` });
                 continue;
             }
 
             const codeNameCheck = validateCodeName(row.codeName);
             if (!codeNameCheck.valid) {
-                errors.push({ row: row.row, input, message: `code_name ${codeNameCheck.reason}` });
+                errors.push({ row: row.row, sheet: 'weather_states', input, message: `code_name ${codeNameCheck.reason}` });
                 continue;
             }
 
             const nameCheck = validateName(row.name);
             if (!nameCheck.valid) {
-                errors.push({ row: row.row, input, message: `name ${nameCheck.reason}` });
+                errors.push({ row: row.row, sheet: 'weather_states', input, message: `name ${nameCheck.reason}` });
                 continue;
             }
 
             const cleanCodeName = codeNameCheck.value;
 
             if (seen.has(cleanCodeName)) {
-                errors.push({ row: row.row, input, message: `Duplicate of row ${seen.get(cleanCodeName)}` });
+                errors.push({ row: row.row, sheet: 'weather_states', input, message: `Duplicate of row ${seen.get(cleanCodeName)}` });
                 continue;
             }
             seen.set(cleanCodeName, row.row);
 
-            const ecEntry        = envConditionsByState.get(cleanCodeName) ?? { ids: [], errors: [] };
+            const ecEntry         = envConditionsByState.get(cleanCodeName) ?? { ids: [], errors: [] };
             const envConditionIds = ecEntry.ids;
             errors.push(...ecEntry.errors);
 
@@ -221,17 +226,16 @@ export class WeatherStatesService {
             });
         }
 
-        // Catch env_condition rows that reference a weather_state not present in the states sheet
         for (const [key, entry] of envConditionsByState) {
             if (!seen.has(key)) {
                 errors.push(...entry.errors);
-                for (const id of entry.ids) {
+                for (const _id of entry.ids) {
                     errors.push({
                         row:     0,
+                        sheet:   'env_conditions',
                         input:   key,
                         message: `env_conditions sheet references weather state '${key}' which is not in the weather_states sheet`,
                     });
-                    void id;
                 }
             }
         }
@@ -245,8 +249,8 @@ export class WeatherStatesService {
 
         const toSave = candidates.filter(c => {
             if (!c.existing) return true;
-            const newIds    = new Set(c.envConditionIds);
-            const oldIds    = existingEnvMap.get(c.codeName) ?? new Set<number>();
+            const newIds     = new Set(c.envConditionIds);
+            const oldIds     = existingEnvMap.get(c.codeName) ?? new Set<number>();
             const envChanged = newIds.size !== oldIds.size || [...newIds].some(id => !oldIds.has(id));
             return (
                 c.existing.name     !== c.name     ||
@@ -261,7 +265,7 @@ export class WeatherStatesService {
         for (const c of toSave) {
             try {
                 await this.repo.upsertWeatherState({
-                    guildId:         dto.guildId,
+                    guildId,
                     codeName:        c.codeName,
                     name:            c.name,
                     isSevere:        c.isSevere,
@@ -279,13 +283,35 @@ export class WeatherStatesService {
                     });
                 }
             } catch {
-                errors.push({ row: c.dto.row, input: rowInput(c.codeName, c.name), message: 'Failed to save to database' });
+                errors.push({ row: c.dto.row, sheet: 'weather_states', input: rowInput(c.codeName, c.name), message: 'Failed to save to database' });
             }
         }
 
-        errors.sort((a, b) => a.row - b.row);
+        this.cache.invalidateWeatherStates(guildId);
 
-        this.cache.invalidateWeatherStates(dto.guildId);
-        return { saved, errors, overwrites };
+        const overwrittenCodes = new Set(overwrites.map(o => o.codeName));
+        const rows: UploadResultRow[] = [
+            ...saved.map(s => ({
+                row:    s.row,
+                sheet:  'weather_states',
+                input:  `${s.codeName} | ${s.name}`,
+                status: overwrittenCodes.has(s.codeName) ? 'updated' as const : 'added' as const,
+            })),
+            ...errors.map(e => ({
+                row:    e.row,
+                sheet:  e.sheet,
+                input:  e.input,
+                status: 'failed' as const,
+                reason: e.message,
+            })),
+        ];
+        rows.sort((a, b) => a.row - b.row);
+
+        return {
+            added:   saved.length - overwrites.length,
+            updated: overwrites.length,
+            failed:  errors.length,
+            rows,
+        };
     }
 }

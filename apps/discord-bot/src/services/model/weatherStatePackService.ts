@@ -1,36 +1,22 @@
 import { apiClient } from '../api';
-import type { WeatherStateRow, WeatherStateEnvConditionRow } from '../../utils/parsers/weatherStatePack';
 
 export interface WeatherStateTemplateData {
     envConditions: string[];
 }
 
-export interface WeatherStateSavedRow {
-    row:      number;
-    codeName: string;
-    name:     string;
-    isSevere: boolean;
-}
-
-export interface WeatherStateOverwrittenRow {
-    row:       number;
-    codeName:  string;
-    oldName:   string;
-    newName:   string;
-    oldSevere: boolean;
-    newSevere: boolean;
-}
-
-export interface RowError {
+export interface UploadResultRow {
     row:     number;
+    sheet:   string;
     input:   string;
-    message: string;
+    status:  'added' | 'updated' | 'failed';
+    reason?: string;
 }
 
-export interface WeatherStatePackUploadResult {
-    saved:      WeatherStateSavedRow[];
-    errors:     RowError[];
-    overwrites: WeatherStateOverwrittenRow[];
+export interface UploadWeatherStatePackResult {
+    added:   number;
+    updated: number;
+    failed:  number;
+    rows:    UploadResultRow[];
 }
 
 export interface ResetWeatherStatePackResult {
@@ -53,25 +39,12 @@ export async function fetchAllWeatherStates(guildId: string) {
     return apiClient.get<WeatherStateListItem[]>('/model/weather-states/all', { guildId });
 }
 
-export async function uploadWeatherStatePack(
-    guildId:       string,
-    states:        WeatherStateRow[],
-    envConditions: WeatherStateEnvConditionRow[],
-) {
-    return apiClient.post<WeatherStatePackUploadResult>('/model/weather-states/upload', {
-        guildId,
-        states: states.map(r => ({
-            row:      r.row,
-            codeName: r.codeName,
-            name:     r.name,
-            isSevere: r.isSevere,
-        })),
-        envConditions: envConditions.map(r => ({
-            row:          r.row,
-            weatherState: r.weatherState,
-            envCondition: r.envCondition,
-        })),
-    }, 120_000);
+export async function uploadWeatherStatePack(guildId: string, fileBuffer: Buffer) {
+    return apiClient.postMultipart<UploadWeatherStatePackResult>(
+        '/model/weather-states/upload',
+        { guildId },
+        { name: 'weather-states.xlsx', buffer: fileBuffer },
+    );
 }
 
 export async function resetWeatherStatePack(guildId: string) {

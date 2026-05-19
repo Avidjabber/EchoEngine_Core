@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { UploadWeatherStatePackDto } from './dto/upload-weather-state-pack.dto';
 import { WeatherStatesService } from './weatherStates.service';
 
 @Controller('model/weather-states')
@@ -50,7 +50,13 @@ export class WeatherStatesController {
 
     @Post('upload')
     @HttpCode(HttpStatus.OK)
-    uploadPack(@Body() dto: UploadWeatherStatePackDto) {
-        return this.weatherStatesService.uploadPack(dto);
+    @UseInterceptors(FileInterceptor('file'))
+    async uploadPack(
+        @UploadedFile() file: Express.Multer.File,
+        @Body('guildId') guildId: string,
+    ) {
+        if (!guildId) throw new BadRequestException('guildId is required');
+        if (!file)    throw new BadRequestException('file is required');
+        return this.weatherStatesService.uploadPack(guildId, file.buffer);
     }
 }

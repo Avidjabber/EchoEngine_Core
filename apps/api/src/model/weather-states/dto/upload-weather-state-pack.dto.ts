@@ -45,6 +45,21 @@ export interface UploadWeatherStatePackResult {
     overwrites: WeatherStateOverwrittenRow[];
 }
 
+export interface UploadResultRow {
+    row:     number;
+    sheet:   string;
+    input:   string;
+    status:  'added' | 'updated' | 'failed';
+    reason?: string;
+}
+
+export interface UploadWeatherStatePackNewResult {
+    added:   number;
+    updated: number;
+    failed:  number;
+    rows:    UploadResultRow[];
+}
+
 export interface WeatherStateTemplateData {
     envConditions: string[];
 }
