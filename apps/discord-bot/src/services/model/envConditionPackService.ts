@@ -134,6 +134,40 @@ export async function fetchEnvConditionDownloadData(guildId: string) {
     );
 }
 
+export type UpsertModifierResult =
+    | { status: 'saved'; modifierType: 'world';       condition: string; effectType: string; relation: string; value: number | null }
+    | { status: 'saved'; modifierType: 'stat';        condition: string; stat: string; value: number }
+    | { status: 'saved'; modifierType: 'proficiency'; condition: string; proficiency: string; value: number; hasDisadvantage: boolean; hasAdvantage: boolean }
+    | { status: 'failed'; reason: string };
+
+export function upsertEnvConditionModifier(
+    guildId:      string,
+    modifierType: 'world' | 'stat' | 'proficiency',
+    params: {
+        condition:        string;
+        effectType?:      string;
+        relation?:        string;
+        value?:           number | null;
+        stat?:            string;
+        proficiency?:     string;
+        hasDisadvantage?: boolean;
+        hasAdvantage?:    boolean;
+    },
+) {
+    return apiClient.post<UpsertModifierResult>('/model/env-conditions/upsert-modifier', {
+        guildId,
+        modifierType,
+        condition:       params.condition,
+        effectType:      params.effectType,
+        relation:        params.relation,
+        value:           params.value,
+        stat:            params.stat,
+        proficiency:     params.proficiency,
+        hasDisadvantage: params.hasDisadvantage,
+        hasAdvantage:    params.hasAdvantage,
+    });
+}
+
 export async function uploadEnvConditionPack(guildId: string, fileBuffer: Buffer) {
     return apiClient.postMultipart<UploadEnvConditionResult>(
         '/model/env-conditions/upload',

@@ -44,6 +44,27 @@ export class EnvConditionsController {
         return result;
     }
 
+    @Post('upsert-modifier')
+    @HttpCode(HttpStatus.OK)
+    upsertModifier(
+        @Body('guildId')          guildId:          string,
+        @Body('modifierType')     modifierType:     string,
+        @Body('condition')        condition:        string,
+        @Body('effectType')       effectType:       string | undefined,
+        @Body('relation')         relation:         string | undefined,
+        @Body('value')            value:            number | undefined,
+        @Body('stat')             stat:             string | undefined,
+        @Body('proficiency')      proficiency:      string | undefined,
+        @Body('hasDisadvantage')  hasDisadvantage:  boolean | undefined,
+        @Body('hasAdvantage')     hasAdvantage:     boolean | undefined,
+    ) {
+        if (!guildId || !modifierType || !condition) throw new BadRequestException('guildId, modifierType, and condition are required');
+        if (!['world', 'stat', 'proficiency'].includes(modifierType)) throw new BadRequestException('modifierType must be world, stat, or proficiency');
+        return this.envConditionsService.upsertModifier(guildId, modifierType as 'world' | 'stat' | 'proficiency', {
+            condition, effectType, relation, value, stat, proficiency, hasDisadvantage, hasAdvantage,
+        });
+    }
+
     @Post('modifier-remove')
     @HttpCode(HttpStatus.OK)
     async removeModifier(

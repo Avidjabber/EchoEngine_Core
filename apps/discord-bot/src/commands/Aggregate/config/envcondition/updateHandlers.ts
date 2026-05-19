@@ -14,7 +14,7 @@ import { colors } from '../../../../core/colors';
 import {
     fetchEnvConditionInfoData,
     fetchEnvConditionTemplateData,
-    uploadEnvConditionPack,
+    upsertEnvConditionModifier,
     removeEnvConditionModifier,
 } from '../../../../services/model/envConditionPackService';
 import { getCachedEnvConditionInfo, setCachedEnvConditionInfo, invalidateEnvConditionInfoCache } from './infoState';
@@ -618,32 +618,25 @@ export async function handleEcEdit(interaction: ButtonInteraction): Promise<void
 async function doSave(interaction: ButtonInteraction, state: EnvConditionUpdateState): Promise<void> {
     const { modifierType, codeName, guildId } = state;
 
-    const worldRows = modifierType === 'world' ? [{
-        row: 1, condition: codeName, effectType: state.effectType!, relation: state.relation!, value: state.value,
-    }] : [];
+    const params = modifierType === 'world'
+        ? { condition: codeName, effectType: state.effectType!, relation: state.relation!, value: state.value }
+        : modifierType === 'stat'
+        ? { condition: codeName, stat: state.stat!, value: state.value! }
+        : { condition: codeName, proficiency: state.proficiency!, value: state.value ?? 0, hasDisadvantage: state.hasDisadvantage, hasAdvantage: state.hasAdvantage };
 
-    const statRows = modifierType === 'stat' ? [{
-        row: 1, condition: codeName, stat: state.stat!, value: state.value!,
-    }] : [];
-
-    const profRows = modifierType === 'proficiency' ? [{
-        row: 1, condition: codeName, proficiency: state.proficiency!, value: state.value ?? 0, hasDisadvantage: state.hasDisadvantage, hasAdvantage: state.hasAdvantage,
-    }] : [];
-
-    const result = await uploadEnvConditionPack(guildId, worldRows, statRows, profRows);
+    const result = await upsertEnvConditionModifier(guildId, modifierType, params);
 
     if (!result.success) {
         await replyError(interaction, messages.errorGeneric);
         return;
     }
 
-    const { saved, errors } = result.value!;
+    const upserted = result.value!;
 
-    if (errors.length > 0) {
-        const errorText = errors.map(e => `-# ${e.message}`).join('\n');
+    if (upserted.status === 'failed') {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
-            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: `Save failed:\n${errorText}` }] }],
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: `Save failed:\n-# ${upserted.reason}` }] }],
         } as never);
         return;
     }
@@ -652,11 +645,10 @@ async function doSave(interaction: ButtonInteraction, state: EnvConditionUpdateS
     invalidateEnvConditionInfoCache(guildId);
 
     const typeLabel = modifierType === 'world' ? 'world' : modifierType === 'stat' ? 'stat' : 'proficiency';
-    const savedItem = saved[0];
     let detail = '';
-    if (savedItem?.sheet === 'world_modifiers')       detail = describeWorldModifier(savedItem.effectType, savedItem.relation, savedItem.value);
-    if (savedItem?.sheet === 'stat_modifiers')        detail = describeStatModifier(savedItem.stat, savedItem.value);
-    if (savedItem?.sheet === 'proficiency_modifiers') detail = describeProfModifier(savedItem.proficiency, savedItem.value, savedItem.hasDisadvantage, savedItem.hasAdvantage);
+    if (upserted.modifierType === 'world')       detail = describeWorldModifier(upserted.effectType, upserted.relation, upserted.value);
+    if (upserted.modifierType === 'stat')        detail = describeStatModifier(upserted.stat, upserted.value);
+    if (upserted.modifierType === 'proficiency') detail = describeProfModifier(upserted.proficiency, upserted.value, upserted.hasDisadvantage, upserted.hasAdvantage);
 
     await interaction.followUp({
         flags:      MessageFlags.IsComponentsV2,

@@ -13,6 +13,7 @@ import {
     ProficiencyModifierDto,
     UploadResultRow,
     UploadEnvConditionNewResult,
+    UpsertModifierResult,
 } from './dto/upload-env-condition-pack.dto';
 import { parseEnvConditionPack } from './envConditions.parser';
 import { EnvConditionsRepository } from './envConditions.repository';
@@ -340,6 +341,99 @@ export class EnvConditionsService {
             failed:  errors.length,
             rows,
         };
+    }
+
+    async upsertModifier(
+        guildId:      string,
+        modifierType: 'world' | 'stat' | 'proficiency',
+        params: {
+            condition:       string;
+            effectType?:     string | null;
+            relation?:       string | null;
+            value?:          number | null;
+            stat?:           string | null;
+            proficiency?:    string | null;
+            hasDisadvantage?: boolean;
+            hasAdvantage?:    boolean;
+        },
+    ): Promise<UpsertModifierResult> {
+        let envConditions = this.cache.getEnvConditions();
+        if (!envConditions) {
+            envConditions = await this.repo.findAllEnvConditions();
+            this.cache.setEnvConditions(envConditions);
+        }
+        const envConditionId = new Map(envConditions.map(e => [e.codeName.toLowerCase(), e.id])).get(params.condition.toLowerCase());
+        if (envConditionId === undefined) {
+            return { status: 'failed', reason: `'${params.condition}' is not a valid condition codeName` };
+        }
+
+        if (modifierType === 'world') {
+            let effectTypes = this.cache.getEffectTypes();
+            if (!effectTypes) { effectTypes = await this.repo.findEnvModifierEffectTypes(); this.cache.setEffectTypes(effectTypes); }
+            let relationTypes = this.cache.getRelationTypes();
+            if (!relationTypes) { relationTypes = await this.repo.findEnvConditionRelationTypes(); this.cache.setRelationTypes(relationTypes); }
+
+            const { effectType, relation, value } = params;
+            if (!effectType || !relation) {
+                const missing = [!effectType && 'effectType', !relation && 'relation'].filter(Boolean).join(', ');
+                return { status: 'failed', reason: `Missing required field(s): ${missing}` };
+            }
+            const etLower  = effectType.toLowerCase();
+            const relLower = relation.toLowerCase();
+
+            const effectTypeId = new Map(effectTypes.map(e => [e.name.toLowerCase(), e.id])).get(etLower);
+            if (effectTypeId === undefined) return { status: 'failed', reason: `'${effectType}' is not a valid effect type` };
+
+            if (!VALID_WORLD_MODIFIER_RELATIONS.has(relLower)) return { status: 'failed', reason: `'${relation}' is not valid — use increase, decrease, or block` };
+            const relationTypeId = new Map(relationTypes.map(r => [r.name.toLowerCase(), r.id])).get(relLower);
+            if (relationTypeId === undefined) return { status: 'failed', reason: `'${relation}' is not a recognised relation type` };
+
+            const isBlock = relLower === 'block';
+            if (!isBlock && (value === null || value === undefined)) return { status: 'failed', reason: `value is required when relation is '${relation}'` };
+            if (!isBlock && (value! < 0 || value! > 5)) return { status: 'failed', reason: `value must be between 0.0 and 5.0` };
+
+            const dbValue = isBlock ? null : value ?? null;
+            await this.repo.upsertEnvConditionModifier({ guildId, envConditionId, effectTypeId, relationTypeId, value: dbValue });
+            this.cache.invalidateGuildModifiers(guildId);
+            return { status: 'saved', modifierType: 'world', condition: params.condition, effectType, relation: relLower, value: dbValue };
+        }
+
+        if (modifierType === 'stat') {
+            let stats = this.cache.getStats();
+            if (!stats) { stats = await this.repo.findAllStats(); this.cache.setStats(stats); }
+
+            const { stat, value } = params;
+            if (!stat) return { status: 'failed', reason: 'Missing required field: stat' };
+            if (value === null || value === undefined) return { status: 'failed', reason: 'Missing required field: value' };
+
+            const statId = new Map(stats.map(s => [s.name.toLowerCase(), s.id])).get(stat.toLowerCase());
+            if (statId === undefined) return { status: 'failed', reason: `'${stat}' is not a valid stat name` };
+
+            await this.repo.upsertStatModifier({ guildId, envConditionId, statId, value });
+            this.cache.invalidateGuildModifiers(guildId);
+            return { status: 'saved', modifierType: 'stat', condition: params.condition, stat, value };
+        }
+
+        // proficiency
+        let proficiencyDefs = this.cache.getProfDefsSlim(guildId);
+        if (!proficiencyDefs) { proficiencyDefs = await this.repo.findProficiencyDefs(guildId); this.cache.setProfDefsSlim(guildId, proficiencyDefs); }
+
+        const { proficiency } = params;
+        if (!proficiency) return { status: 'failed', reason: 'Missing required field: proficiency' };
+
+        const proficiencyDefId = new Map(proficiencyDefs.map(p => [p.codeName.toLowerCase(), p.id])).get(proficiency.toLowerCase());
+        if (proficiencyDefId === undefined) return { status: 'failed', reason: `'${proficiency}' is not a valid proficiency codeName for this guild` };
+
+        const value          = params.value          ?? 0;
+        const hasDisadvantage = params.hasDisadvantage ?? false;
+        const hasAdvantage    = params.hasAdvantage    ?? false;
+
+        const activeCount = (value !== 0 ? 1 : 0) + (hasDisadvantage ? 1 : 0) + (hasAdvantage ? 1 : 0);
+        if (activeCount > 1) return { status: 'failed', reason: 'Only one of value, has_disadvantage, or has_advantage may be set' };
+
+        await this.repo.upsertProficiencyModifier({ guildId, envConditionId, proficiencyDefId, value, hasDisadvantage, hasAdvantage });
+        this.cache.invalidateGuildModifiers(guildId);
+        return { status: 'saved', modifierType: 'proficiency', condition: params.condition, proficiency, value, hasDisadvantage, hasAdvantage };
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

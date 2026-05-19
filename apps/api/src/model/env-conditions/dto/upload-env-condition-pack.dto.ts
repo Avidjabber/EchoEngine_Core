@@ -101,6 +101,12 @@ export interface EnvConditionResetResult {
     proficiencyModifiers: number;
 }
 
+export type UpsertModifierResult =
+    | { status: 'saved'; modifierType: 'world';       condition: string; effectType: string; relation: string; value: number | null }
+    | { status: 'saved'; modifierType: 'stat';        condition: string; stat: string; value: number }
+    | { status: 'saved'; modifierType: 'proficiency'; condition: string; proficiency: string; value: number; hasDisadvantage: boolean; hasAdvantage: boolean }
+    | { status: 'failed'; reason: string };
+
 export interface EnvConditionListItem {
     codeName: string;
     name:     string;
