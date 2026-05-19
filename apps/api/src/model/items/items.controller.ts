@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { UploadItemPackDto } from './dto/upload-item-pack.dto';
 import { ItemsService } from './items.service';
 
 @Controller('model/items')
@@ -16,8 +16,14 @@ export class ItemsController {
 
     @Post('upload')
     @HttpCode(HttpStatus.OK)
-    uploadPack(@Body() dto: UploadItemPackDto) {
-        return this.itemsService.uploadPack(dto);
+    @UseInterceptors(FileInterceptor('file'))
+    uploadPack(
+        @UploadedFile() file: Express.Multer.File,
+        @Body('guildId') guildId: string,
+    ) {
+        if (!guildId) throw new BadRequestException('guildId is required');
+        if (!file)    throw new BadRequestException('file is required');
+        return this.itemsService.uploadPack(guildId, file.buffer);
     }
 
     @Post('reset')

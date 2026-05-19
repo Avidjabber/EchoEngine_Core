@@ -1,26 +1,29 @@
 import { Injectable } from '@nestjs/common';
 import {
-    ItemRowDto,
-    ItemEquipmentRowDto,
-    ItemActionRowDto,
-    ItemEffectRowDto,
-    UploadItemPackDto,
-    UploadItemPackResult,
     ItemTemplateData,
     ResetItemPackResult,
     ItemSavedRow,
     ItemOverwrittenRow,
-    RowError,
+    UploadResultRow,
+    UploadItemPackNewResult,
 } from './dto/upload-item-pack.dto';
 import { ItemsRepository } from './items.repository';
 import { validateName, validateCodeName, validateDescription } from '../../utils/contentFilter';
+import { parseItemPack, ItemRow, ItemEquipmentRow, ItemFoodRow } from './items.parser';
 
 function rowInput(...parts: (string | number | null | undefined)[]): string {
     return parts.map(p => (p === null || p === undefined) ? '?' : String(p)).join(' | ');
 }
 
+interface InternalError {
+    row:     number;
+    sheet:   string;
+    input:   string;
+    message: string;
+}
+
 interface EquipmentCandidate {
-    dto:                  ItemEquipmentRowDto;
+    dto:                  ItemEquipmentRow;
     slotTypeId:           number;
     slotCost:             number;
     label:                string | null;
@@ -76,7 +79,7 @@ interface ActionCandidate {
 }
 
 interface ItemCandidate {
-    dto:             ItemRowDto;
+    dto:             ItemRow;
     codeName:        string;
     name:            string;
     description:     string | null;
@@ -166,7 +169,9 @@ export class ItemsService {
         return { deleted, failed };
     }
 
-    async uploadPack(dto: UploadItemPackDto): Promise<UploadItemPackResult> {
+    async uploadPack(guildId: string, fileBuffer: Buffer): Promise<UploadItemPackNewResult> {
+        const parsed = await parseItemPack(fileBuffer);
+
         const [
             measurementTypes, fuelTypes, itemTypes, slotTypes, damageTypes,
             stats, actionCategories, itemActionTypes, targetScopes, behaviorEffectTypes,
@@ -185,63 +190,63 @@ export class ItemsService {
             this.repo.findAllItemInteractions(),
             this.repo.findAllSymptoms(),
             this.repo.findItemRelationTypes(),
-            this.repo.findGuildSpeciesCodes(dto.guildId),
-            this.repo.findGuildEventDefCodes(dto.guildId),
-            this.repo.findGuildItems(dto.guildId),
+            this.repo.findGuildSpeciesCodes(guildId),
+            this.repo.findGuildEventDefCodes(guildId),
+            this.repo.findGuildItems(guildId),
         ]);
 
-        const measurementTypeMap  = new Map(measurementTypes.map(x  => [x.name.toLowerCase(),   x]));
-        const fuelTypeMap         = new Map(fuelTypes.map(x         => [x.name.toLowerCase(),   x]));
-        const itemTypeMap         = new Map(itemTypes.map(x         => [x.name.toLowerCase(),   x]));
-        const slotTypeMap         = new Map(slotTypes.map(x         => [x.name.toLowerCase(),   x]));
-        const damageTypeMap       = new Map(damageTypes.map(x       => [x.name.toLowerCase(),   x]));
-        const statMap             = new Map(stats.map(x             => [x.name.toLowerCase(),   x]));
-        const actionCategoryMap   = new Map(actionCategories.map(x  => [x.name.toLowerCase(),   x]));
-        const itemActionTypeMap   = new Map(itemActionTypes.map(x   => [x.name.toLowerCase(),   x]));
-        const targetScopeMap      = new Map(targetScopes.map(x      => [x.name.toLowerCase(),   x]));
-        const behaviorEffectMap   = new Map(behaviorEffectTypes.map(x => [x.name.toLowerCase(), x]));
-        const itemInteractionMap  = new Map(itemInteractions.map(x  => [x.name.toLowerCase(),   x]));
-        const symptomMap          = new Map(symptoms.map(x          => [x.name.toLowerCase(),   x]));
-        const relationTypeMap     = new Map(relationTypes.map(x     => [x.name.toLowerCase(),   x]));
+        const measurementTypeMap  = new Map(measurementTypes.map(x  => [x.name.toLowerCase(),     x]));
+        const fuelTypeMap         = new Map(fuelTypes.map(x         => [x.name.toLowerCase(),     x]));
+        const itemTypeMap         = new Map(itemTypes.map(x         => [x.name.toLowerCase(),     x]));
+        const slotTypeMap         = new Map(slotTypes.map(x         => [x.name.toLowerCase(),     x]));
+        const damageTypeMap       = new Map(damageTypes.map(x       => [x.name.toLowerCase(),     x]));
+        const statMap             = new Map(stats.map(x             => [x.name.toLowerCase(),     x]));
+        const actionCategoryMap   = new Map(actionCategories.map(x  => [x.name.toLowerCase(),     x]));
+        const itemActionTypeMap   = new Map(itemActionTypes.map(x   => [x.name.toLowerCase(),     x]));
+        const targetScopeMap      = new Map(targetScopes.map(x      => [x.name.toLowerCase(),     x]));
+        const behaviorEffectMap   = new Map(behaviorEffectTypes.map(x => [x.name.toLowerCase(),   x]));
+        const itemInteractionMap  = new Map(itemInteractions.map(x  => [x.name.toLowerCase(),     x]));
+        const symptomMap          = new Map(symptoms.map(x          => [x.name.toLowerCase(),     x]));
+        const relationTypeMap     = new Map(relationTypes.map(x     => [x.name.toLowerCase(),     x]));
         const speciesMap          = new Map(speciesCodes.map(x      => [x.codeName.toLowerCase(), x]));
         const eventDefMap         = new Map(eventDefCodes.map(x     => [x.codeName.toLowerCase(), x]));
         const existingMap         = new Map(existingItems.map(x     => [x.codeName.toLowerCase(), x]));
 
         // ── Index sub-rows by itemCodeName ─────────────────────────────────────
-        const equipByItem  = new Map<string, { rows: ItemEquipmentRowDto[]; errors: RowError[] }>();
-        const foodByItem   = new Map<string, { row: RowError | null; data: typeof dto.food[0] | null }>();
-        const actionByItem = new Map<string, { rows: ItemActionRowDto[]; errors: RowError[] }>();
-        const effectByActionKey = new Map<string, { rows: ItemEffectRowDto[]; errors: RowError[] }>();
+        const equipByItem       = new Map<string, { rows: ItemEquipmentRow[]; errors: InternalError[] }>();
+        const foodByItem        = new Map<string, ItemFoodRow>();
+        const actionByItem      = new Map<string, { rows: ItemActionRow[];    errors: InternalError[] }>();
+        const effectByActionKey = new Map<string, { rows: ItemEffectRow[];    errors: InternalError[] }>();
 
-        for (const row of dto.equipment) {
+        for (const row of parsed.equipment) {
             const key = (row.itemCodeName ?? '').toLowerCase();
             if (!equipByItem.has(key)) equipByItem.set(key, { rows: [], errors: [] });
             equipByItem.get(key)!.rows.push(row);
         }
 
-        for (const row of dto.food) {
+        for (const row of parsed.food) {
             const key = (row.itemCodeName ?? '').toLowerCase();
-            foodByItem.set(key, { row: null, data: row });
+            foodByItem.set(key, row);
         }
 
-        for (const row of dto.actions) {
+        for (const row of parsed.actions) {
             const key = (row.itemCodeName ?? '').toLowerCase();
             if (!actionByItem.has(key)) actionByItem.set(key, { rows: [], errors: [] });
             actionByItem.get(key)!.rows.push(row);
         }
 
-        for (const row of dto.effects) {
+        for (const row of parsed.effects) {
             const key = `${(row.itemCodeName ?? '').toLowerCase()}::${(row.interaction ?? '').toLowerCase()}`;
             if (!effectByActionKey.has(key)) effectByActionKey.set(key, { rows: [], errors: [] });
             effectByActionKey.get(key)!.rows.push(row);
         }
 
         // ── Validate item rows ─────────────────────────────────────────────────
-        const errors:     RowError[]      = [];
+        const errors:     InternalError[] = [];
         const candidates: ItemCandidate[] = [];
         const seen = new Map<string, number>();
 
-        for (const row of dto.items) {
+        for (const row of parsed.items) {
             const input = rowInput(row.codeName, row.name);
 
             if (!row.codeName || !row.name) {
@@ -249,19 +254,19 @@ export class ItemsService {
                     !row.codeName && 'code_name',
                     !row.name     && 'name',
                 ] as (string | false)[]).filter(Boolean).join(', ');
-                errors.push({ row: row.row, input, message: `Missing required field(s): ${missing}` });
+                errors.push({ row: row.row, sheet: 'items', input, message: `Missing required field(s): ${missing}` });
                 continue;
             }
 
             const codeNameCheck = validateCodeName(row.codeName);
             if (!codeNameCheck.valid) {
-                errors.push({ row: row.row, input, message: `code_name ${codeNameCheck.reason}` });
+                errors.push({ row: row.row, sheet: 'items', input, message: `code_name ${codeNameCheck.reason}` });
                 continue;
             }
 
             const nameCheck = validateName(row.name);
             if (!nameCheck.valid) {
-                errors.push({ row: row.row, input, message: `name ${nameCheck.reason}` });
+                errors.push({ row: row.row, sheet: 'items', input, message: `name ${nameCheck.reason}` });
                 continue;
             }
 
@@ -269,7 +274,7 @@ export class ItemsService {
             if (row.description) {
                 const descCheck = validateDescription(row.description);
                 if (!descCheck.valid) {
-                    errors.push({ row: row.row, input, message: `description ${descCheck.reason}` });
+                    errors.push({ row: row.row, sheet: 'items', input, message: `description ${descCheck.reason}` });
                     continue;
                 }
                 cleanDescription = descCheck.value;
@@ -278,7 +283,7 @@ export class ItemsService {
             const cleanCodeName = codeNameCheck.value;
 
             if (seen.has(cleanCodeName)) {
-                errors.push({ row: row.row, input, message: `Duplicate of row ${seen.get(cleanCodeName)}` });
+                errors.push({ row: row.row, sheet: 'items', input, message: `Duplicate of row ${seen.get(cleanCodeName)}` });
                 continue;
             }
             seen.set(cleanCodeName, row.row);
@@ -287,7 +292,7 @@ export class ItemsService {
             if (row.measurementType) {
                 const mt = measurementTypeMap.get(row.measurementType.toLowerCase());
                 if (!mt) {
-                    errors.push({ row: row.row, input, message: `'${row.measurementType}' is not a valid measurement_type` });
+                    errors.push({ row: row.row, sheet: 'items', input, message: `'${row.measurementType}' is not a valid measurement_type` });
                     continue;
                 }
                 measurementTypeId = mt.id;
@@ -297,7 +302,7 @@ export class ItemsService {
             if (row.fuelType) {
                 const ft = fuelTypeMap.get(row.fuelType.toLowerCase());
                 if (!ft) {
-                    errors.push({ row: row.row, input, message: `'${row.fuelType}' is not a valid fuel_type` });
+                    errors.push({ row: row.row, sheet: 'items', input, message: `'${row.fuelType}' is not a valid fuel_type` });
                     continue;
                 }
                 fuelTypeId = ft.id;
@@ -310,7 +315,7 @@ export class ItemsService {
                 for (const typeName of typeNames) {
                     const itemType = itemTypeMap.get(typeName.toLowerCase());
                     if (!itemType) {
-                        errors.push({ row: row.row, input, message: `'${typeName}' is not a valid item type` });
+                        errors.push({ row: row.row, sheet: 'items', input, message: `'${typeName}' is not a valid item type` });
                         typeError = true;
                         break;
                     }
@@ -320,21 +325,21 @@ export class ItemsService {
             }
 
             // ── Validate equipment profiles for this item ──────────────────────
-            const equipEntry   = equipByItem.get(cleanCodeName) ?? { rows: [], errors: [] };
-            const equipErrors  = [...equipEntry.errors];
+            const equipEntry  = equipByItem.get(cleanCodeName) ?? { rows: [], errors: [] };
+            const equipErrors: InternalError[] = [...equipEntry.errors];
             const validProfiles: EquipmentCandidate[] = [];
 
             for (const er of equipEntry.rows) {
                 const ei = rowInput(er.itemCodeName, er.slotType);
 
                 if (!er.slotType) {
-                    equipErrors.push({ row: er.row, input: ei, message: 'Missing required field: slot_type' });
+                    equipErrors.push({ row: er.row, sheet: 'equipment', input: ei, message: 'Missing required field: slot_type' });
                     continue;
                 }
 
                 const slotType = slotTypeMap.get(er.slotType.toLowerCase());
                 if (!slotType) {
-                    equipErrors.push({ row: er.row, input: ei, message: `'${er.slotType}' is not a valid slot_type` });
+                    equipErrors.push({ row: er.row, sheet: 'equipment', input: ei, message: `'${er.slotType}' is not a valid slot_type` });
                     continue;
                 }
 
@@ -364,7 +369,7 @@ export class ItemsService {
                 const lookupErrors = [dtRes, edtRes, acRes, atRes, tsRes, beRes, hsRes, dsRes, hlRes, ssRes, spRes, evRes]
                     .map(r => r.err).filter((e): e is string => e !== null);
                 if (lookupErrors.length > 0) {
-                    for (const msg of lookupErrors) equipErrors.push({ row: er.row, input: ei, message: msg });
+                    for (const msg of lookupErrors) equipErrors.push({ row: er.row, sheet: 'equipment', input: ei, message: msg });
                     continue;
                 }
 
@@ -418,8 +423,8 @@ export class ItemsService {
             // ── Food profile for this item ─────────────────────────────────────
             const foodEntry = foodByItem.get(cleanCodeName);
             let foodProfile: ItemCandidate['foodProfile'] = null;
-            if (foodEntry?.data) {
-                const fd = foodEntry.data;
+            if (foodEntry) {
+                const fd = foodEntry;
                 foodProfile = {
                     meatNutritionPerGram:  fd.meatNutritionPerGram  ?? 0,
                     meatHydrationPerGram:  fd.meatHydrationPerGram  ?? 0,
@@ -430,7 +435,7 @@ export class ItemsService {
 
             // ── Actions + effects for this item ────────────────────────────────
             const actionEntry  = actionByItem.get(cleanCodeName) ?? { rows: [], errors: [] };
-            const actionErrors = [...actionEntry.errors];
+            const actionErrors: InternalError[] = [...actionEntry.errors];
             const validActions: ActionCandidate[] = [];
             const interactionsSeen = new Set<number>();
 
@@ -438,26 +443,26 @@ export class ItemsService {
                 const ai = rowInput(ar.itemCodeName, ar.interaction);
 
                 if (!ar.interaction) {
-                    actionErrors.push({ row: ar.row, input: ai, message: 'Missing required field: interaction' });
+                    actionErrors.push({ row: ar.row, sheet: 'actions', input: ai, message: 'Missing required field: interaction' });
                     continue;
                 }
 
                 const interaction = itemInteractionMap.get(ar.interaction.toLowerCase());
                 if (!interaction) {
-                    actionErrors.push({ row: ar.row, input: ai, message: `'${ar.interaction}' is not a valid item interaction` });
+                    actionErrors.push({ row: ar.row, sheet: 'actions', input: ai, message: `'${ar.interaction}' is not a valid item interaction` });
                     continue;
                 }
 
                 if (interactionsSeen.has(interaction.id)) {
-                    actionErrors.push({ row: ar.row, input: ai, message: `Duplicate interaction '${ar.interaction}' for this item` });
+                    actionErrors.push({ row: ar.row, sheet: 'actions', input: ai, message: `Duplicate interaction '${ar.interaction}' for this item` });
                     continue;
                 }
                 interactionsSeen.add(interaction.id);
 
                 // Effects for this action key
-                const effectKey   = `${cleanCodeName}::${ar.interaction.toLowerCase()}`;
-                const effectEntry = effectByActionKey.get(effectKey) ?? { rows: [], errors: [] };
-                const effectErrors = [...effectEntry.errors];
+                const effectKey    = `${cleanCodeName}::${ar.interaction.toLowerCase()}`;
+                const effectEntry  = effectByActionKey.get(effectKey) ?? { rows: [], errors: [] };
+                const effectErrors: InternalError[] = [...effectEntry.errors];
                 const validEffects: ActionCandidate['effects'] = [];
 
                 for (const efr of effectEntry.rows) {
@@ -468,19 +473,19 @@ export class ItemsService {
                             !efr.symptom      && 'symptom',
                             !efr.relationType && 'relation_type',
                         ] as (string | false)[]).filter(Boolean).join(', ');
-                        effectErrors.push({ row: efr.row, input: efi, message: `Missing required field(s): ${missing}` });
+                        effectErrors.push({ row: efr.row, sheet: 'effects', input: efi, message: `Missing required field(s): ${missing}` });
                         continue;
                     }
 
                     const symptom = symptomMap.get(efr.symptom.toLowerCase());
                     if (!symptom) {
-                        effectErrors.push({ row: efr.row, input: efi, message: `'${efr.symptom}' is not a recognised symptom` });
+                        effectErrors.push({ row: efr.row, sheet: 'effects', input: efi, message: `'${efr.symptom}' is not a recognised symptom` });
                         continue;
                     }
 
                     const relationType = relationTypeMap.get(efr.relationType.toLowerCase());
                     if (!relationType) {
-                        effectErrors.push({ row: efr.row, input: efi, message: `'${efr.relationType}' is not a valid relation_type for item effects` });
+                        effectErrors.push({ row: efr.row, sheet: 'effects', input: efi, message: `'${efr.relationType}' is not a valid relation_type for item effects` });
                         continue;
                     }
 
@@ -512,13 +517,13 @@ export class ItemsService {
                 averageWeight:   row.averageWeight  ?? 0,
                 weightVariance:  row.weightVariance ?? 0,
                 averageVolume:   row.averageVolume  ?? 0,
-                rotCap:          row.rotCap        ?? null,
-                maxDurability:   row.maxDurability ?? null,
-                maxUses:         row.maxUses       ?? null,
-                maxDailyUses:    row.maxDailyUses  ?? null,
-                fuelValue:       row.fuelValue     ?? null,
+                rotCap:          row.rotCap         ?? null,
+                maxDurability:   row.maxDurability  ?? null,
+                maxUses:         row.maxUses        ?? null,
+                maxDailyUses:    row.maxDailyUses   ?? null,
+                fuelValue:       row.fuelValue      ?? null,
                 fuelTypeId,
-                isEphemeral:     row.isEphemeral   ?? false,
+                isEphemeral:     row.isEphemeral    ?? false,
                 equipmentProfiles: validProfiles,
                 foodProfile,
                 actions:         validActions,
@@ -526,26 +531,26 @@ export class ItemsService {
             });
         }
 
-        // Orphaned equipment/action rows with no matching item row
+        // Orphaned sub-sheet rows with no matching item
         for (const [key, entry] of equipByItem) {
             if (!seen.has(key) && entry.rows.length > 0) {
-                errors.push({ row: 0, input: key, message: `equipment sheet references item '${key}' which is not in the items sheet` });
+                errors.push({ row: 0, sheet: 'equipment', input: key, message: `equipment sheet references item '${key}' which is not in the items sheet` });
             }
         }
         for (const [key, entry] of actionByItem) {
             if (!seen.has(key) && entry.rows.length > 0) {
-                errors.push({ row: 0, input: key, message: `actions sheet references item '${key}' which is not in the items sheet` });
+                errors.push({ row: 0, sheet: 'actions', input: key, message: `actions sheet references item '${key}' which is not in the items sheet` });
             }
         }
 
-        // ── Upsert all candidates sequentially to avoid exhausting the connection pool ──
+        // ── Upsert all candidates sequentially ────────────────────────────────
         const saved:      ItemSavedRow[]       = [];
         const overwrites: ItemOverwrittenRow[] = [];
 
         for (const c of candidates) {
             try {
                 await this.repo.upsertItem({
-                    guildId:           dto.guildId,
+                    guildId,
                     codeName:          c.codeName,
                     name:              c.name,
                     description:       c.description,
@@ -567,19 +572,36 @@ export class ItemsService {
                 });
                 saved.push({ row: c.dto.row, codeName: c.codeName, name: c.name });
                 if (c.existing) {
-                    overwrites.push({
-                        row:      c.dto.row,
-                        codeName: c.codeName,
-                        oldName:  c.existing.name,
-                        newName:  c.name,
-                    });
+                    overwrites.push({ row: c.dto.row, codeName: c.codeName, oldName: c.existing.name, newName: c.name });
                 }
             } catch {
-                errors.push({ row: c.dto.row, input: rowInput(c.codeName, c.name), message: 'Failed to save to database' });
+                errors.push({ row: c.dto.row, sheet: 'items', input: rowInput(c.codeName, c.name), message: 'Failed to save to database' });
             }
         }
 
-        errors.sort((a, b) => a.row - b.row);
-        return { saved, overwrites, errors };
+        const overwrittenCodes = new Set(overwrites.map(o => o.codeName));
+        const rows: UploadResultRow[] = [
+            ...saved.map(s => ({
+                row:    s.row,
+                sheet:  'items',
+                input:  `${s.codeName} | ${s.name}`,
+                status: overwrittenCodes.has(s.codeName) ? 'updated' as const : 'added' as const,
+            })),
+            ...errors.map(e => ({
+                row:    e.row,
+                sheet:  e.sheet,
+                input:  e.input,
+                status: 'failed' as const,
+                reason: e.message,
+            })),
+        ];
+        rows.sort((a, b) => a.row - b.row);
+
+        return {
+            added:   saved.length - overwrites.length,
+            updated: overwrites.length,
+            failed:  errors.length,
+            rows,
+        };
     }
 }

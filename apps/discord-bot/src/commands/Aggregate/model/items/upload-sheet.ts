@@ -1,12 +1,21 @@
 import axios from 'axios';
-import { ChatInputCommandInteraction } from 'discord.js';
+import { AttachmentBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { messages } from '@echoengine/shared';
+import { colors } from '../../../../core/colors';
 import { replyError, replyLoading } from '../../../../core/reply';
-import { parseItemPack, ParsedItemPack } from '../../../../utils/parsers/itemPack';
-import { uploadItemPack } from '../../../../services/model/itemPackService';
-import { buildUploadMessages } from './uploadComponents';
+import { uploadItemPack, UploadResultRow } from '../../../../services/model/itemPackService';
 
 const SHEETS_ID_REGEX = /\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/;
+
+function buildCsv(rows: UploadResultRow[]): Buffer {
+    const lines = ['row,sheet,identifier,status,reason'];
+    for (const r of rows) {
+        const identifier = `"${r.input.replace(/"/g, '""')}"`;
+        const reason     = r.reason ? `"${r.reason.replace(/"/g, '""')}"` : '';
+        lines.push(`${r.row},${r.sheet},${identifier},${r.status},${reason}`);
+    }
+    return Buffer.from(lines.join('\n'), 'utf-8');
+}
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const link = interaction.options.getString('link', true);
@@ -31,26 +40,32 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return;
     }
 
-    let parsed: ParsedItemPack;
-    try {
-        parsed = await parseItemPack(buffer);
-    } catch {
-        await replyError(interaction, 'The sheet could not be read. Make sure it follows the item pack template.');
-        return;
-    }
-
-    const result = await uploadItemPack(interaction.guildId!, parsed);
+    const result = await uploadItemPack(interaction.guildId!, buffer);
 
     if (!result.success) {
         await replyError(interaction, messages.errorGeneric);
         return;
     }
 
-    const { saved, overwrites, errors } = result.value!;
+    const { added, updated, failed, rows } = result.value!;
 
-    const [first, ...rest] = buildUploadMessages(interaction.user.id, saved, overwrites, errors);
-    await interaction.editReply(first as never);
-    for (const msg of rest) {
-        await interaction.followUp(msg as never);
-    }
+    const accentColor = failed > 0 && (added + updated) > 0 ? colors.warning
+        : failed > 0                                         ? colors.error
+        : colors.success;
+
+    const summary = [
+        '## Item Upload',
+        `**${added}** item${added !== 1 ? 's' : ''} added`,
+        `**${updated}** item${updated !== 1 ? 's' : ''} updated`,
+        `**${failed}** row${failed !== 1 ? 's' : ''} failed validation`,
+    ].join('\n');
+
+    const csv = new AttachmentBuilder(buildCsv(rows), { name: 'items-result.csv' });
+
+    await interaction.editReply({ content: 'Upload complete. See the attached file for a full breakdown.', files: [csv] });
+
+    await interaction.followUp({
+        flags:      MessageFlags.IsComponentsV2,
+        components: [{ type: 17, accent_color: accentColor, components: [{ type: 10, content: summary }] }],
+    } as never);
 }

@@ -1,29 +1,18 @@
 import { apiClient } from '../api';
-import type { ParsedItemPack } from '../../utils/parsers/itemPack';
 
-export interface RowError {
+export interface UploadResultRow {
     row:     number;
+    sheet:   string;
     input:   string;
-    message: string;
-}
-
-export interface ItemSavedRow {
-    row:      number;
-    codeName: string;
-    name:     string;
-}
-
-export interface ItemOverwrittenRow {
-    row:      number;
-    codeName: string;
-    oldName:  string;
-    newName:  string;
+    status:  'added' | 'updated' | 'failed';
+    reason?: string;
 }
 
 export interface ItemPackUploadResult {
-    saved:      ItemSavedRow[];
-    overwrites: ItemOverwrittenRow[];
-    errors:     RowError[];
+    added:   number;
+    updated: number;
+    failed:  number;
+    rows:    UploadResultRow[];
 }
 
 export interface ItemTemplateData {
@@ -54,15 +43,13 @@ export function fetchItemTemplateData(guildId: string) {
     return apiClient.get<ItemTemplateData>('/model/items/template-data', { guildId });
 }
 
-export function uploadItemPack(guildId: string, pack: ParsedItemPack) {
-    return apiClient.post<ItemPackUploadResult>('/model/items/upload', {
-        guildId,
-        items:     pack.items,
-        equipment: pack.equipment,
-        food:      pack.food,
-        actions:   pack.actions,
-        effects:   pack.effects,
-    }, 120_000);
+export function uploadItemPack(guildId: string, fileBuffer: Buffer) {
+    return apiClient.postMultipart<ItemPackUploadResult>(
+        '/model/items/upload',
+        { guildId },
+        { name: 'items.xlsx', buffer: fileBuffer },
+        120_000,
+    );
 }
 
 export function resetItemPack(guildId: string) {
