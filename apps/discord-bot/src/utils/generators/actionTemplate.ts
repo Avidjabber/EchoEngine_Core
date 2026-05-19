@@ -125,9 +125,21 @@ function addReferenceSheet(workbook: ExcelJS.Workbook, data: ActionPackTemplateD
 
 export async function generateActionTemplate(data: ActionPackTemplateData): Promise<Buffer> {
     const workbook = new ExcelJS.Workbook();
+
     addBaseConfigsSheet(workbook);
+    const baseSheet = workbook.getWorksheet('base_configs')!;
+    for (const action of data.actionTypes) {
+        baseSheet.addRow({ action, energy_cost: '', daily_limit: '', min_entities: '', max_entities: '', duration_minutes: '', base_faction_reward: '' });
+    }
+
     addDisciplineRewardsSheet(workbook);
+
     addStepConfigsSheet(workbook);
+    const stepSheet = workbook.getWorksheet('step_configs')!;
+    for (const s of data.steps) {
+        stepSheet.addRow({ action: s.action, step: s.step, proficiency: '', stat: '' });
+    }
+
     addDisciplineRequirementsSheet(workbook);
     addReferenceSheet(workbook, data);
     const raw = await workbook.xlsx.writeBuffer();
