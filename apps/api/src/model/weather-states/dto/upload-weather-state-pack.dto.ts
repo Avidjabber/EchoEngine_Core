@@ -1,22 +1,3 @@
-export interface WeatherStateRowDto {
-    row:      number;
-    codeName: string | null;
-    name:     string | null;
-    isSevere: boolean | null;
-}
-
-export interface WeatherStateEnvConditionRowDto {
-    row:          number;
-    weatherState: string | null;
-    envCondition: string | null;
-}
-
-export interface UploadWeatherStatePackDto {
-    guildId:       string;
-    states:        WeatherStateRowDto[];
-    envConditions: WeatherStateEnvConditionRowDto[];
-}
-
 export interface WeatherStateSavedRow {
     row:      number;
     codeName: string;
@@ -31,18 +12,6 @@ export interface WeatherStateOverwrittenRow {
     newName:    string;
     oldSevere:  boolean;
     newSevere:  boolean;
-}
-
-export interface RowError {
-    row:     number;
-    input:   string;
-    message: string;
-}
-
-export interface UploadWeatherStatePackResult {
-    saved:      WeatherStateSavedRow[];
-    errors:     RowError[];
-    overwrites: WeatherStateOverwrittenRow[];
 }
 
 export interface UploadResultRow {

@@ -22,13 +22,6 @@ export interface ProficiencyModifierDto {
     hasAdvantage:    boolean | null;
 }
 
-export interface UploadEnvConditionPackDto {
-    guildId:              string;
-    worldModifiers:       WorldModifierDto[];
-    statModifiers:        StatModifierDto[];
-    proficiencyModifiers: ProficiencyModifierDto[];
-}
-
 export type SavedRow =
     | { sheet: 'world_modifiers';       row: number; condition: string; effectType: string; relation: string; value: number | null }
     | { sheet: 'stat_modifiers';        row: number; condition: string; stat: string; value: number }

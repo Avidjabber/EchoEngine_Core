@@ -1,26 +1,32 @@
 import { Injectable } from '@nestjs/common';
 import {
-    ProficiencyRowDto,
-    UploadProficiencyPackDto,
-    UploadProficiencyPackResult,
     ProficiencyTemplateData,
     ResetProficiencyPackResult,
     ProficiencySavedRow,
     ProficiencyOverwrittenRow,
-    RowError,
+    UploadResultRow,
+    UploadProficiencyPackNewResult,
+    UpsertOneProficiencyResult,
 } from './dto/upload-proficiency-pack.dto';
 import { ProficienciesRepository } from './proficiencies.repository';
 import { validateName, validateCodeName, validateDescription } from '../../utils/contentFilter';
 import { ApiCacheService, CachedProfDefFull } from '../../cache/api-cache.service';
+import { parseProficiencyPack, ProficiencyRow } from './proficiencies.parser';
 
 interface Candidate {
-    dto:         ProficiencyRowDto;
+    dto:         ProficiencyRow;
     codeName:    string;
     name:        string;
     description: string | null;
     statId:      number;
     statName:    string;
     existing:    CachedProfDefFull | undefined;
+}
+
+interface InternalError {
+    row:     number;
+    input:   string;
+    message: string;
 }
 
 function rowInput(...parts: (string | null | undefined)[]): string {
@@ -117,27 +123,77 @@ export class ProficienciesService {
         return { deleted, failed };
     }
 
-    async uploadPack(dto: UploadProficiencyPackDto): Promise<UploadProficiencyPackResult> {
+    async upsertOne(
+        guildId:     string,
+        codeName:    string,
+        name:        string,
+        stat:        string,
+        description: string | null,
+    ): Promise<UpsertOneProficiencyResult> {
+        const codeNameCheck = validateCodeName(codeName);
+        if (!codeNameCheck.valid) return { status: 'failed', reason: `code_name ${codeNameCheck.reason}` };
+
+        const nameCheck = validateName(name);
+        if (!nameCheck.valid) return { status: 'failed', reason: `name ${nameCheck.reason}` };
+
+        let cleanDescription: string | null = null;
+        if (description) {
+            const descCheck = validateDescription(description);
+            if (!descCheck.valid) return { status: 'failed', reason: `description ${descCheck.reason}` };
+            cleanDescription = descCheck.value;
+        }
+
+        const cleanCodeName = codeNameCheck.value;
+        const cleanName     = nameCheck.value;
+
         let stats    = this.cache.getStats();
-        let profDefs = this.cache.getProfDefsFull(dto.guildId);
+        let profDefs = this.cache.getProfDefsFull(guildId);
+        const toFetch: Promise<void>[] = [];
+        if (!stats)    toFetch.push(this.repo.findAllStats().then(r => { stats = r; this.cache.setStats(r); }));
+        if (!profDefs) toFetch.push(this.repo.findGuildProficiencyDefs(guildId).then(r => { profDefs = r; this.cache.setProfDefsFull(guildId, r); }));
+        if (toFetch.length) await Promise.all(toFetch);
+
+        const statEntry = stats!.find(s => s.name.toLowerCase() === stat.toLowerCase());
+        if (!statEntry) return { status: 'failed', reason: `'${stat}' is not a valid stat name` };
+
+        const existing = profDefs!.find(d => d.codeName.toLowerCase() === cleanCodeName);
+
+        try {
+            await this.repo.upsertProficiencyDef({ guildId, codeName: cleanCodeName, name: cleanName, description: cleanDescription, statId: statEntry.id });
+            this.cache.invalidateProfDefs(guildId);
+        } catch {
+            return { status: 'failed', reason: 'Failed to save to database' };
+        }
+
+        if (existing) {
+            return { status: 'updated', codeName: cleanCodeName, name: cleanName, stat: statEntry.name, oldName: existing.name, oldStat: existing.stat.name };
+        }
+        return { status: 'added', codeName: cleanCodeName, name: cleanName, stat: statEntry.name };
+    }
+
+    async uploadPack(guildId: string, fileBuffer: Buffer): Promise<UploadProficiencyPackNewResult> {
+        const parsed = await parseProficiencyPack(fileBuffer);
+
+        let stats    = this.cache.getStats();
+        let profDefs = this.cache.getProfDefsFull(guildId);
 
         const toFetch: Promise<void>[] = [];
         if (!stats)    toFetch.push(
             this.repo.findAllStats().then(r => { stats = r; this.cache.setStats(r); }),
         );
         if (!profDefs) toFetch.push(
-            this.repo.findGuildProficiencyDefs(dto.guildId).then(r => { profDefs = r; this.cache.setProfDefsFull(dto.guildId, r); }),
+            this.repo.findGuildProficiencyDefs(guildId).then(r => { profDefs = r; this.cache.setProfDefsFull(guildId, r); }),
         );
         if (toFetch.length) await Promise.all(toFetch);
 
         const statMap     = new Map(stats!.map(s    => [s.name.toLowerCase(), s]));
         const existingMap = new Map(profDefs!.map(d => [d.codeName.toLowerCase(), d]));
 
-        const errors:     RowError[]   = [];
-        const candidates: Candidate[]  = [];
+        const errors:     InternalError[] = [];
+        const candidates: Candidate[]     = [];
         const seen = new Map<string, number>();
 
-        for (const row of dto.rows) {
+        for (const row of parsed.proficiencies) {
             const input = rowInput(row.codeName, row.name, row.stat);
 
             if (!row.codeName || !row.name || !row.stat) {
@@ -200,8 +256,8 @@ export class ProficienciesService {
         const toSave = candidates.filter(c => {
             if (!c.existing) return true;
             return (
-                c.existing.name              !== c.name        ||
-                c.existing.stat.id           !== c.statId      ||
+                c.existing.name                  !== c.name        ||
+                c.existing.stat.id               !== c.statId      ||
                 (c.existing.description ?? null) !== c.description
             );
         });
@@ -212,7 +268,7 @@ export class ProficienciesService {
         for (const c of toSave) {
             try {
                 await this.repo.upsertProficiencyDef({
-                    guildId:     dto.guildId,
+                    guildId,
                     codeName:    c.codeName,
                     name:        c.name,
                     description: c.description,
@@ -234,9 +290,29 @@ export class ProficienciesService {
             }
         }
 
-        errors.sort((a, b) => a.row - b.row);
+        this.cache.invalidateProfDefs(guildId);
 
-        this.cache.invalidateProfDefs(dto.guildId);
-        return { saved, errors, overwrites };
+        const overwrittenCodes = new Set(overwrites.map(o => o.codeName));
+        const rows: UploadResultRow[] = [
+            ...saved.map(s => ({
+                row:    s.row,
+                input:  `${s.codeName} | ${s.name}`,
+                status: overwrittenCodes.has(s.codeName) ? 'updated' as const : 'added' as const,
+            })),
+            ...errors.map(e => ({
+                row:    e.row,
+                input:  e.input,
+                status: 'failed' as const,
+                reason: e.message,
+            })),
+        ];
+        rows.sort((a, b) => a.row - b.row);
+
+        return {
+            added:   saved.length - overwrites.length,
+            updated: overwrites.length,
+            failed:  errors.length,
+            rows,
+        };
     }
 }

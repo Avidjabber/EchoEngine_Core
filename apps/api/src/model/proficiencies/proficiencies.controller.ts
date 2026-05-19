@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { UploadProficiencyPackDto } from './dto/upload-proficiency-pack.dto';
 import { ProficienciesService } from './proficiencies.service';
 
 @Controller('model/proficiencies')
@@ -48,9 +48,28 @@ export class ProficienciesController {
         return this.proficienciesService.resetPack(guildId);
     }
 
+    @Post('upsert-one')
+    @HttpCode(HttpStatus.OK)
+    async upsertOne(
+        @Body('guildId')     guildId:     string,
+        @Body('codeName')    codeName:    string,
+        @Body('name')        name:        string,
+        @Body('stat')        stat:        string,
+        @Body('description') description: string | null,
+    ) {
+        if (!guildId || !codeName || !name || !stat) throw new BadRequestException('guildId, codeName, name, and stat are required');
+        return this.proficienciesService.upsertOne(guildId, codeName, name, stat, description ?? null);
+    }
+
     @Post('upload')
     @HttpCode(HttpStatus.OK)
-    uploadPack(@Body() dto: UploadProficiencyPackDto) {
-        return this.proficienciesService.uploadPack(dto);
+    @UseInterceptors(FileInterceptor('file'))
+    async uploadPack(
+        @UploadedFile() file: Express.Multer.File,
+        @Body('guildId') guildId: string,
+    ) {
+        if (!guildId) throw new BadRequestException('guildId is required');
+        if (!file)    throw new BadRequestException('file is required');
+        return this.proficienciesService.uploadPack(guildId, file.buffer);
     }
 }

@@ -3,7 +3,7 @@ import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
 import { getAddState, setAddState, clearAddState } from './addState';
 import { buildPreviewCard } from './addComponents';
-import { uploadProficiencyPack } from '../../../../services/model/proficiencyPackService';
+import { upsertProficiency } from '../../../../services/model/proficiencyPackService';
 
 function extractField(interaction: ModalSubmitInteraction, customId: string): string {
     const rawComponents: any[] = (interaction as any).data?.components ?? [];
@@ -80,13 +80,7 @@ export async function handleProfAddFinalize(interaction: ButtonInteraction): Pro
 
     await interaction.deferUpdate();
 
-    const result = await uploadProficiencyPack(guildId, [{
-        row:         1,
-        codeName:    state.codeName,
-        name:        state.name,
-        stat:        state.stat,
-        description: state.description || null,
-    }]);
+    const result = await upsertProficiency(guildId, state.codeName, state.name, state.stat, state.description || null);
 
     if (!result.success) {
         await interaction.editReply({
@@ -96,36 +90,32 @@ export async function handleProfAddFinalize(interaction: ButtonInteraction): Pro
         return;
     }
 
-    const { saved, errors, overwrites } = result.value!;
+    const upserted = result.value!;
 
-    if (errors.length > 0) {
-        const errorText = errors.map(e => `-# ${e.message}`).join('\n');
+    if (upserted.status === 'failed') {
         await interaction.editReply({
             flags:      MessageFlags.IsComponentsV2,
-            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: `Failed to save:\n${errorText}` }] }],
+            components: [{ type: 17, accent_color: colors.error, components: [{ type: 10, content: `Failed to save:\n-# ${upserted.reason}` }] }],
         } as never);
         return;
     }
 
     clearAddState(userId, guildId);
 
-    const overwrite = overwrites[0];
-    const item      = saved[0];
-
     let content: string;
     let accentColor: number;
 
-    if (overwrite) {
-        const nameChanged = overwrite.oldName !== overwrite.newName;
-        const statChanged = overwrite.oldStat !== overwrite.newStat;
+    if (upserted.status === 'updated') {
+        const nameChanged = upserted.oldName !== upserted.name;
+        const statChanged = upserted.oldStat !== upserted.stat;
         const detail = [
-            nameChanged ? `name: ${overwrite.oldName} → ${overwrite.newName}` : null,
-            statChanged ? `stat: ${overwrite.oldStat} → ${overwrite.newStat}` : null,
+            nameChanged ? `name: ${upserted.oldName} → ${upserted.name}` : null,
+            statChanged ? `stat: ${upserted.oldStat} → ${upserted.stat}` : null,
         ].filter(Boolean).join(', ') || 'description updated';
-        content     = `## Proficiency Updated\nUpdated by <@${userId}>\n\n-# ${overwrite.codeName} — ${detail}`;
+        content     = `## Proficiency Updated\nUpdated by <@${userId}>\n\n-# ${upserted.codeName} — ${detail}`;
         accentColor = colors.special;
     } else {
-        content     = `## Proficiency Added\nAdded by <@${userId}>\n\n-# ${item.codeName} | ${item.name} | ${item.stat}`;
+        content     = `## Proficiency Added\nAdded by <@${userId}>\n\n-# ${upserted.codeName} | ${upserted.name} | ${upserted.stat}`;
         accentColor = colors.success;
     }
 

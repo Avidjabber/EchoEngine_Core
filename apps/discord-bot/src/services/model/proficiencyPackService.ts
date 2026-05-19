@@ -1,37 +1,22 @@
 import { apiClient } from '../api';
-import type { ProficiencyRow } from '../../utils/parsers/proficiencyPack';
 
 export interface ProficiencyTemplateData {
     stats:         string[];
     proficiencies: string[];
 }
 
-export interface ProficiencySavedRow {
-    row:      number;
-    codeName: string;
-    name:     string;
-    stat:     string;
-}
-
-export interface ProficiencyOverwrittenRow {
-    row:      number;
-    codeName: string;
-    oldName:  string;
-    newName:  string;
-    oldStat:  string;
-    newStat:  string;
-}
-
-export interface RowError {
+export interface UploadResultRow {
     row:     number;
     input:   string;
-    message: string;
+    status:  'added' | 'updated' | 'failed';
+    reason?: string;
 }
 
 export interface ProficiencyPackUploadResult {
-    saved:      ProficiencySavedRow[];
-    errors:     RowError[];
-    overwrites: ProficiencyOverwrittenRow[];
+    added:   number;
+    updated: number;
+    failed:  number;
+    rows:    UploadResultRow[];
 }
 
 export interface ResetProficiencyPackResult {
@@ -78,17 +63,29 @@ export async function deleteProficiency(guildId: string, codeName: string) {
     return apiClient.post<{ deleted: boolean }>('/model/proficiencies/delete-one', { guildId, codeName });
 }
 
-export async function uploadProficiencyPack(guildId: string, rows: ProficiencyRow[]) {
-    return apiClient.post<ProficiencyPackUploadResult>('/model/proficiencies/upload', {
-        guildId,
-        rows: rows.map(r => ({
-            row:         r.row,
-            codeName:    r.codeName,
-            name:        r.name,
-            stat:        r.stat,
-            description: r.description,
-        })),
-    }, 120_000);
+export type UpsertOneProficiencyResult =
+    | { status: 'added';   codeName: string; name: string; stat: string }
+    | { status: 'updated'; codeName: string; name: string; stat: string; oldName: string; oldStat: string }
+    | { status: 'failed';  reason: string };
+
+export async function upsertProficiency(
+    guildId:     string,
+    codeName:    string,
+    name:        string,
+    stat:        string,
+    description: string | null,
+) {
+    return apiClient.post<UpsertOneProficiencyResult>('/model/proficiencies/upsert-one', {
+        guildId, codeName, name, stat, description,
+    });
+}
+
+export async function uploadProficiencyPack(guildId: string, fileBuffer: Buffer) {
+    return apiClient.postMultipart<ProficiencyPackUploadResult>(
+        '/model/proficiencies/upload',
+        { guildId },
+        { name: 'proficiencies.xlsx', buffer: fileBuffer },
+    );
 }
 
 export async function resetProficiencyPack(guildId: string) {

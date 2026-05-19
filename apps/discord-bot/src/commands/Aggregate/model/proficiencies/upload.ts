@@ -1,12 +1,20 @@
 import axios from 'axios';
-import { ChatInputCommandInteraction } from 'discord.js';
+import { AttachmentBuilder, ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import { messages } from '@echoengine/shared';
 import { colors } from '../../../../core/colors';
 import { replyError, replyLoading } from '../../../../core/reply';
-import { parseProficiencyPack, ParsedProficiencyPack } from '../../../../utils/parsers/proficiencyPack';
-import { uploadProficiencyPack } from '../../../../services/model/proficiencyPackService';
+import { uploadProficiencyPack, UploadResultRow } from '../../../../services/model/proficiencyPackService';
 import { invalidateProficiencyListCache } from '../../config/proficiency/listCache';
-import { buildUploadMessages } from './uploadComponents';
+
+function buildCsv(rows: UploadResultRow[]): Buffer {
+    const lines = ['row,identifier,status,reason'];
+    for (const r of rows) {
+        const identifier = `"${r.input.replace(/"/g, '""')}"`;
+        const reason     = r.reason ? `"${r.reason.replace(/"/g, '""')}"` : '';
+        lines.push(`${r.row},${identifier},${r.status},${reason}`);
+    }
+    return Buffer.from(lines.join('\n'), 'utf-8');
+}
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const attachment = interaction.options.getAttachment('file', true);
@@ -27,28 +35,34 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return;
     }
 
-    let parsed: ParsedProficiencyPack;
-    try {
-        parsed = await parseProficiencyPack(buffer);
-    } catch {
-        await replyError(interaction, 'The file could not be read. Make sure it is a valid `.xlsx` file.');
-        return;
-    }
-
-    const result = await uploadProficiencyPack(interaction.guildId!, parsed.proficiencies);
+    const result = await uploadProficiencyPack(interaction.guildId!, buffer);
 
     if (!result.success) {
         await replyError(interaction, messages.errorGeneric);
         return;
     }
 
+    const { added, updated, failed, rows } = result.value!;
+
     invalidateProficiencyListCache(interaction.guildId!);
 
-    const { saved, errors, overwrites } = result.value!;
+    const accentColor = failed > 0 && (added + updated) > 0 ? colors.warning
+        : failed > 0                                         ? colors.error
+        : colors.success;
 
-    const [first, ...rest] = buildUploadMessages(interaction.user.id, [], saved, overwrites, errors);
-    await interaction.editReply(first as never);
-    for (const msg of rest) {
-        await interaction.followUp(msg as never);
-    }
+    const summary = [
+        '## Proficiency Upload',
+        `**${added}** proficien${added !== 1 ? 'cies' : 'cy'} added`,
+        `**${updated}** proficien${updated !== 1 ? 'cies' : 'cy'} updated`,
+        `**${failed}** proficien${failed !== 1 ? 'cies' : 'cy'} failed validation`,
+    ].join('\n');
+
+    const csv = new AttachmentBuilder(buildCsv(rows), { name: 'proficiencies-result.csv' });
+
+    await interaction.editReply({ content: 'Upload complete. See the attached file for a full breakdown.', files: [csv] });
+
+    await interaction.followUp({
+        flags:      MessageFlags.IsComponentsV2,
+        components: [{ type: 17, accent_color: accentColor, components: [{ type: 10, content: summary }] }],
+    } as never);
 }

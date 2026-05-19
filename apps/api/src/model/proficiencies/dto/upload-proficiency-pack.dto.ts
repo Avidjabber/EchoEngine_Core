@@ -1,16 +1,3 @@
-export interface ProficiencyRowDto {
-    row:         number;
-    codeName:    string | null;
-    name:        string | null;
-    stat:        string | null;
-    description: string | null;
-}
-
-export interface UploadProficiencyPackDto {
-    guildId: string;
-    rows:    ProficiencyRowDto[];
-}
-
 export interface ProficiencySavedRow {
     row:      number;
     codeName: string;
@@ -27,17 +14,24 @@ export interface ProficiencyOverwrittenRow {
     newStat:  string;
 }
 
-export interface RowError {
+export interface UploadResultRow {
     row:     number;
     input:   string;
-    message: string;
+    status:  'added' | 'updated' | 'failed';
+    reason?: string;
 }
 
-export interface UploadProficiencyPackResult {
-    saved:      ProficiencySavedRow[];
-    errors:     RowError[];
-    overwrites: ProficiencyOverwrittenRow[];
+export interface UploadProficiencyPackNewResult {
+    added:   number;
+    updated: number;
+    failed:  number;
+    rows:    UploadResultRow[];
 }
+
+export type UpsertOneProficiencyResult =
+    | { status: 'added';   codeName: string; name: string; stat: string }
+    | { status: 'updated'; codeName: string; name: string; stat: string; oldName: string; oldStat: string }
+    | { status: 'failed';  reason: string };
 
 export interface ProficiencyTemplateData {
     stats:         string[];
