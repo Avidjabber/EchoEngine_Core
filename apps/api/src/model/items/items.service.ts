@@ -6,6 +6,7 @@ import {
     ItemOverwrittenRow,
     UploadResultRow,
     UploadItemPackNewResult,
+    ItemDownloadData,
 } from './dto/upload-item-pack.dto';
 import { ItemsRepository } from './items.repository';
 import { validateName, validateCodeName, validateDescription } from '../../utils/contentFilter';
@@ -147,6 +148,111 @@ export class ItemsService {
             eventDefCodes:       eventDefCodes.map(x => x.codeName),
             existingItems:       existingItems.map(x => x.codeName),
         };
+    }
+
+    async downloadPack(guildId: string): Promise<ItemDownloadData> {
+        const [rawItems, templateData] = await Promise.all([
+            this.repo.findGuildItemsFull(guildId),
+            this.getTemplateData(guildId),
+        ]);
+
+        const items      = rawItems.map(item => ({
+            codeName:        item.codeName,
+            name:            item.name,
+            description:     item.description,
+            types:           item.types.map(t => t.itemType.name).join(', '),
+            measurementType: item.measurementType?.name ?? null,
+            averageWeight:   item.averageWeight,
+            weightVariance:  item.weightVariance,
+            averageVolume:   item.averageVolume,
+            rotCap:          item.rotCap,
+            maxDurability:   item.maxDurability,
+            maxUses:         item.maxUses,
+            maxDailyUses:    item.maxDailyUses,
+            fuelValue:       item.fuelValue,
+            fuelType:        item.fuelType?.name ?? null,
+            isEphemeral:     item.isEphemeral,
+        }));
+
+        const equipment = rawItems.flatMap(item =>
+            item.equipmentProfiles.map(p => ({
+                itemCodeName:          item.codeName,
+                slotType:              p.slotType.name,
+                slotCost:              p.slotCost,
+                label:                 p.label,
+                acModifier:            p.acModifier,
+                damageDiceCount:       p.damageDiceCount,
+                damageDiceSides:       p.damageDiceSides,
+                damageType:            p.damageType?.name ?? null,
+                elementalDiceCount:    p.elementalDiceCount,
+                elementalDiceSides:    p.elementalDiceSides,
+                elementalDamageType:   p.elementalDamageType?.name ?? null,
+                healDiceCount:         p.healDiceCount,
+                healDiceSides:         p.healDiceSides,
+                isMagical:             p.isMagical,
+                actionCategory:        p.actionCategory?.name ?? null,
+                actionType:            p.actionType?.name ?? null,
+                targetScope:           p.targetScope?.name ?? null,
+                cooldownRounds:        p.cooldownRounds,
+                durationRounds:        p.durationRounds,
+                behaviorEffectType:    p.behaviorEffectType?.name ?? null,
+                flatModifier:          p.flatModifier,
+                percentModifier:       p.percentModifier,
+                isReactionAction:      p.isReactionAction,
+                requiresVerbal:        p.requiresVerbal,
+                requiresSomatic:       p.requiresSomatic,
+                allowedInSpar:         p.allowedInSpar,
+                usageContext:          p.usageContext,
+                hitStat:               p.hitStat?.name ?? null,
+                damageStat:            p.damageStat?.name ?? null,
+                healStat:              p.healStat?.name ?? null,
+                hitBonus:              p.hitBonus,
+                damageBonus:           p.damageBonus,
+                healBonus:             p.healBonus,
+                savingThrowStat:       p.savingThrowStat?.name ?? null,
+                saveDC:                p.saveDC,
+                triggersEventDef:      p.triggersEventDef?.codeName ?? null,
+                triggerDC:             p.triggerDC,
+                outOfCombatMaxTargets: p.outOfCombatMaxTargets,
+                summonSpecies:         p.summonSpecies?.codeName ?? null,
+                summonDiceCount:       p.summonDiceCount,
+                summonDiceSides:       p.summonDiceSides,
+                attackCount:           p.attackCount,
+            })),
+        );
+
+        const food = rawItems
+            .filter(item => item.foodProfile)
+            .map(item => ({
+                itemCodeName:          item.codeName,
+                meatNutritionPerGram:  item.foodProfile!.meatNutritionPerGram,
+                meatHydrationPerGram:  item.foodProfile!.meatHydrationPerGram,
+                plantNutritionPerGram: item.foodProfile!.plantNutritionPerGram,
+                plantHydrationPerGram: item.foodProfile!.plantHydrationPerGram,
+            }));
+
+        const actions  = rawItems.flatMap(item =>
+            item.actions.map(a => ({
+                itemCodeName:  item.codeName,
+                interaction:   a.itemInteraction.name,
+                energyCost:    a.energyCost,
+                consumedOnUse: a.consumedOnUse,
+            })),
+        );
+
+        const effects = rawItems.flatMap(item =>
+            item.actions.flatMap(a =>
+                a.effects.map(e => ({
+                    itemCodeName:  item.codeName,
+                    interaction:   a.itemInteraction.name,
+                    symptom:       e.symptom.name,
+                    relationType:  e.relationType.name,
+                    effectiveness: e.effectiveness,
+                })),
+            ),
+        );
+
+        return { items, equipment, food, actions, effects, templateData };
     }
 
     async resetPack(guildId: string): Promise<ResetItemPackResult> {

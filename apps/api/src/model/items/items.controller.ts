@@ -14,6 +14,12 @@ export class ItemsController {
         return this.itemsService.getTemplateData(guildId);
     }
 
+    @Get('download')
+    downloadPack(@Query('guildId') guildId: string) {
+        if (!guildId) throw new BadRequestException('guildId is required');
+        return this.itemsService.downloadPack(guildId);
+    }
+
     @Post('upload')
     @HttpCode(HttpStatus.OK)
     @UseInterceptors(FileInterceptor('file'))

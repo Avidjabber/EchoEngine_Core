@@ -7,6 +7,7 @@ import {
     UploadResultRow,
     UploadProficiencyPackNewResult,
     UpsertOneProficiencyResult,
+    ProficiencyDownloadData,
 } from './dto/upload-proficiency-pack.dto';
 import { ProficienciesRepository } from './proficiencies.repository';
 import { validateName, validateCodeName, validateDescription } from '../../utils/contentFilter';
@@ -95,6 +96,14 @@ export class ProficienciesService {
             stats:         stats!.map(s => s.name),
             proficiencies: defs!.map(d => d.codeName),
         };
+    }
+
+    async downloadPack(guildId: string): Promise<ProficiencyDownloadData> {
+        const [proficiencies, templateData] = await Promise.all([
+            this.getAll(guildId),
+            this.getTemplateData(guildId),
+        ]);
+        return { proficiencies, templateData };
     }
 
     async resetPack(guildId: string): Promise<ResetProficiencyPackResult> {

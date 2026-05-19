@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import type { ProficiencyTemplateData } from '../../services/model/proficiencyPackService';
+import type { ProficiencyTemplateData, ProficiencyDownloadItem } from '../../services/model/proficiencyPackService';
 
 const HEADER_STYLE: Partial<ExcelJS.Style> = {
     font:      { bold: true },
@@ -37,6 +37,44 @@ export async function generateProficiencyTemplate(data: ProficiencyTemplateData)
         refSheet.addRow({
             stats:         data.stats[i]         ?? '',
             proficiencies: data.proficiencies[i] ?? '',
+        });
+    }
+    refSheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+    const raw = await workbook.xlsx.writeBuffer();
+    return Buffer.from(raw);
+}
+
+export async function generateProficiencyDownload(
+    proficiencies: ProficiencyDownloadItem[],
+    templateData:  ProficiencyTemplateData,
+): Promise<Buffer> {
+    const workbook = new ExcelJS.Workbook();
+
+    const profSheet = workbook.addWorksheet('proficiencies');
+    profSheet.columns = [
+        { header: 'code_name',   key: 'code_name',   width: 28 },
+        { header: 'name',        key: 'name',        width: 24 },
+        { header: 'stat',        key: 'stat',        width: 18 },
+        { header: 'description', key: 'description', width: 40 },
+    ];
+    styleHeaderRow(profSheet.getRow(1));
+    profSheet.views = [{ state: 'frozen', ySplit: 1 }];
+    for (const p of proficiencies) {
+        profSheet.addRow({ code_name: p.codeName, name: p.name, stat: p.stat, description: p.description ?? '' });
+    }
+
+    const refSheet = workbook.addWorksheet('reference');
+    refSheet.columns = [
+        { header: 'Stats',         key: 'stats',         width: 18 },
+        { header: 'Proficiencies', key: 'proficiencies', width: 28 },
+    ];
+    styleHeaderRow(refSheet.getRow(1));
+    const maxRows = Math.max(templateData.stats.length, templateData.proficiencies.length);
+    for (let i = 0; i < maxRows; i++) {
+        refSheet.addRow({
+            stats:         templateData.stats[i]         ?? '',
+            proficiencies: templateData.proficiencies[i] ?? '',
         });
     }
     refSheet.views = [{ state: 'frozen', ySplit: 1 }];

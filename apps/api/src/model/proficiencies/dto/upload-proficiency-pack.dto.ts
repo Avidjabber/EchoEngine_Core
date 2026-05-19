@@ -42,3 +42,15 @@ export interface ResetProficiencyPackResult {
     deleted: Array<{ codeName: string; name: string }>;
     failed:  Array<{ codeName: string; name: string; reason: string }>;
 }
+
+export interface ProficiencyDownloadItem {
+    codeName:    string;
+    name:        string;
+    stat:        string;
+    description: string | null;
+}
+
+export interface ProficiencyDownloadData {
+    proficiencies: ProficiencyDownloadItem[];
+    templateData:  ProficiencyTemplateData;
+}

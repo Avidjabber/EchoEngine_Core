@@ -80,6 +80,22 @@ export async function upsertProficiency(
     });
 }
 
+export interface ProficiencyDownloadItem {
+    codeName:    string;
+    name:        string;
+    stat:        string;
+    description: string | null;
+}
+
+export interface ProficiencyDownloadData {
+    proficiencies: ProficiencyDownloadItem[];
+    templateData:  ProficiencyTemplateData;
+}
+
+export async function fetchProficiencyDownloadData(guildId: string) {
+    return apiClient.get<ProficiencyDownloadData>('/model/proficiencies/download', { guildId });
+}
+
 export async function uploadProficiencyPack(guildId: string, fileBuffer: Buffer) {
     return apiClient.postMultipart<ProficiencyPackUploadResult>(
         '/model/proficiencies/upload',

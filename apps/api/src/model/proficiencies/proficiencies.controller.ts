@@ -41,6 +41,12 @@ export class ProficienciesController {
         return this.proficienciesService.getTemplateData(guildId);
     }
 
+    @Get('download')
+    downloadPack(@Query('guildId') guildId: string) {
+        if (!guildId) throw new BadRequestException('guildId is required');
+        return this.proficienciesService.downloadPack(guildId);
+    }
+
     @Post('reset')
     @HttpCode(HttpStatus.OK)
     resetPack(@Body('guildId') guildId: string) {

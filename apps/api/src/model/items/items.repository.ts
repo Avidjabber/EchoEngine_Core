@@ -159,6 +159,97 @@ export class ItemsRepository {
         });
     }
 
+    findGuildItemsFull(guildId: string) {
+        return this.db.item.findMany({
+            where:   { guildId },
+            orderBy: { codeName: 'asc' },
+            select: {
+                codeName:        true,
+                name:            true,
+                description:     true,
+                averageWeight:   true,
+                weightVariance:  true,
+                averageVolume:   true,
+                rotCap:          true,
+                maxDurability:   true,
+                maxUses:         true,
+                maxDailyUses:    true,
+                fuelValue:       true,
+                isEphemeral:     true,
+                measurementType: { select: { name: true } },
+                fuelType:        { select: { name: true } },
+                types:           { select: { itemType: { select: { name: true } } } },
+                equipmentProfiles: {
+                    select: {
+                        slotType:              { select: { name: true } },
+                        slotCost:              true,
+                        label:                 true,
+                        acModifier:            true,
+                        damageDiceCount:       true,
+                        damageDiceSides:       true,
+                        damageType:            { select: { name: true } },
+                        elementalDiceCount:    true,
+                        elementalDiceSides:    true,
+                        elementalDamageType:   { select: { name: true } },
+                        healDiceCount:         true,
+                        healDiceSides:         true,
+                        isMagical:             true,
+                        actionCategory:        { select: { name: true } },
+                        actionType:            { select: { name: true } },
+                        targetScope:           { select: { name: true } },
+                        cooldownRounds:        true,
+                        durationRounds:        true,
+                        behaviorEffectType:    { select: { name: true } },
+                        flatModifier:          true,
+                        percentModifier:       true,
+                        isReactionAction:      true,
+                        requiresVerbal:        true,
+                        requiresSomatic:       true,
+                        allowedInSpar:         true,
+                        usageContext:          true,
+                        hitStat:               { select: { name: true } },
+                        damageStat:            { select: { name: true } },
+                        healStat:              { select: { name: true } },
+                        hitBonus:              true,
+                        damageBonus:           true,
+                        healBonus:             true,
+                        savingThrowStat:       { select: { name: true } },
+                        saveDC:                true,
+                        triggersEventDef:      { select: { codeName: true } },
+                        triggerDC:             true,
+                        outOfCombatMaxTargets: true,
+                        summonSpecies:         { select: { codeName: true } },
+                        summonDiceCount:       true,
+                        summonDiceSides:       true,
+                        attackCount:           true,
+                    },
+                },
+                foodProfile: {
+                    select: {
+                        meatNutritionPerGram:  true,
+                        meatHydrationPerGram:  true,
+                        plantNutritionPerGram: true,
+                        plantHydrationPerGram: true,
+                    },
+                },
+                actions: {
+                    select: {
+                        itemInteraction: { select: { name: true } },
+                        energyCost:      true,
+                        consumedOnUse:   true,
+                        effects: {
+                            select: {
+                                symptom:       { select: { name: true } },
+                                relationType:  { select: { name: true } },
+                                effectiveness: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+
     async upsertItem(data: UpsertItemData) {
         return this.db.$transaction(async (tx) => {
             const item = await tx.item.upsert({
